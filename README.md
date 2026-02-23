@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/lerim.png" alt="Lerim Logo" width="400">
+  <img src="assets/lerim.png" alt="Lerim Logo" width="160">
 </p>
 
 <p align="center"><strong>Continual learning layer for coding agents.</strong></p>
