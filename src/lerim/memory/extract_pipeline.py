@@ -1,0 +1,243 @@
+"""Minimal extraction pipeline for session transcripts.
+
+The extraction path is intentionally simple:
+session file (.jsonl/.json) -> read text -> dspy.RLM -> memory candidates.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any
+
+import dspy
+
+from lerim.config.settings import get_config
+from lerim.memory.schemas import MemoryCandidate
+from lerim.memory.utils import configure_dspy_lm
+from lerim.sessions import catalog as session_db
+
+
+class MemoryExtractSignature(dspy.Signature):
+    """Extract reusable memory candidates from transcript text.
+
+    Transcript format: JSONL (one JSON object per line, newline-separated).
+    Parse by splitting on newlines and parsing each line as JSON.
+
+    Example formats from different coding agents (actual keys may vary):
+    1) Simple: {"role": "user", "content": "I decided to use X instead of Y", "timestamp": "2026-02-23T10:00:00Z"}
+    2) Claude: {"type": "user", "message": {"content": "We will use Docker..."}, "timestamp": "..."}
+    3) Codex: {"type": "event_msg", "payload": {"type": "user_message", "message": "Lesson:..."}}
+
+    Note: Different agents use different key names. Look for common patterns like
+    user/assistant role indicators, content/text/message fields, and timestamp info.
+
+    Primitive type rules (must be consistent):
+    - decision: an explicit choice, preference, or configuration that should stay stable.
+      Trigger words: "decision", "we will", "use X not Y", "always do", "never do", "set X to Y".
+    - learning: a lesson, fix, pattern, or friction signal learned from experience.
+      Trigger words: "lesson", "fix", "found that", "struggled with", "wasted time on".
+    - When in doubt, prefer learning. Only use decision when the transcript contains
+      a clear deliberate choice or a stated configuration value.
+
+    Kind (for learnings only):
+    - insight: a reusable observation or pattern.
+    - procedure: a step-by-step fix or workflow.
+    - friction: a blocker, struggle, or time-waster.
+    - pitfall: a mistake to avoid.
+    - preference: a soft preference (not a hard decision).
+
+    Tags: assign descriptive group/cluster labels for categorization. No limit on count.
+    Examples: queue, heartbeat, docker, ci-cd, patching, error-handling.
+
+    Focus on high-value items:
+    - repeated struggles and blockers
+    - lessons and fixes that worked
+    - decisions to reuse later
+    """
+
+    transcript: str = dspy.InputField(
+        desc="Raw transcript in JSONL format - one JSON object per line"
+    )
+    metadata: dict[str, Any] = dspy.InputField(desc="Session metadata")
+    metrics: dict[str, Any] = dspy.InputField(desc="Deterministic metrics")
+    primitives: list[MemoryCandidate] = dspy.OutputField(
+        desc="Extracted memory candidate list"
+    )
+
+
+def _extract_candidates_with_rlm(
+    transcript: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+    metrics: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Run DSPy RLM on transcript text and return normalized candidates."""
+    if not transcript.strip():
+        return []
+    config = get_config()
+    max_iterations = config.dspy_rlm_max_iterations
+    max_llm_calls = config.dspy_rlm_max_llm_calls
+    configure_dspy_lm("extract")
+    rlm = dspy.RLM(
+        MemoryExtractSignature,
+        max_iterations=max_iterations,
+        max_llm_calls=max_llm_calls,
+        verbose=False,
+    )
+    try:
+        result = rlm(
+            transcript=transcript,
+            metadata=metadata or {},
+            metrics=metrics or {},
+        )
+    except Exception:
+        predictor = dspy.Predict(MemoryExtractSignature)
+        result = predictor(
+            transcript=transcript,
+            metadata=metadata or {},
+            metrics=metrics or {},
+        )
+    primitives = getattr(result, "primitives", [])
+    if not isinstance(primitives, list):
+        return []
+    return [
+        item.model_dump(mode="json", exclude_none=True)
+        if isinstance(item, MemoryCandidate)
+        else item
+        for item in primitives
+        if isinstance(item, (MemoryCandidate, dict))
+    ]
+
+
+def extract_memories_from_session_file(
+    session_file_path: Path,
+    *,
+    metadata: dict[str, Any] | None = None,
+    metrics: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Extract memory candidates from one on-disk session trace file."""
+    if not session_file_path.exists() or not session_file_path.is_file():
+        raise FileNotFoundError(f"session_file_missing:{session_file_path}")
+    transcript = session_file_path.read_text(encoding="utf-8")
+    return _extract_candidates_with_rlm(transcript, metadata=metadata, metrics=metrics)
+
+
+def build_extract_report(
+    *,
+    window_start: datetime | None = None,
+    window_end: datetime | None = None,
+    agent_types: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build aggregate extraction stats for dashboard and maintenance views."""
+    rows, _ = session_db.list_sessions_window(
+        limit=500,
+        offset=0,
+        agent_types=agent_types,
+        since=window_start,
+        until=window_end,
+    )
+    totals = defaultdict(int)
+    for row in rows:
+        totals["sessions"] += 1
+        totals["messages"] += int(row.get("message_count") or 0)
+        totals["tool_calls"] += int(row.get("tool_call_count") or 0)
+        totals["errors"] += int(row.get("error_count") or 0)
+        totals["tokens"] += int(row.get("total_tokens") or 0)
+    return {
+        "window_start": window_start.isoformat() if window_start else None,
+        "window_end": window_end.isoformat() if window_end else None,
+        "agent_filter": ",".join(agent_types) if agent_types else "all",
+        "aggregates": {"totals": dict(totals)},
+        "narratives": {
+            "at_a_glance": {
+                "working": "",
+                "hindering": "",
+                "quick_wins": "",
+                "horizon": "",
+            }
+        },
+    }
+
+
+if __name__ == "__main__":
+    """Run CLI extract mode by trace path or run a real-path self-test."""
+    parser = argparse.ArgumentParser(prog="python -m lerim.memory.extract_pipeline")
+    parser.add_argument("--trace-path")
+    parser.add_argument("--output")
+    parser.add_argument("--metadata-json", default="{}")
+    parser.add_argument("--metrics-json", default="{}")
+    args = parser.parse_args()
+
+    if args.trace_path:
+        metadata = json.loads(args.metadata_json)
+        metrics = json.loads(args.metrics_json)
+        payload = extract_memories_from_session_file(
+            Path(args.trace_path).expanduser(),
+            metadata=metadata if isinstance(metadata, dict) else {},
+            metrics=metrics if isinstance(metrics, dict) else {},
+        )
+        encoded = json.dumps(payload, ensure_ascii=True, indent=2) + "\n"
+        if args.output:
+            output_path = Path(args.output).expanduser()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(encoded, encoding="utf-8")
+        else:
+            sys.stdout.write(encoded)
+    else:
+        with TemporaryDirectory() as tmp_dir:
+            session_file_path = Path(tmp_dir) / "session.jsonl"
+            session_file_path.write_text(
+                "\n".join(
+                    [
+                        '{"role":"user","content":"I keep failing the same edit because the target string exists in test and src. This friction wasted 30 minutes."}',
+                        '{"role":"assistant","content":"Lesson: read the exact file first, then patch with file path and larger context. Avoid global replace."}',
+                        '{"role":"user","content":"Queue jobs got stuck again. Heartbeat drift caused retries and duplicate claims."}',
+                        '{"role":"assistant","content":"Fix worked: heartbeat every 15s, max_attempts=3, then dead_letter. Add metrics for retries and dead letters."}',
+                        '{"role":"user","content":"Decision: do not copy traces into Lerim. Keep only session_path and metadata; extract directly from source file."}',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            candidates = extract_memories_from_session_file(
+                session_file_path,
+                metadata={"run_id": "self-test"},
+                metrics={},
+            )
+        assert candidates, "self-test failed: no candidates extracted"
+
+        quality_hits = 0
+        for item in candidates:
+            assert isinstance(item, dict), "self-test failed: candidate must be dict"
+            primitive = str(item.get("primitive") or "").strip()
+            title = str(item.get("title") or "").strip()
+            body = str(item.get("body") or "").strip()
+
+            assert primitive in {"decision", "learning"}, (
+                f"self-test failed: invalid primitive={primitive!r}"
+            )
+            assert len(title) >= 8, "self-test failed: title too short"
+            assert len(body) >= 24, "self-test failed: body too short"
+
+            text_blob = f"{title} {body}".lower()
+            if any(
+                keyword in text_blob
+                for keyword in (
+                    "heartbeat",
+                    "dead_letter",
+                    "file path",
+                    "retry",
+                    "friction",
+                )
+            ):
+                quality_hits += 1
+
+        assert quality_hits >= 1, (
+            "self-test failed: extracted memories miss expected session signals"
+        )

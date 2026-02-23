@@ -1,0 +1,2756 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lerim</title>
+  <link rel="icon" href="data:," />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/@tabler/core@1.0.0-beta21/dist/css/tabler.min.css" rel="stylesheet" />
+  <link href="/assets/graph-explorer/graph-explorer.css" rel="stylesheet" />
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
+  <style>
+    :root {
+      --lerim-bg: #0b0f14;
+      --lerim-panel: #111720;
+      --lerim-card: #151c26;
+      --lerim-border: #223040;
+      --lerim-text: #e2e8f0;
+      --lerim-muted: #94a3b8;
+      --lerim-accent: #22d3ee;
+      --lerim-accent-2: #f59e0b;
+      --lerim-accent-3: #34d399;
+      --tblr-body-bg: var(--lerim-bg);
+      --tblr-body-color: var(--lerim-text);
+      --tblr-card-bg: var(--lerim-card);
+      --tblr-card-border-color: var(--lerim-border);
+      --tblr-border-color: var(--lerim-border);
+      --tblr-muted: var(--lerim-muted);
+      --tblr-font-sans-serif: "Bricolage Grotesque", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    [x-cloak] { display: none !important; }
+
+    html, body {
+      background-color: var(--lerim-bg);
+    }
+
+    body.lerim-body {
+      font-family: "Bricolage Grotesque", system-ui, sans-serif;
+      background:
+        radial-gradient(1300px 900px at 8% -12%, rgba(34, 211, 238, 0.14), transparent 72%),
+        radial-gradient(1200px 820px at 94% -8%, rgba(245, 158, 11, 0.14), transparent 74%),
+        linear-gradient(180deg, #0d1320 0%, #0b111a 48%, #0b0f14 100%);
+      color: var(--lerim-text);
+      min-height: 100vh;
+    }
+
+    .lerim-page {
+      min-height: 100vh;
+      background: transparent !important;
+    }
+
+    .page-wrapper,
+    .page-body {
+      background: transparent !important;
+    }
+
+    .lerim-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .lerim-logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(140deg, var(--lerim-accent-2), var(--lerim-accent));
+      box-shadow: 0 12px 24px rgba(15, 23, 42, 0.45);
+    }
+
+    .lerim-title {
+      font-family: "Fraunces", serif;
+      font-size: 1.55rem;
+      letter-spacing: -0.02em;
+    }
+
+    .lerim-subtitle {
+      font-size: 0.85rem;
+      color: var(--lerim-muted);
+    }
+
+    .lerim-nav {
+      background: rgba(11, 15, 20, 0.8);
+      backdrop-filter: blur(18px);
+      border-bottom: 1px solid var(--lerim-border);
+    }
+
+    .lerim-filter {
+      display: grid;
+      gap: 6px;
+      min-width: 150px;
+    }
+
+    .lerim-filter label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--lerim-muted);
+    }
+
+    .lerim-cache {
+      display: grid;
+      gap: 2px;
+      min-width: 140px;
+    }
+
+    .lerim-tabs {
+      border-bottom: 1px solid var(--lerim-border);
+    }
+
+    .lerim-tabs .nav-link {
+      color: var(--lerim-muted);
+      padding: 0.85rem 1.2rem;
+      border: none;
+      border-bottom: 2px solid transparent;
+      font-weight: 500;
+    }
+
+    .lerim-tabs .nav-link.active {
+      color: var(--lerim-text);
+      border-bottom-color: var(--lerim-accent);
+      background: transparent;
+    }
+
+    .lerim-tabs .nav-link:hover {
+      color: var(--lerim-text);
+    }
+
+    .lerim-loading {
+      height: 3px;
+      background: rgba(34, 211, 238, 0.15);
+      overflow: hidden;
+      border-radius: 999px;
+      margin-top: 8px;
+    }
+
+    .lerim-loading::after {
+      content: "";
+      display: block;
+      height: 100%;
+      width: 40%;
+      background: linear-gradient(90deg, transparent, var(--lerim-accent), transparent);
+      animation: loading-slide 1.4s infinite;
+    }
+
+    @keyframes loading-slide {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(300%); }
+    }
+
+    .stat-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--lerim-muted);
+    }
+
+    .stat-value {
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin-top: 6px;
+    }
+
+    .stat-sub {
+      color: var(--lerim-muted);
+      font-size: 0.82rem;
+      margin-top: 4px;
+    }
+
+    .refine-glance {
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(34, 211, 238, 0.12));
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      border-radius: 12px;
+      padding: 18px;
+    }
+
+    .refine-section-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    .refine-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .refine-list li {
+      background: rgba(21, 28, 38, 0.8);
+      border: 1px solid var(--lerim-border);
+      border-radius: 10px;
+      padding: 12px;
+    }
+
+    .chart-shell {
+      position: relative;
+      width: 100%;
+      min-height: 260px;
+    }
+
+    .chart-shell.tall { min-height: 320px; }
+
+    .chart-canvas {
+      width: 100%;
+      height: 260px;
+    }
+
+    .chart-shell.tall .chart-canvas { height: 320px; }
+
+    .chart-empty {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--lerim-muted);
+      font-size: 0.9rem;
+      background: rgba(11, 15, 20, 0.4);
+      border-radius: 12px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+
+    .chart-shell.is-empty .chart-empty { opacity: 1; }
+
+    .data-table thead th {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--lerim-muted);
+      border-bottom: 1px solid var(--lerim-border);
+    }
+
+    .data-table tbody tr {
+      cursor: pointer;
+    }
+
+    .data-table tbody tr.selected {
+      background: rgba(34, 211, 238, 0.08);
+    }
+
+    .agent-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      color: #0b0f14;
+    }
+
+    .agent-badge.claude { background: #f59e0b; }
+    .agent-badge.codex { background: #22d3ee; }
+    .agent-badge.opencode { background: #34d399; }
+
+    .status-pill {
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      text-transform: capitalize;
+      border: 1px solid transparent;
+    }
+
+    .status-pill.completed { background: rgba(34, 197, 94, 0.15); color: #4ade80; border-color: rgba(34, 197, 94, 0.4); }
+    .status-pill.error { background: rgba(248, 113, 113, 0.15); color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
+    .status-pill.running { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); }
+
+    .runs-grid {
+      display: grid;
+      gap: 1rem;
+    }
+
+    @media (min-width: 1200px) {
+      .runs-grid { grid-template-columns: 2fr 1.1fr; }
+    }
+
+    .memory-grid {
+      display: grid;
+      gap: 1rem;
+    }
+
+    @media (min-width: 992px) {
+      .memory-grid { grid-template-columns: 1fr 1.2fr; }
+    }
+
+    .memory-list {
+      max-height: 72vh;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .memory-item {
+      background: rgba(21, 28, 38, 0.9);
+      border: 1px solid var(--lerim-border);
+      border-radius: 12px;
+      padding: 0.9rem;
+      cursor: pointer;
+      transition: border-color 0.2s ease, transform 0.2s ease;
+    }
+
+    .memory-item + .memory-item { margin-top: 0.7rem; }
+
+    .memory-item.active {
+      border-color: rgba(34, 211, 238, 0.6);
+      transform: translateY(-2px);
+    }
+
+    .memory-title {
+      font-weight: 600;
+    }
+
+    .memory-snippet {
+      color: var(--lerim-muted);
+      font-size: 0.85rem;
+      margin-top: 0.35rem;
+    }
+
+    .memory-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 0.5rem;
+    }
+
+    .memory-chip {
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--lerim-border);
+      font-size: 0.72rem;
+      color: var(--lerim-muted);
+    }
+
+    .chat-message {
+      background: rgba(15, 23, 42, 0.35);
+      border: 1px solid rgba(34, 211, 238, 0.1);
+      border-radius: 12px;
+      padding: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .chat-message.user {
+      border-color: rgba(245, 158, 11, 0.3);
+    }
+
+    .chat-message.tool {
+      border-color: rgba(148, 163, 184, 0.25);
+    }
+
+    .chat-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--lerim-muted);
+      margin-bottom: 0.4rem;
+    }
+
+    .chat-block {
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.78rem;
+      white-space: pre-wrap;
+      background: rgba(15, 23, 42, 0.7);
+      padding: 0.5rem;
+      border-radius: 8px;
+      color: #cbd5f5;
+    }
+
+    .analysis-output {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--lerim-border);
+      border-radius: 12px;
+      padding: 1rem;
+      white-space: pre-wrap;
+      min-height: 120px;
+    }
+
+    .toast-container {
+      position: fixed;
+      top: 24px;
+      right: 24px;
+      display: grid;
+      gap: 10px;
+      z-index: 9999;
+    }
+
+    .toast {
+      padding: 0.75rem 1rem;
+      border-radius: 10px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid var(--lerim-border);
+      color: var(--lerim-text);
+      font-size: 0.85rem;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+    }
+
+    .toast.error { border-color: rgba(248, 113, 113, 0.5); color: #f87171; }
+    .toast.success { border-color: rgba(34, 197, 94, 0.5); color: #4ade80; }
+
+    /* Session viewer compatibility hooks */
+    .agentic-widget { display: none; }
+    .agentic-panel { display: none; }
+    .agentic-toggle { display: none; }
+    .agentic-message { display: none; }
+    .agentic-header { display: none; }
+  </style>
+</head>
+<body class="lerim-body">
+  <div class="page lerim-page" x-data="dashboard()" x-init="init()" x-cloak>
+    <header class="navbar navbar-expand-md navbar-dark lerim-nav">
+      <div class="container-xl">
+        <div class="lerim-brand">
+          <span class="lerim-logo"></span>
+          <div>
+            <div class="lerim-title">Lerim</div>
+            <div class="lerim-subtitle">Continuous memory + learning layer for agents</div>
+          </div>
+        </div>
+        <div class="navbar-nav ms-auto align-items-center gap-3 flex-row flex-wrap">
+          <div class="lerim-filter">
+            <label>Agent</label>
+            <select class="form-select form-select-sm" x-model="$store.app.filters.agent" @change="onFilterChange()">
+              <option value="all">All Agents</option>
+              <option value="claude">Claude</option>
+              <option value="codex">Codex</option>
+              <option value="opencode">OpenCode</option>
+            </select>
+          </div>
+          <div class="lerim-filter">
+            <label>Scope</label>
+            <select class="form-select form-select-sm" x-model="$store.app.filters.scope" @change="onFilterChange()">
+              <option value="today">Today</option>
+              <option value="week">Last 7 Days</option>
+              <option value="month">Last 30 Days</option>
+              <option value="all">All Time</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" @click="refresh()" :disabled="$store.app.loading.stats">
+            <span x-show="!$store.app.loading.stats">Refresh</span>
+            <span x-show="$store.app.loading.stats">Loading...</span>
+          </button>
+          <div class="lerim-cache">
+            <span class="badge" :class="cacheBadgeClass" x-text="cacheBadgeText"></span>
+            <span class="text-muted small" x-text="cacheSubtext"></span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="page-wrapper">
+      <div class="container-xl">
+        <div class="lerim-loading" x-show="$store.app.loading.stats || $store.app.loading.stats_extended"></div>
+
+        <ul class="nav nav-tabs lerim-tabs mt-3" role="tablist">
+          <template x-for="tab in tabs" :key="tab.id">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" :class="{ active: $store.app.activeTab === tab.id }" @click="setTab(tab.id)" type="button" role="tab" x-text="tab.label"></button>
+            </li>
+          </template>
+        </ul>
+
+        <!-- Overview -->
+        <section class="pt-4" x-show="$store.app.activeTab === 'overview'">
+          <div class="row row-cards" x-show="$store.app.loading.stats">
+            <template x-for="i in 6" :key="i">
+              <div class="col-6 col-md-4 col-xl-2">
+                <div class="card">
+                  <div class="card-body">
+                    <div class="placeholder-glow">
+                      <span class="placeholder col-7"></span>
+                      <span class="placeholder col-5"></span>
+                      <span class="placeholder col-6"></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <div class="row row-cards" x-show="!$store.app.loading.stats">
+            <div class="col-6 col-md-4 col-xl-2">
+              <div class="card card-sm">
+                <div class="card-body">
+                  <div class="stat-label">Sessions</div>
+                  <div class="stat-value" x-text="formatNumber($store.stats.totals.runs)"></div>
+                  <div class="stat-sub" x-text="'Avg ' + formatDuration($store.stats.derived.avg_session_duration_ms) + '/session'"></div>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <div class="card card-sm">
+                <div class="card-body">
+                  <div class="stat-label">Messages</div>
+                  <div class="stat-value" style="color:#4ade80" x-text="formatNumber($store.stats.totals.messages)"></div>
+                  <div class="stat-sub" x-text="$store.stats.derived.avg_messages_per_session + '/session'"></div>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <div class="card card-sm">
+                <div class="card-body">
+                  <div class="stat-label">Tool Calls</div>
+                  <div class="stat-value" style="color:#f59e0b" x-text="formatNumber($store.stats.totals.tool_calls)"></div>
+                  <div class="stat-sub" x-text="$store.stats.totals.unique_tools + ' unique tools'"></div>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <div class="card card-sm">
+                <div class="card-body">
+                  <div class="stat-label">Errors</div>
+                  <div class="stat-value" style="color:#f87171" x-text="formatNumber($store.stats.totals.errors)"></div>
+                  <div class="stat-sub" x-text="$store.stats.derived.error_rate + '% error rate'"></div>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <div class="card card-sm">
+                <div class="card-body">
+                  <div class="stat-label">Tokens</div>
+                  <div class="stat-value" style="color:#a78bfa" x-text="formatNumber($store.stats.totals.tokens)"></div>
+                  <div class="stat-sub" x-text="'In: ' + formatNumber($store.stats.totals.input_tokens) + ' · Out: ' + formatNumber($store.stats.totals.output_tokens)"></div>
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <div class="card card-sm">
+                <div class="card-body">
+                  <div class="stat-label">Total Time</div>
+                  <div class="stat-value" style="color:#38bdf8" x-text="formatDuration($store.stats.totals.duration_ms)"></div>
+                  <div class="stat-sub" x-text="'Across ' + $store.stats.totals.runs + ' sessions'"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="row row-cards mt-2">
+            <div class="col-12 col-lg-6">
+              <div class="card">
+                <div class="card-header">
+                  <div>
+                    <div class="card-title">Agent Distribution</div>
+                    <div class="text-muted small">Share of sessions by agent</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="chart-shell" data-chart="agent">
+                    <div id="chart-agent" class="chart-canvas"></div>
+                    <div class="chart-empty">No agent data</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-12 col-lg-6">
+              <div class="card">
+                <div class="card-header">
+                  <div>
+                    <div class="card-title">Model Usage</div>
+                    <div class="text-muted small">Token volume by model</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="chart-shell" data-chart="model">
+                    <div id="chart-model" class="chart-canvas"></div>
+                    <div class="chart-empty">No model data</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="row row-cards mt-2">
+            <div class="col-12 col-lg-6">
+              <div class="card">
+                <div class="card-header">
+                  <div>
+                    <div class="card-title">Tool Usage</div>
+                    <div class="text-muted small">Top tools across sessions</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="chart-shell tall" data-chart="tools">
+                    <div id="chart-tools" class="chart-canvas"></div>
+                    <div class="chart-empty">No tool data</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-12 col-lg-6">
+              <div class="card">
+                <div class="card-header">
+                  <div>
+                    <div class="card-title">Daily Sessions</div>
+                    <div class="text-muted small">Sessions by agent each day</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="chart-shell tall" data-chart="daily">
+                    <div id="chart-daily" class="chart-canvas"></div>
+                    <div class="chart-empty">No activity data</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="row row-cards mt-2">
+            <div class="col-12 col-lg-6">
+              <div class="card">
+                <div class="card-header">
+                  <div>
+                    <div class="card-title">Daily Activity</div>
+                    <div class="text-muted small">Messages, tools, tokens</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="chart-shell tall" data-chart="daily-metrics">
+                    <div id="chart-daily-metrics" class="chart-canvas"></div>
+                    <div class="chart-empty">No activity data</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-12 col-lg-6">
+              <div class="card">
+                <div class="card-header">
+                  <div>
+                    <div class="card-title">Activity by Hour</div>
+                    <div class="text-muted small">Sessions and tool usage by hour</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="chart-shell" data-chart="hourly">
+                    <div id="chart-hourly" class="chart-canvas"></div>
+                    <div class="chart-empty">No hourly data</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Runs -->
+        <section class="pt-4" x-show="$store.app.activeTab === 'runs'">
+          <div class="card">
+            <div class="card-body">
+              <div class="row g-3 align-items-end">
+                <div class="col-12 col-lg-6">
+                  <label class="form-label">Search</label>
+                  <div class="input-group">
+                    <input class="form-control" type="text" placeholder="Full-text search..." x-model="$store.runs.search.query" @keydown.enter="searchRuns()" />
+                    <button class="btn btn-primary" @click="searchRuns()" :disabled="$store.app.loading.searching">
+                      <span x-show="!$store.app.loading.searching">Search</span>
+                      <span x-show="$store.app.loading.searching">Searching...</span>
+                    </button>
+                    <button class="btn btn-outline-secondary" @click="clearSearch()">Clear</button>
+                  </div>
+                </div>
+                <div class="col-12 col-lg-4">
+                  <label class="form-label">Repo or Branch</label>
+                  <input class="form-control" type="text" placeholder="Filter by repo or branch" x-model="$store.runs.search.repo" @keydown.enter="searchRuns()" />
+                </div>
+                <div class="col-12 col-lg-2">
+                  <label class="form-label">Status</label>
+                  <select class="form-select" x-model="$store.runs.search.status" @change="searchRuns()">
+                    <option value="">Any status</option>
+                    <option value="completed">Completed</option>
+                    <option value="error">Error</option>
+                    <option value="running">Running</option>
+                  </select>
+                </div>
+              </div>
+              <div class="text-muted small mt-3" x-text="searchSummary"></div>
+            </div>
+          </div>
+
+          <div class="card mt-3">
+            <div class="card-body">
+              <template x-if="$store.app.loading.runs">
+                <div class="placeholder-glow">
+                  <span class="placeholder col-12"></span>
+                  <span class="placeholder col-10"></span>
+                  <span class="placeholder col-11"></span>
+                </div>
+              </template>
+              <template x-if="!$store.app.loading.runs && $store.runs.items.length === 0">
+                <div class="text-muted">No sessions found.</div>
+              </template>
+              <template x-if="!$store.app.loading.runs && $store.runs.items.length > 0">
+                <div class="table-responsive">
+                  <table class="table table-vcenter data-table">
+                    <thead>
+                      <tr>
+                        <th @click="sortBy('agent_type')">Agent</th>
+                        <th @click="sortBy('status')">Status</th>
+                        <th @click="sortBy('started_at')">Started</th>
+                        <th @click="sortBy('duration_ms')">Duration</th>
+                        <th @click="sortBy('message_count')">Messages</th>
+                        <th @click="sortBy('tool_call_count')">Tools</th>
+                        <th @click="sortBy('error_count')">Errors</th>
+                        <th @click="sortBy('total_tokens')">Tokens</th>
+                        <th @click="sortBy('repo_name')">Branch</th>
+                        <th>Open</th>
+                      </tr>
+                    </thead>
+                    <template x-for="(run, idx) in $store.runs.items" :key="run.run_id">
+                      <tbody>
+                        <tr @click="selectRun(idx)" :class="{ selected: $store.runs.selectedIndex === idx }">
+                          <td><span class="agent-badge" :class="run.agent_type" x-text="getAgentLetter(run.agent_type)"></span></td>
+                          <td><span class="status-pill" :class="getStatusClass(run)" x-text="getStatusText(run)"></span></td>
+                          <td x-text="relativeTime(run.started_at)"></td>
+                          <td x-text="formatDuration(run.duration_ms)"></td>
+                          <td x-text="run.message_count"></td>
+                          <td x-text="run.tool_call_count"></td>
+                          <td x-text="run.error_count"></td>
+                          <td x-text="formatNumber(run.total_tokens)"></td>
+                          <td x-text="run.repo_name || '-'" class="text-muted"></td>
+                          <td>
+                            <a class="btn btn-outline-primary btn-sm" :href="'/session/' + run.agent_type + '/' + run.run_id + '?back=runs'" @click.stop>Open</a>
+                          </td>
+                        </tr>
+                        <tr x-show="$store.runs.previewOpen[run.run_id]">
+                          <td colspan="10">
+                            <div class="text-muted" x-html="sanitizeSnippet(run.snippet || run.preview || '')"></div>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </template>
+                  </table>
+                </div>
+                <template x-if="$store.runs.pagination.total > runsLimit">
+                  <div class="d-flex align-items-center justify-content-between mt-3">
+                    <button class="btn btn-outline-secondary" @click="loadRuns($store.runs.pagination.offset - runsLimit)" :disabled="$store.runs.pagination.offset === 0">Previous</button>
+                    <span class="text-muted" x-text="paginationInfo"></span>
+                    <button class="btn btn-outline-secondary" @click="loadRuns($store.runs.pagination.offset + runsLimit)" :disabled="!$store.runs.pagination.has_more">Next</button>
+                  </div>
+                </template>
+              </template>
+            </div>
+          </div>
+
+          <div class="runs-grid mt-3">
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title" x-text="$store.runs.selectedRun ? 'Transcript · ' + $store.runs.selectedRun.run_id.slice(0, 8) : 'Transcript'"></div>
+              </div>
+              <div class="card-body">
+                <template x-if="!$store.runs.selectedRun">
+                  <div class="text-muted">Select a run to view the transcript.</div>
+                </template>
+                <template x-if="$store.runs.selectedRun">
+                  <div>
+                    <template x-if="$store.app.loading.transcript">
+                      <div class="text-muted">Loading transcript...</div>
+                    </template>
+                    <template x-if="!$store.app.loading.transcript && $store.runs.transcript.length === 0">
+                      <div class="text-muted">No transcript data available.</div>
+                    </template>
+                    <template x-if="!$store.app.loading.transcript && $store.runs.transcript.length > 0">
+                      <div>
+                        <template x-for="(msg, i) in $store.runs.transcript" :key="i">
+                          <div class="chat-message" :class="msg.role || 'assistant'">
+                            <div class="chat-meta">
+                              <span x-text="msg.role === 'tool' ? (msg.tool_name || 'Tool') : msg.role"></span>
+                              <span x-text="msg.timestamp ? formatDateTime(msg.timestamp) : ''"></span>
+                            </div>
+                            <div x-show="msg.content" x-text="msg.content"></div>
+                            <div class="chat-block mt-2" x-show="msg.tool_input" x-text="msg.tool_input ? JSON.stringify(msg.tool_input, null, 2) : ''"></div>
+                            <div class="chat-block mt-2" x-show="msg.tool_output" x-text="msg.tool_output ? JSON.stringify(msg.tool_output, null, 2) : ''"></div>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">Reflect on this run</div>
+              </div>
+              <div class="card-body">
+                <p class="text-muted">Ask a custom question or use a preset.</p>
+                <div class="btn-list mb-3">
+                  <button class="btn btn-outline-secondary" @click="runReflect('summary')" :disabled="DASHBOARD_READ_ONLY">Summary</button>
+                  <button class="btn btn-outline-secondary" @click="runReflect('next_actions')" :disabled="DASHBOARD_READ_ONLY">Next Actions</button>
+                  <button class="btn btn-outline-secondary" @click="runReflect('pitfalls')" :disabled="DASHBOARD_READ_ONLY">Pitfalls</button>
+                </div>
+                <div class="input-group mb-3">
+                  <input class="form-control" type="text" placeholder="Ask about this run..." x-model="reflectInput" />
+                  <button class="btn btn-primary" @click="runReflect(null, reflectInput)" :disabled="DASHBOARD_READ_ONLY">Ask</button>
+                </div>
+                <div class="analysis-output" x-text="reflectOutput"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Memories -->
+        <section class="pt-4" x-show="$store.app.activeTab === 'memories'">
+          <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+            <div class="btn-group" role="tablist" aria-label="Memory workspace views">
+              <button
+                class="btn"
+                :class="$store.memories.view === 'library' ? 'btn-primary' : 'btn-outline-secondary'"
+                @click="setMemoryView('library')"
+                type="button"
+              >
+                Library &amp; Editor
+              </button>
+              <button
+                class="btn"
+                :class="$store.memories.view === 'graph' ? 'btn-primary' : 'btn-outline-secondary'"
+                @click="setMemoryView('graph')"
+                type="button"
+              >
+                Graph Explorer
+              </button>
+            </div>
+            <div class="text-muted small" x-text="$store.memories.view === 'graph' ? 'Graph mode: query, filter, inspect, expand.' : 'Library mode: browse and edit memories.'"></div>
+          </div>
+
+          <div class="memory-grid" x-show="$store.memories.view === 'library'">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">Memories</div>
+                  <div class="text-muted small">Browse, edit, and explore relationships.</div>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="row g-2">
+                  <div class="col-12">
+                    <input class="form-control" type="text" placeholder="Search memories..." x-model="$store.memories.filters.query" @keydown.enter="loadMemories()" />
+                  </div>
+                  <div class="col-6">
+                    <select class="form-select" x-model="$store.memories.filters.type" @change="loadMemories()">
+                      <option value="">All types</option>
+                      <option value="pattern">Pattern</option>
+                      <option value="convention">Convention</option>
+                      <option value="pitfall">Pitfall</option>
+                      <option value="preference">Preference</option>
+                      <option value="technique">Technique</option>
+                      <option value="context">Context</option>
+                      <option value="friction">Friction</option>
+                      <option value="delight">Delight</option>
+                    </select>
+                  </div>
+                  <div class="col-6">
+                    <select class="form-select" x-model="$store.memories.filters.state" @change="loadMemories()">
+                      <option value="">All states</option>
+                      <option value="candidate">Candidate</option>
+                      <option value="validated">Validated</option>
+                      <option value="established">Established</option>
+                      <option value="stale">Stale</option>
+                      <option value="archived">Archived</option>
+                    </select>
+                  </div>
+                  <div class="col-8">
+                    <input class="form-control" type="text" placeholder="Filter by project..." x-model="$store.memories.filters.project" @keydown.enter="loadMemories()" />
+                  </div>
+                  <div class="col-4">
+                    <button class="btn btn-outline-primary w-100" @click="loadMemories()" :disabled="$store.memories.loading">
+                      <span x-show="!$store.memories.loading">Refresh</span>
+                      <span x-show="$store.memories.loading">Loading...</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="text-muted small mt-3" x-text="$store.memories.summary"></div>
+                <div class="memory-list mt-3">
+                  <template x-if="$store.memories.loading">
+                    <div class="text-muted">Loading memories...</div>
+                  </template>
+                  <template x-if="!$store.memories.loading && $store.memories.items.length === 0">
+                    <div class="text-muted">No memories found.</div>
+                  </template>
+                  <template x-if="!$store.memories.loading && $store.memories.items.length > 0">
+                    <template x-for="memory in $store.memories.items" :key="memory.id">
+                      <div class="memory-item" :class="{ active: $store.memories.selectedId === memory.id }" @click="selectMemory(memory.id)">
+                        <div class="memory-title" x-text="memory.title"></div>
+                        <div class="memory-snippet" x-html="sanitizeSnippet(memory.snippet || memory.preview || '')"></div>
+                        <div class="memory-meta">
+                          <span class="memory-chip" x-text="memory.kind"></span>
+                          <span class="memory-chip" x-text="memory.kind || memory.primitive"></span>
+                          <span class="memory-chip" x-show="memory.projects && memory.projects.length" x-text="memory.projects[0]"></span>
+                          <span class="memory-chip" x-show="memory.tags && memory.tags.length" x-text="'#' + memory.tags[0]"></span>
+                          <span class="memory-chip" x-text="formatDateTime(memory.updated)"></span>
+                        </div>
+                      </div>
+                    </template>
+                  </template>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">Memory Editor</div>
+                  <div class="text-muted small" x-text="$store.memories.selectedId ? ('ID: ' + $store.memories.selectedId) : 'Select a memory to edit'">
+                  </div>
+                </div>
+              </div>
+              <div class="card-body">
+                <template x-if="!$store.memories.selected">
+                  <div class="text-muted">Select a memory to edit.</div>
+                </template>
+                <template x-if="$store.memories.selected">
+                  <form class="d-grid gap-3" @submit.prevent="saveMemory()">
+                    <div>
+                      <label class="form-label">Title</label>
+                      <input class="form-control" type="text" x-model="$store.memories.draft.title" @input="markMemoryDirty()" />
+                    </div>
+                    <div class="row g-2">
+                      <div class="col-12 col-md-6">
+                        <label class="form-label">Type</label>
+                        <select class="form-select" x-model="$store.memories.draft.kind" @change="markMemoryDirty()">
+                          <option value="pattern">Pattern</option>
+                          <option value="convention">Convention</option>
+                          <option value="pitfall">Pitfall</option>
+                          <option value="preference">Preference</option>
+                          <option value="technique">Technique</option>
+                          <option value="context">Context</option>
+                          <option value="friction">Friction</option>
+                          <option value="delight">Delight</option>
+                        </select>
+                      </div>
+                      <div class="col-12 col-md-6">
+                        <label class="form-label">Confidence</label>
+                        <div class="row g-2 align-items-center">
+                          <div class="col-8">
+                            <input class="form-range" type="range" min="0" max="1" step="0.05" x-model.number="$store.memories.draft.confidence" @input="markMemoryDirty()" />
+                          </div>
+                          <div class="col-4">
+                            <input class="form-control" type="number" min="0" max="1" step="0.01" x-model.number="$store.memories.draft.confidence" @input="markMemoryDirty()" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <label class="form-label">Body</label>
+                      <textarea class="form-control" rows="6" x-model="$store.memories.draft.body" @input="markMemoryDirty()"></textarea>
+                    </div>
+                    <div class="row g-2">
+                      <div class="col-12 col-md-6">
+                        <label class="form-label">Tags</label>
+                        <input class="form-control" type="text" x-model="$store.memories.draft.tags" @input="markMemoryDirty()" />
+                      </div>
+                    </div>
+                    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                      <div class="text-muted small" x-text="$store.memories.statusText"></div>
+                      <div class="btn-list">
+                        <button class="btn btn-outline-secondary" type="button" @click="resetMemoryDraft()" :disabled="DASHBOARD_READ_ONLY || !$store.memories.dirty">Reset</button>
+                        <button class="btn btn-primary" type="submit" :disabled="DASHBOARD_READ_ONLY || $store.memories.saving || !$store.memories.dirty">
+                          <span x-show="!$store.memories.saving">Save Changes</span>
+                          <span x-show="$store.memories.saving">Saving...</span>
+                        </button>
+                        <button class="btn btn-danger" type="button" @click="deleteMemory()" :disabled="DASHBOARD_READ_ONLY || $store.memories.deleting">Delete</button>
+                      </div>
+                    </div>
+                  </form>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" x-cloak x-show="$store.memories.view === 'graph'" x-transition.opacity.duration.180ms>
+            <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap">
+              <div>
+                <div class="card-title">Memory Graph Explorer</div>
+                <div class="text-muted small">Query-first graph view inspired by Kuzu.</div>
+              </div>
+              <div class="btn-list">
+                <button class="btn btn-outline-secondary btn-sm" @click="refreshMemoryExplorer()">Refresh Graph Data</button>
+              </div>
+            </div>
+            <div class="card-body p-2 p-lg-3">
+              <div id="memory-graph-explorer-root"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Session Intelligence -->
+        <section class="pt-4" x-show="$store.app.activeTab === 'refine'">
+          <div class="card mb-3">
+            <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+              <div>
+                <div class="card-title">Session Intelligence</div>
+                <div class="text-muted small">Powered by <span class="text-info">lerim refine</span></div>
+              </div>
+              <div class="btn-list">
+                <button
+                  class="btn btn-primary"
+                  @click="runRefineNow()"
+                  :disabled="DASHBOARD_READ_ONLY || $store.refine.loading.run || ($store.refine.form.mode === 'session' && !$store.refine.form.run_id.trim())"
+                >
+                  <span x-show="!$store.refine.loading.run">Run Refine</span>
+                  <span x-show="$store.refine.loading.run">Running...</span>
+                </button>
+                <button class="btn btn-outline-secondary" @click="resetRefineOptions()" :disabled="$store.refine.loading.run">
+                  Reset Options
+                </button>
+                <button class="btn btn-outline-secondary" @click="loadRefineReport()">Refresh</button>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="row g-3 mb-3">
+                <div class="col-12 col-lg-3">
+                  <label class="form-label">Mode</label>
+                  <select class="form-select" x-model="$store.refine.form.mode" @change="setRefineMode($store.refine.form.mode)">
+                    <option value="window">Window</option>
+                    <option value="session">Single Session</option>
+                    <option value="backfill">Backfill</option>
+                  </select>
+                </div>
+                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode !== 'session'">
+                  <label class="form-label">Window</label>
+                  <select class="form-select" x-model="$store.refine.form.window">
+                    <option value="">Use top Scope filter</option>
+                    <option value="1d">1d</option>
+                    <option value="7d">7d</option>
+                    <option value="30d">30d</option>
+                    <option value="all">all</option>
+                  </select>
+                </div>
+                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode === 'session'">
+                  <label class="form-label">Session run_id</label>
+                  <input class="form-control" type="text" placeholder="019c..." x-model="$store.refine.form.run_id" />
+                </div>
+                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode !== 'session'">
+                  <label class="form-label">Agents</label>
+                  <input class="form-control" type="text" placeholder="Use top Agent filter" x-model="$store.refine.form.agents" />
+                </div>
+                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode !== 'session'">
+                  <label class="form-label">Max Sessions</label>
+                  <input class="form-control" type="number" min="1" step="1" x-model.number="$store.refine.form.max_sessions" />
+                </div>
+                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode === 'window'">
+                  <label class="form-label">Since (ISO/local)</label>
+                  <input class="form-control" type="text" placeholder="2026-02-07T12:00:00+00:00" x-model="$store.refine.form.since" />
+                </div>
+                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode === 'window'">
+                  <label class="form-label">Until (ISO/local)</label>
+                  <input class="form-control" type="text" placeholder="2026-02-07T15:00:00+00:00" x-model="$store.refine.form.until" />
+                </div>
+                <div class="col-12">
+                  <label class="form-label">Steps (comma-separated)</label>
+                  <input class="form-control" type="text" x-model="$store.refine.form.steps" />
+                </div>
+                <div class="col-12 d-flex gap-4 flex-wrap">
+                  <label class="form-check">
+                    <input class="form-check-input" type="checkbox" x-model="$store.refine.form.force" />
+                    <span class="form-check-label">Force rerun</span>
+                  </label>
+                </div>
+                <div class="col-12 text-muted small">
+                  CLI parity: <code>window/since/until/agents/max-sessions/steps/force</code> plus modes for <code>session</code> and <code>backfill</code>.
+                </div>
+              </div>
+
+              <div class="row row-cards mb-3">
+                <div class="col-6 col-lg-2">
+                  <div class="stat-label">Queue Pending</div>
+                  <div class="stat-value" x-text="formatNumber($store.refine.status.queue?.pending || 0)"></div>
+                </div>
+                <div class="col-6 col-lg-2">
+                  <div class="stat-label">Queue Running</div>
+                  <div class="stat-value" x-text="formatNumber($store.refine.status.queue?.running || 0)"></div>
+                </div>
+                <div class="col-6 col-lg-2">
+                  <div class="stat-label">Dead Letter</div>
+                  <div class="stat-value" x-text="formatNumber($store.refine.status.queue?.dead_letter || 0)"></div>
+                </div>
+                <div class="col-6 col-lg-3">
+                  <div class="stat-label">Latest Sync</div>
+                  <div class="stat-value small text-wrap" x-text="$store.refine.status.sync?.status || 'n/a'"></div>
+                </div>
+                <div class="col-6 col-lg-3">
+                  <div class="stat-label">Latest Maintain</div>
+                  <div class="stat-value small text-wrap" x-text="$store.refine.status.maintain?.status || 'n/a'"></div>
+                </div>
+              </div>
+
+              <div class="text-muted mb-3" x-show="$store.refine.loading.report">Loading report...</div>
+              <div class="text-muted mb-3" x-show="!$store.refine.loading.report && !$store.refine.report.aggregates">
+                No report yet. Run refine to generate the first report.
+              </div>
+              <div x-show="$store.refine.report.aggregates">
+                <div class="row row-cards mb-3">
+                  <div class="col-6 col-lg-2">
+                    <div class="stat-label">Messages</div>
+                    <div class="stat-value" x-text="formatNumber($store.refine.report.aggregates.totals?.messages || 0)"></div>
+                  </div>
+                  <div class="col-6 col-lg-2">
+                    <div class="stat-label">Lines</div>
+                    <div class="stat-value" x-text="formatLines($store.refine.report.aggregates)"></div>
+                  </div>
+                  <div class="col-6 col-lg-2">
+                    <div class="stat-label">Files</div>
+                    <div class="stat-value" x-text="formatNumber($store.refine.report.aggregates.totals?.files_modified || 0)"></div>
+                  </div>
+                  <div class="col-6 col-lg-2">
+                    <div class="stat-label">Days</div>
+                    <div class="stat-value" x-text="formatNumber($store.refine.report.aggregates.derived?.days || 0)"></div>
+                  </div>
+                  <div class="col-6 col-lg-2">
+                    <div class="stat-label">Msgs/Day</div>
+                    <div class="stat-value" x-text="formatNumber($store.refine.report.aggregates.derived?.messages_per_day || 0)"></div>
+                  </div>
+                </div>
+
+                <div class="refine-glance mb-3" x-show="$store.refine.report.narratives?.at_a_glance">
+                  <div class="refine-section-title">At a Glance</div>
+                  <div class="text-muted small mb-2" x-text="$store.refine.report.narratives.at_a_glance?.working || ''"></div>
+                  <div class="text-muted small mb-2" x-text="$store.refine.report.narratives.at_a_glance?.hindering || ''"></div>
+                  <div class="text-muted small mb-2" x-text="$store.refine.report.narratives.at_a_glance?.quick_wins || ''"></div>
+                  <div class="text-muted small" x-text="$store.refine.report.narratives.at_a_glance?.horizon || ''"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card mb-3" x-show="$store.refine.report.narratives?.project_areas?.length">
+            <div class="card-header">
+              <div class="card-title">What You Work On</div>
+            </div>
+            <div class="card-body">
+              <ul class="refine-list">
+                <template x-for="area in $store.refine.report.narratives.project_areas" :key="area.name">
+                  <li>
+                    <div class="fw-semibold" x-text="area.name"></div>
+                    <div class="text-muted small" x-text="area.description"></div>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card mb-3" x-show="$store.refine.report.narratives?.wins?.length">
+            <div class="card-header">
+              <div class="card-title">Impressive Things</div>
+            </div>
+            <div class="card-body">
+              <ul class="refine-list">
+                <template x-for="item in $store.refine.report.narratives.wins" :key="item">
+                  <li x-text="item"></li>
+                </template>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card mb-3" x-show="$store.refine.report.narratives?.friction?.length">
+            <div class="card-header">
+              <div class="card-title">Where Things Go Wrong</div>
+            </div>
+            <div class="card-body">
+              <ul class="refine-list">
+                <template x-for="item in $store.refine.report.narratives.friction" :key="item.title">
+                  <li>
+                    <div class="fw-semibold" x-text="item.title"></div>
+                    <div class="text-muted small" x-text="item.description"></div>
+                    <div class="text-muted small" x-text="(item.examples || []).join(' · ')"></div>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card mb-3" x-show="$store.refine.report.narratives?.features?.length">
+            <div class="card-header">
+              <div class="card-title">Features to Try</div>
+            </div>
+            <div class="card-body">
+              <ul class="refine-list">
+                <template x-for="item in $store.refine.report.narratives.features" :key="item.title">
+                  <li>
+                    <div class="fw-semibold" x-text="item.title"></div>
+                    <div class="text-muted small" x-text="item.oneliner"></div>
+                    <div class="text-muted small" x-text="item.why"></div>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card mb-3" x-show="$store.refine.report.narratives?.patterns?.length">
+            <div class="card-header">
+              <div class="card-title">New Usage Patterns</div>
+            </div>
+            <div class="card-body">
+              <ul class="refine-list">
+                <template x-for="item in $store.refine.report.narratives.patterns" :key="item.title">
+                  <li>
+                    <div class="fw-semibold" x-text="item.title"></div>
+                    <div class="text-muted small" x-text="item.summary"></div>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card mb-3" x-show="$store.refine.report.narratives?.horizon?.length">
+            <div class="card-header">
+              <div class="card-title">On the Horizon</div>
+            </div>
+            <div class="card-body">
+              <ul class="refine-list">
+                <template x-for="item in $store.refine.report.narratives.horizon" :key="item.title">
+                  <li>
+                    <div class="fw-semibold" x-text="item.title"></div>
+                    <div class="text-muted small" x-text="item.possible"></div>
+                    <div class="text-muted small" x-text="item.tip"></div>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card mb-3" x-show="$store.refine.report.narratives?.feedback">
+            <div class="card-header">
+              <div class="card-title">Team Feedback</div>
+            </div>
+            <div class="card-body">
+              <div class="text-muted small mb-2" x-text="($store.refine.report.narratives.feedback?.team || []).join(' · ')"></div>
+              <div class="text-muted small" x-text="($store.refine.report.narratives.feedback?.model || []).join(' · ')"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Settings -->
+        <section class="pt-4" x-show="$store.app.activeTab === 'settings'">
+          <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <div>
+                <div class="card-title">Runtime Settings</div>
+                <div class="text-muted small">Changes are saved to ~/.lerim/config.toml.</div>
+              </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-outline-primary btn-sm" @click="loadSettings()" :disabled="$store.settings.loading">
+                  Reload
+                </button>
+                <button class="btn btn-primary btn-sm" @click="saveSettings()" :disabled="DASHBOARD_READ_ONLY || $store.settings.saving">
+                  <span x-show="!$store.settings.saving">Save</span>
+                  <span x-show="$store.settings.saving">Saving...</span>
+                </button>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="row g-3">
+                <div class="col-12 col-md-4">
+                  <label class="form-label">Agent Provider</label>
+                  <select class="form-select" x-model="$store.settings.form.agent_provider" @change="loadModelOptions($store.settings.form.agent_provider)">
+                    <option value="anthropic">anthropic</option>
+                    <option value="zai">zai</option>
+                    <option value="openrouter">openrouter</option>
+                  </select>
+                </div>
+                <div class="col-12 col-md-8">
+                  <label class="form-label">Agent Model</label>
+                  <input class="form-control" list="agent-model-options" x-model="$store.settings.form.agent_model" />
+                  <datalist id="agent-model-options">
+                    <template x-for="model in $store.settings.model_options" :key="model">
+                      <option :value="model"></option>
+                    </template>
+                  </datalist>
+                </div>
+                <div class="col-12">
+                  <label class="form-label">Agent Timeout (sec)</label>
+                  <input class="form-control" type="number" min="1" step="1" x-model.number="$store.settings.form.agent_timeout" />
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label">LLM Provider</label>
+                  <select class="form-select" x-model="$store.settings.form.llm_provider">
+                    <option value="anthropic">anthropic</option>
+                    <option value="zai">zai</option>
+                    <option value="openrouter">openrouter</option>
+                  </select>
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label">LLM Model</label>
+                  <input class="form-control" x-model="$store.settings.form.llm_model" />
+                </div>
+              </div>
+              <div class="text-muted small mt-3" x-text="$store.settings.status"></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">Config Sources</div>
+            </div>
+            <div class="card-body">
+              <div x-show="!$store.settings.sources.length" class="text-muted small">No config source metadata available.</div>
+              <div class="table-responsive" x-show="$store.settings.sources.length">
+                <table class="table table-sm">
+                  <thead>
+                    <tr>
+                      <th>Source</th>
+                      <th>Path</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="source in $store.settings.sources" :key="source.path + source.source">
+                      <tr>
+                        <td x-text="source.source"></td>
+                        <td class="text-muted small" x-text="source.path"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" x-data>
+    <template x-for="toast in $store.toasts.items" :key="toast.id">
+      <div class="toast" :class="toast.type" x-text="toast.message" role="alert"></div>
+    </template>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="/assets/graph-explorer/graph-explorer.js"></script>
+  <script>
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function sanitizeSnippet(value) {
+      if (!value) return '';
+      let escaped = escapeHtml(value);
+      escaped = escaped.replace(/&lt;mark&gt;/g, '<mark>');
+      escaped = escaped.replace(/&lt;\/mark&gt;/g, '</mark>');
+      return escaped;
+    }
+
+    function parseCommaList(value) {
+      if (!value) return [];
+      const raw = Array.isArray(value) ? value : String(value).split(',');
+      const seen = new Set();
+      const results = [];
+      raw.forEach((item) => {
+        const cleaned = String(item || '').trim();
+        if (!cleaned || seen.has(cleaned)) return;
+        seen.add(cleaned);
+        results.push(cleaned);
+      });
+      return results;
+    }
+
+    function formatCommaList(values) {
+      if (!values) return '';
+      if (!Array.isArray(values)) return String(values);
+      return values.filter(Boolean).join(', ');
+    }
+
+    function formatNumber(num) {
+      if (!Number.isFinite(num)) return '0';
+      if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
+      if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
+      return String(num);
+    }
+
+    function formatDuration(ms) {
+      if (!Number.isFinite(ms)) return '0m';
+      const seconds = Math.floor(ms / 1000);
+      const minutes = Math.floor(seconds / 60);
+      const hours = Math.floor(minutes / 60);
+      const days = Math.floor(hours / 24);
+      if (days > 0) return `${days}d ${hours % 24}h`;
+      if (hours > 0) return `${hours}h ${minutes % 60}m`;
+      return `${minutes}m`;
+    }
+
+    function formatDateTime(value) {
+      if (!value) return '';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString();
+    }
+
+    function relativeTime(value) {
+      if (!value) return '-';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      const diffMs = Date.now() - date.getTime();
+      const diffMin = Math.floor(diffMs / 60000);
+      if (diffMin < 1) return 'just now';
+      if (diffMin < 60) return `${diffMin}m ago`;
+      const diffHours = Math.floor(diffMin / 60);
+      if (diffHours < 24) return `${diffHours}h ago`;
+      const diffDays = Math.floor(diffHours / 24);
+      return `${diffDays}d ago`;
+    }
+
+    const DASHBOARD_READ_ONLY = true;
+
+    function setAgenticScope(run) {
+      if (!run) {
+        window.__agenticScope = null;
+        return;
+      }
+      window.__agenticScope = {
+        run_id: run.run_id,
+        agent_type: run.agent_type,
+        repo_name: run.repo_name,
+      };
+    }
+
+    const chartPalette = {
+      claude: '#f59e0b',
+      codex: '#22d3ee',
+      opencode: '#34d399',
+      muted: '#94a3b8',
+      accent: '#22d3ee',
+      accent2: '#f59e0b',
+      accent3: '#a78bfa',
+    };
+
+    function chartAxisDefaults(extra = {}) {
+      return {
+        axisLabel: { color: chartPalette.muted },
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { show: false },
+        ...extra,
+      };
+    }
+
+    const chartRegistry = {
+      instances: {},
+      get(name) {
+        const el = document.getElementById(`chart-${name}`);
+        if (!el) return null;
+        if (!this.instances[name]) {
+          this.instances[name] = echarts.init(el, null, { renderer: 'canvas' });
+        }
+        return this.instances[name];
+      },
+      resizeAll() {
+        Object.values(this.instances).forEach((chart) => {
+          if (chart) chart.resize();
+        });
+      },
+      disposeAll() {
+        Object.values(this.instances).forEach((chart) => {
+          if (chart) chart.dispose();
+        });
+        this.instances = {};
+      },
+    };
+
+    function toggleChartEmpty(name, isEmpty) {
+      const wrapper = document.querySelector(`[data-chart="${name}"]`);
+      if (!wrapper) return;
+      wrapper.classList.toggle('is-empty', Boolean(isEmpty));
+    }
+
+    function scheduleRenderCharts() {
+      if (window.requestIdleCallback) {
+        window.requestIdleCallback(() => renderOverviewCharts(), { timeout: 500 });
+      } else {
+        setTimeout(renderOverviewCharts, 0);
+      }
+    }
+
+    function renderOverviewCharts() {
+      if (!window.Alpine) return;
+      const app = Alpine.store('app');
+      const stats = Alpine.store('stats');
+      if (!app || app.activeTab !== 'overview' || !stats) return;
+
+      renderAgentChart(stats.by_agent || {});
+      renderModelChart(stats.model_usage || {});
+      renderToolChart(stats.tool_usage || {});
+      renderDailyChart(stats.daily_activity || []);
+      renderDailyMetricsChart(stats.daily_activity || []);
+      renderHourlyChart(stats.hourly_activity || []);
+
+      chartRegistry.resizeAll();
+    }
+
+    function renderAgentChart(byAgent) {
+      const entries = Object.entries(byAgent);
+      const values = entries.map(([, v]) => v.runs || 0);
+      const total = values.reduce((a, b) => a + b, 0);
+      if (!total) {
+        toggleChartEmpty('agent', true);
+        return;
+      }
+      toggleChartEmpty('agent', false);
+      const data = entries.map(([agent, v]) => ({
+        value: v.runs || 0,
+        name: agent.charAt(0).toUpperCase() + agent.slice(1),
+        itemStyle: { color: chartPalette[agent] || '#64748b' },
+      }));
+      const chart = chartRegistry.get('agent');
+      if (!chart) return;
+      chart.setOption({
+        animation: false,
+        tooltip: { trigger: 'item' },
+        series: [
+          {
+            type: 'pie',
+            radius: ['55%', '75%'],
+            label: { color: chartPalette.muted },
+            labelLine: { length: 12, length2: 8 },
+            data,
+          },
+        ],
+      }, { notMerge: true, lazyUpdate: true });
+    }
+
+    function renderModelChart(modelUsage) {
+      const entries = Object.entries(modelUsage || {})
+        .map(([model, usage]) => ({
+          model,
+          input: Number(usage.input || 0),
+          output: Number(usage.output || 0),
+          total: Number(usage.total || 0),
+        }))
+        .filter(entry => entry.total > 0)
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 8);
+      if (!entries.length) {
+        toggleChartEmpty('model', true);
+        return;
+      }
+      toggleChartEmpty('model', false);
+      const chart = chartRegistry.get('model');
+      if (!chart) return;
+      chart.setOption({
+        animation: false,
+        grid: { left: 16, right: 16, top: 16, bottom: 16, containLabel: true },
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        legend: { textStyle: { color: chartPalette.muted } },
+        xAxis: chartAxisDefaults({ type: 'value' }),
+        yAxis: chartAxisDefaults({
+          type: 'category',
+          data: entries.map(entry => entry.model),
+        }),
+        series: [
+          {
+            name: 'Input',
+            type: 'bar',
+            stack: 'tokens',
+            data: entries.map(entry => entry.input),
+            itemStyle: { color: chartPalette.accent },
+          },
+          {
+            name: 'Output',
+            type: 'bar',
+            stack: 'tokens',
+            data: entries.map(entry => entry.output),
+            itemStyle: { color: chartPalette.accent2 },
+          },
+        ],
+      }, { notMerge: true, lazyUpdate: true });
+    }
+
+    function renderToolChart(toolUsage) {
+      const entries = Object.entries(toolUsage || {})
+        .map(([tool, count]) => ({
+          tool: tool.includes(':') ? tool.split(':')[1] : tool,
+          count: Number(count || 0),
+        }))
+        .filter(entry => entry.count > 0)
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+      if (!entries.length) {
+        toggleChartEmpty('tools', true);
+        return;
+      }
+      toggleChartEmpty('tools', false);
+      const chart = chartRegistry.get('tools');
+      if (!chart) return;
+      chart.setOption({
+        animation: false,
+        grid: { left: 16, right: 16, top: 16, bottom: 16, containLabel: true },
+        xAxis: chartAxisDefaults({ type: 'value' }),
+        yAxis: chartAxisDefaults({
+          type: 'category',
+          data: entries.map(entry => entry.tool),
+        }),
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        series: [
+          {
+            type: 'bar',
+            data: entries.map(entry => entry.count),
+            itemStyle: { color: chartPalette.accent },
+            barWidth: 12,
+          },
+        ],
+      }, { notMerge: true, lazyUpdate: true });
+    }
+
+    function renderDailyChart(dailyActivity) {
+      if (!dailyActivity.length) {
+        toggleChartEmpty('daily', true);
+        return;
+      }
+      toggleChartEmpty('daily', false);
+      const labels = dailyActivity.map(item => item.date);
+      const chart = chartRegistry.get('daily');
+      if (!chart) return;
+      chart.setOption({
+        animation: false,
+        tooltip: { trigger: 'axis' },
+        legend: { textStyle: { color: chartPalette.muted } },
+        grid: { left: 16, right: 16, top: 24, bottom: 24, containLabel: true },
+        xAxis: {
+          ...chartAxisDefaults(),
+          type: 'category',
+          data: labels,
+          boundaryGap: false,
+        },
+        yAxis: chartAxisDefaults({ type: 'value' }),
+        series: [
+          {
+            name: 'Claude',
+            type: 'line',
+            data: dailyActivity.map(item => item.claude || 0),
+            areaStyle: { opacity: 0.2 },
+            smooth: true,
+            itemStyle: { color: chartPalette.claude },
+          },
+          {
+            name: 'Codex',
+            type: 'line',
+            data: dailyActivity.map(item => item.codex || 0),
+            areaStyle: { opacity: 0.2 },
+            smooth: true,
+            itemStyle: { color: chartPalette.codex },
+          },
+          {
+            name: 'OpenCode',
+            type: 'line',
+            data: dailyActivity.map(item => item.opencode || 0),
+            areaStyle: { opacity: 0.2 },
+            smooth: true,
+            itemStyle: { color: chartPalette.opencode },
+          },
+        ],
+      }, { notMerge: true, lazyUpdate: true });
+    }
+
+    function renderDailyMetricsChart(dailyActivity) {
+      if (!dailyActivity.length) {
+        toggleChartEmpty('daily-metrics', true);
+        return;
+      }
+      toggleChartEmpty('daily-metrics', false);
+      const labels = dailyActivity.map(item => item.date);
+      const chart = chartRegistry.get('daily-metrics');
+      if (!chart) return;
+      chart.setOption({
+        animation: false,
+        tooltip: { trigger: 'axis' },
+        legend: { textStyle: { color: chartPalette.muted } },
+        grid: { left: 16, right: 30, top: 24, bottom: 24, containLabel: true },
+        xAxis: {
+          ...chartAxisDefaults(),
+          type: 'category',
+          data: labels,
+          boundaryGap: false,
+        },
+        yAxis: chartAxisDefaults({ type: 'value' }),
+        series: [
+          {
+            name: 'Messages',
+            type: 'line',
+            data: dailyActivity.map(item => item.messages || 0),
+            smooth: true,
+            itemStyle: { color: '#4ade80' },
+          },
+          {
+            name: 'Tool Calls',
+            type: 'line',
+            data: dailyActivity.map(item => item.tool_calls || 0),
+            smooth: true,
+            itemStyle: { color: '#fbbf24' },
+          },
+          {
+            name: 'Tokens (K)',
+            type: 'line',
+            data: dailyActivity.map(item => Math.round((item.tokens || 0) / 1000)),
+            smooth: true,
+            itemStyle: { color: chartPalette.accent3 },
+          },
+        ],
+      }, { notMerge: true, lazyUpdate: true });
+    }
+
+    function renderHourlyChart(hourlyActivity) {
+      if (!hourlyActivity.length) {
+        toggleChartEmpty('hourly', true);
+        return;
+      }
+      toggleChartEmpty('hourly', false);
+      const labels = Array.from({ length: 24 }, (_, idx) => `${idx}:00`);
+      const hourMap = {};
+      hourlyActivity.forEach(item => { hourMap[item.hour] = item; });
+      const chart = chartRegistry.get('hourly');
+      if (!chart) return;
+      chart.setOption({
+        animation: false,
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        legend: { textStyle: { color: chartPalette.muted } },
+        grid: { left: 16, right: 16, top: 24, bottom: 24, containLabel: true },
+        xAxis: {
+          ...chartAxisDefaults(),
+          type: 'category',
+          data: labels,
+        },
+        yAxis: chartAxisDefaults({ type: 'value' }),
+        series: [
+          {
+            name: 'Sessions',
+            type: 'bar',
+            stack: 'activity',
+            data: labels.map((_, i) => hourMap[i]?.sessions || 0),
+            itemStyle: { color: '#60a5fa' },
+          },
+          {
+            name: 'Messages',
+            type: 'bar',
+            stack: 'activity',
+            data: labels.map((_, i) => hourMap[i]?.messages || 0),
+            itemStyle: { color: '#4ade80' },
+          },
+          {
+            name: 'Tool Calls',
+            type: 'bar',
+            stack: 'activity',
+            data: labels.map((_, i) => hourMap[i]?.tool_calls || 0),
+            itemStyle: { color: '#f59e0b' },
+          },
+          {
+            name: 'Tokens (K)',
+            type: 'bar',
+            stack: 'activity',
+            data: labels.map((_, i) => Math.round((hourMap[i]?.tokens || 0) / 1000)),
+            itemStyle: { color: '#a78bfa' },
+          },
+        ],
+      }, { notMerge: true, lazyUpdate: true });
+    }
+
+    function emptyRefineReport() {
+      return {
+        aggregates: {
+          totals: {},
+          derived: {},
+        },
+        narratives: {
+          at_a_glance: {},
+          project_areas: [],
+          wins: [],
+          friction: [],
+          features: [],
+          patterns: [],
+          horizon: [],
+          feedback: {
+            team: [],
+            model: [],
+          },
+        },
+      };
+    }
+
+    function defaultRefineSteps(mode) {
+      if (mode === 'session') return 'index,facets,learnings,postprocess';
+      return 'index,facets,learnings,enrichment,cases,postprocess,report';
+    }
+
+    function defaultRefineForm() {
+      return {
+        mode: 'window',
+        window: '',
+        since: '',
+        until: '',
+        agents: '',
+        run_id: '',
+        max_sessions: 50,
+        steps: defaultRefineSteps('window'),
+        force: false,
+      };
+    }
+
+    function normalizeRefineReport(raw) {
+      const base = emptyRefineReport();
+      if (!raw || typeof raw !== 'object') {
+        return base;
+      }
+
+      const aggregates = raw.aggregates && typeof raw.aggregates === 'object' ? raw.aggregates : {};
+      const narratives = raw.narratives && typeof raw.narratives === 'object' ? raw.narratives : {};
+      const feedback = narratives.feedback && typeof narratives.feedback === 'object' ? narratives.feedback : {};
+
+      return {
+        ...base,
+        ...raw,
+        aggregates: {
+          ...base.aggregates,
+          ...aggregates,
+          totals: { ...base.aggregates.totals, ...(aggregates.totals || {}) },
+          derived: { ...base.aggregates.derived, ...(aggregates.derived || {}) },
+        },
+        narratives: {
+          ...base.narratives,
+          ...narratives,
+          at_a_glance: { ...base.narratives.at_a_glance, ...(narratives.at_a_glance || {}) },
+          project_areas: Array.isArray(narratives.project_areas) ? narratives.project_areas : [],
+          wins: Array.isArray(narratives.wins) ? narratives.wins : [],
+          friction: Array.isArray(narratives.friction) ? narratives.friction : [],
+          features: Array.isArray(narratives.features) ? narratives.features : [],
+          patterns: Array.isArray(narratives.patterns) ? narratives.patterns : [],
+          horizon: Array.isArray(narratives.horizon) ? narratives.horizon : [],
+          feedback: {
+            ...base.narratives.feedback,
+            ...feedback,
+            team: Array.isArray(feedback.team) ? feedback.team : [],
+            model: Array.isArray(feedback.model) ? feedback.model : [],
+          },
+        },
+      };
+    }
+
+    document.addEventListener('alpine:init', () => {
+      Alpine.store('app', {
+        filters: {
+          agent: 'all',
+          scope: 'week',
+        },
+        activeTab: 'overview',
+        loading: {
+          stats: false,
+          stats_extended: false,
+          runs: false,
+          transcript: false,
+          reflect: false,
+          searching: false,
+        },
+      });
+
+      Alpine.store('stats', {
+        totals: {
+          runs: 0,
+          messages: 0,
+          tool_calls: 0,
+          errors: 0,
+          tokens: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          duration_ms: 0,
+          unique_tools: 0,
+        },
+        derived: {
+          avg_session_duration_ms: 0,
+          avg_messages_per_session: 0,
+          error_rate: 0,
+        },
+        by_agent: {},
+        model_usage: {},
+        tool_usage: {},
+        daily_activity: [],
+        hourly_activity: [],
+        cache: {
+          cached_at: null,
+          age_seconds: null,
+          stale: true,
+          source: 'empty',
+        },
+      });
+
+      Alpine.store('runs', {
+        items: [],
+        pagination: { offset: 0, total: 0, has_more: false },
+        selectedRun: null,
+        selectedIndex: -1,
+        transcript: [],
+        search: {
+          query: '',
+          repo: '',
+          status: '',
+          active: false,
+        },
+        previewOpen: {},
+      });
+
+      Alpine.store('memories', {
+        items: [],
+        view: 'library',
+        selectedId: null,
+        selected: null,
+        draft: null,
+        loading: false,
+        saving: false,
+        deleting: false,
+        dirty: false,
+        statusText: '',
+        summary: '',
+        filters: {
+          query: '',
+          type: '',
+          state: '',
+          project: '',
+        },
+      });
+
+      Alpine.store('refine', {
+        status: {},
+        report: emptyRefineReport(),
+        form: defaultRefineForm(),
+        lastRun: null,
+        loading: {
+          status: false,
+          report: false,
+          run: false,
+        },
+      });
+
+      Alpine.store('settings', {
+        loading: false,
+        saving: false,
+        status: '',
+        model_options: [],
+        sources: [],
+        form: {
+          agent_provider: 'anthropic',
+          agent_model: '',
+          agent_timeout: 120,
+          llm_provider: 'zai',
+          llm_model: '',
+        },
+      });
+
+      Alpine.store('toasts', {
+        items: [],
+        _nextId: 0,
+        add(message, type = 'info', duration = 4000) {
+          const id = ++this._nextId;
+          this.items.push({ id, message, type });
+          setTimeout(() => {
+            this.items = this.items.filter(t => t.id !== id);
+          }, duration);
+        },
+      });
+    });
+
+    function dashboard() {
+      return {
+        tabs: [
+          { id: 'overview', label: 'Overview' },
+          { id: 'runs', label: 'Runs' },
+          { id: 'memories', label: 'Memories' },
+          { id: 'refine', label: 'Session Intelligence' },
+          { id: 'settings', label: 'Settings' },
+        ],
+        runsLimit: 30,
+        sortField: 'started_at',
+        sortDir: 'desc',
+        reflectInput: '',
+        reflectOutput: '',
+        memoryExplorerApp: null,
+        init() {
+          this.loadStats();
+          this.loadRefineStatus();
+
+          const urlParams = new URLSearchParams(window.location.search);
+          const tabParam = urlParams.get('tab');
+          if (tabParam && this.tabs.some(t => t.id === tabParam)) {
+            this.$store.app.activeTab = tabParam;
+            if (tabParam === 'runs') {
+              this.loadRuns(0);
+            }
+            if (tabParam === 'memories') {
+              this.loadMemories();
+            }
+            if (tabParam === 'refine') {
+              this.loadRefineReport();
+            }
+            if (tabParam === 'settings') {
+              this.loadSettings();
+            }
+          }
+
+          window.addEventListener('resize', () => {
+            chartRegistry.resizeAll();
+            if (this.memoryExplorerApp && this.$store.app.activeTab === 'memories' && this.$store.memories.view === 'graph') {
+              this.memoryExplorerApp.resize();
+            }
+          });
+        },
+
+        setTab(tabId) {
+          if (tabId !== 'memories' && this.$store.memories.view === 'graph') {
+            this.$store.memories.view = 'library';
+          }
+          this.$store.app.activeTab = tabId;
+          if (tabId === 'runs' && this.$store.runs.items.length === 0) {
+            this.loadRuns(0);
+          }
+          if (tabId === 'memories' && this.$store.memories.items.length === 0) {
+            this.loadMemories();
+          }
+          if (tabId === 'memories' && this.$store.memories.view === 'graph') {
+            this.$nextTick(() => this.mountMemoryExplorer());
+          }
+          if (tabId === 'refine') {
+            this.loadRefineStatus();
+            this.loadRefineReport();
+          }
+          if (tabId === 'settings') {
+            this.loadSettings();
+          }
+          if (tabId === 'overview') {
+            this.$nextTick(() => scheduleRenderCharts());
+          }
+        },
+
+        onFilterChange() {
+          this.loadStats();
+          if (this.$store.app.activeTab === 'runs') {
+            this.loadRuns(0);
+          }
+        },
+
+        refresh() {
+          this.loadStats(true);
+          if (this.$store.app.activeTab === 'runs') {
+            this.loadRuns(0);
+          }
+          if (this.$store.app.activeTab === 'memories') {
+            this.loadMemories();
+          }
+          if (this.$store.app.activeTab === 'refine') {
+            this.loadRefineStatus();
+            this.loadRefineReport();
+          }
+          if (this.$store.app.activeTab === 'settings') {
+            this.loadSettings();
+          }
+        },
+
+        async setMemoryView(view) {
+          const nextView = view === 'graph' ? 'graph' : 'library';
+          this.$store.memories.view = nextView;
+          if (nextView !== 'graph') return;
+          await this.$nextTick();
+          await this.mountMemoryExplorer();
+          if (this.memoryExplorerApp) this.memoryExplorerApp.resize();
+        },
+
+        async mountMemoryExplorer() {
+          const root = document.getElementById('memory-graph-explorer-root');
+          if (!root) return;
+          if (!window.LerimGraphExplorer || typeof window.LerimGraphExplorer.mountGraphExplorer !== 'function') {
+            Alpine.store('toasts').add('Graph explorer bundle is missing.', 'error');
+            return;
+          }
+          if (!this.memoryExplorerApp) {
+            this.memoryExplorerApp = window.LerimGraphExplorer.mountGraphExplorer(root, {
+              initialQuery: this.$store.memories.filters.query || '',
+              onOpenMemory: async (memoryId) => {
+                await this.selectMemory(memoryId);
+              },
+              onNotify: (message, level = 'info') => {
+                const toastType = level === 'success' ? 'info' : level;
+                Alpine.store('toasts').add(message, toastType);
+              },
+            });
+            this.memoryExplorerApp.resize();
+            return;
+          }
+
+          await this.memoryExplorerApp.refreshOptions();
+          this.memoryExplorerApp.resize();
+        },
+
+        async refreshMemoryExplorer() {
+          if (this.$store.memories.view !== 'graph') return;
+          await this.mountMemoryExplorer();
+        },
+
+        get cacheBadgeText() {
+          const cache = this.$store.stats.cache || {};
+          if (!cache.cached_at) return 'No cache';
+          const age = cache.age_seconds || 0;
+          if (cache.stale) return `Stale · ${this.formatAge(age)}`;
+          return `Fresh · ${this.formatAge(age)}`;
+        },
+
+        get cacheBadgeClass() {
+          const cache = this.$store.stats.cache || {};
+          if (!cache.cached_at) return 'bg-gray-lt text-gray';
+          return cache.stale ? 'bg-yellow-lt text-yellow' : 'bg-green-lt text-green';
+        },
+
+        get cacheSubtext() {
+          const cache = this.$store.stats.cache || {};
+          if (!cache.cached_at) return 'Extended stats not cached yet.';
+          return `Source: ${cache.source || 'memory'}`;
+        },
+
+        formatAge(seconds) {
+          if (!Number.isFinite(seconds)) return 'just now';
+          if (seconds < 60) return `${seconds}s ago`;
+          const minutes = Math.round(seconds / 60);
+          if (minutes < 60) return `${minutes}m ago`;
+          const hours = Math.round(minutes / 60);
+          return `${hours}h ago`;
+        },
+
+        async loadStats(forceRefresh = false) {
+          const { agent, scope } = this.$store.app.filters;
+          this.$store.app.loading.stats = true;
+          try {
+            const url = `/api/runs/stats?scope=${scope}&agent_type=${agent}${forceRefresh ? '&refresh=1' : ''}`;
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error('Failed to load stats');
+            const data = await resp.json();
+
+            Object.assign(this.$store.stats.totals, data.totals || {});
+            Object.assign(this.$store.stats.derived, data.derived || {});
+            this.$store.stats.by_agent = data.by_agent || {};
+            this.$store.stats.model_usage = data.model_usage || {};
+            this.$store.stats.tool_usage = data.tool_usage || {};
+            this.$store.stats.daily_activity = data.daily_activity || [];
+            this.$store.stats.hourly_activity = data.hourly_activity || [];
+            this.$store.stats.cache = data.cache || this.$store.stats.cache;
+
+            scheduleRenderCharts();
+            this.queueExtendedStats(forceRefresh);
+          } catch (e) {
+            console.error('Failed to load stats:', e);
+            Alpine.store('toasts').add('Failed to load stats', 'error');
+          } finally {
+            this.$store.app.loading.stats = false;
+          }
+        },
+
+        queueExtendedStats(forceRefresh = false) {
+          const run = () => this.loadExtendedStats(forceRefresh);
+          if (window.requestIdleCallback) {
+            window.requestIdleCallback(run, { timeout: 1000 });
+          } else {
+            setTimeout(run, 200);
+          }
+        },
+
+        async loadExtendedStats(forceRefresh = false) {
+          const { agent, scope } = this.$store.app.filters;
+          this.$store.app.loading.stats_extended = true;
+          try {
+            const url = `/api/runs/stats?scope=${scope}&agent_type=${agent}&extended=1${forceRefresh ? '&refresh=1' : ''}`;
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error('Failed to load extended stats');
+            const data = await resp.json();
+
+            if (data.model_usage && Object.keys(data.model_usage).length) {
+              this.$store.stats.model_usage = data.model_usage;
+            }
+            if (data.totals) {
+              if (data.totals.input_tokens || data.totals.output_tokens) {
+                this.$store.stats.totals.input_tokens = data.totals.input_tokens || 0;
+                this.$store.stats.totals.output_tokens = data.totals.output_tokens || 0;
+                if (!this.$store.stats.totals.tokens) {
+                  this.$store.stats.totals.tokens = (data.totals.input_tokens || 0) + (data.totals.output_tokens || 0);
+                }
+              }
+            }
+            if (data.daily_activity && data.daily_activity.length) {
+              this.$store.stats.daily_activity = data.daily_activity;
+            }
+            if (data.hourly_activity && data.hourly_activity.length) {
+              this.$store.stats.hourly_activity = data.hourly_activity;
+            }
+            if (data.cache) {
+              this.$store.stats.cache = data.cache;
+            }
+
+            scheduleRenderCharts();
+          } catch (e) {
+            console.warn('Extended stats unavailable:', e);
+          } finally {
+            this.$store.app.loading.stats_extended = false;
+          }
+        },
+
+        async loadRefineStatus() {
+          this.$store.refine.loading.status = true;
+          try {
+            const resp = await fetch('/api/refine/status');
+            if (!resp.ok) throw new Error('Failed to load refine status');
+            const data = await resp.json();
+            this.$store.refine.status = data || {};
+          } catch (e) {
+            console.warn('Refine status unavailable:', e);
+          } finally {
+            this.$store.refine.loading.status = false;
+          }
+        },
+
+        async loadRefineReport() {
+          this.$store.refine.loading.report = true;
+          try {
+            const resp = await fetch('/api/refine/report');
+            if (!resp.ok) throw new Error('No refine report');
+            const data = await resp.json();
+            this.$store.refine.report = normalizeRefineReport(data);
+          } catch (e) {
+            console.warn('Refine report unavailable:', e);
+            this.$store.refine.report = emptyRefineReport();
+          } finally {
+            this.$store.refine.loading.report = false;
+          }
+        },
+
+        setRefineMode(mode) {
+          const normalized = mode === 'session' || mode === 'backfill' ? mode : 'window';
+          this.$store.refine.form.mode = normalized;
+          this.$store.refine.form.steps = defaultRefineSteps(normalized);
+        },
+
+        resetRefineOptions() {
+          this.$store.refine.form = defaultRefineForm();
+        },
+
+        buildRefinePayload() {
+          const { agent, scope } = this.$store.app.filters;
+          const form = this.$store.refine.form;
+          const scopeMap = { today: '1d', week: '7d', month: '30d', all: 'all' };
+          const mode = form.mode || 'window';
+          const steps = (form.steps || '').trim();
+
+          const payload = {
+            mode,
+            force: !!form.force,
+            steps: steps || null,
+          };
+
+          if (mode === 'session') {
+            payload.run_id = (form.run_id || '').trim();
+            return payload;
+          }
+
+          payload.agents = (form.agents || '').trim() || agent || 'all';
+          payload.max_sessions = Number(form.max_sessions || 50);
+
+          if (mode === 'window') {
+            payload.window = (form.window || '').trim() || scopeMap[scope] || '30d';
+            payload.since = (form.since || '').trim() || null;
+            payload.until = (form.until || '').trim() || null;
+          }
+
+          return payload;
+        },
+
+        async runRefineNow() {
+          if (DASHBOARD_READ_ONLY) {
+            Alpine.store('toasts').add('Dashboard is read-only. Use `lerim sync` or `lerim maintain` from CLI.', 'info');
+            return;
+          }
+          const payload = this.buildRefinePayload();
+          if (payload.mode === 'session' && !payload.run_id) {
+            Alpine.store('toasts').add('Session run_id is required in session mode', 'error');
+            return;
+          }
+          this.$store.refine.loading.run = true;
+          try {
+            const resp = await fetch('/api/refine/run', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Refine failed');
+            this.$store.refine.lastRun = data;
+            this.loadRefineStatus();
+            this.loadRefineReport();
+            if (payload.mode === 'session') {
+              const status = data.status || 'done';
+              Alpine.store('toasts').add(`Refine session ${status}`, status === 'completed' ? 'info' : 'error');
+            } else {
+              const processed = data.processed || 0;
+              const skipped = data.skipped || 0;
+              const failed = data.failed || 0;
+              Alpine.store('toasts').add(
+                `Refine done · processed ${processed}, skipped ${skipped}, failed ${failed}`,
+                failed > 0 ? 'error' : 'info'
+              );
+            }
+          } catch (e) {
+            Alpine.store('toasts').add(`Refine failed: ${e.message || 'unknown error'}`, 'error');
+          } finally {
+            this.$store.refine.loading.run = false;
+          }
+        },
+
+        async loadSettings() {
+          this.$store.settings.loading = true;
+          try {
+            const resp = await fetch('/api/config');
+            if (!resp.ok) throw new Error('Failed to load settings');
+            const data = await resp.json();
+            const effective = data.effective || {};
+            this.$store.settings.sources = data.sources || [];
+            this.$store.settings.form.agent_provider = effective.provider || 'anthropic';
+            this.$store.settings.form.agent_model = effective.agent_model || '';
+            this.$store.settings.form.agent_timeout = effective.agent_timeout || 120;
+            this.$store.settings.form.llm_provider = effective.llm_provider || 'zai';
+            this.$store.settings.form.llm_model = effective.llm_model || '';
+            this.$store.settings.status = `Loaded from ${data.user_config_path || '~/.lerim/config.toml'}`;
+            await this.loadModelOptions(this.$store.settings.form.agent_provider);
+          } catch (e) {
+            console.error('Failed to load settings:', e);
+            this.$store.settings.status = 'Failed to load settings.';
+            Alpine.store('toasts').add('Failed to load settings', 'error');
+          } finally {
+            this.$store.settings.loading = false;
+          }
+        },
+
+        async loadModelOptions(provider) {
+          try {
+            const selected = provider || this.$store.settings.form.agent_provider;
+            const resp = await fetch(`/api/config/models?provider=${encodeURIComponent(selected)}`);
+            if (!resp.ok) throw new Error('Failed to load model options');
+            const data = await resp.json();
+            this.$store.settings.model_options = data.models || [];
+          } catch (e) {
+            this.$store.settings.model_options = [];
+          }
+        },
+
+        async saveSettings() {
+          if (DASHBOARD_READ_ONLY) {
+            this.$store.settings.status = 'Read-only dashboard. Update settings via CLI config.';
+            Alpine.store('toasts').add('Read-only dashboard. Use `lerim config set` instead.', 'info');
+            return;
+          }
+          this.$store.settings.saving = true;
+          this.$store.settings.status = 'Saving...';
+          try {
+            const patch = {
+              agent: {
+                provider: this.$store.settings.form.agent_provider,
+                model: this.$store.settings.form.agent_model,
+                timeout: Number(this.$store.settings.form.agent_timeout || 120),
+              },
+              llm: {
+                provider: this.$store.settings.form.llm_provider,
+                model: this.$store.settings.form.llm_model,
+              },
+            };
+            const resp = await fetch('/api/config', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ patch }),
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Failed to save settings');
+            this.$store.settings.status = 'Saved to ~/.lerim/config.toml';
+            this.$store.settings.sources = data.sources || this.$store.settings.sources;
+            Alpine.store('toasts').add('Settings saved', 'info');
+          } catch (e) {
+            console.error('Failed to save settings:', e);
+            this.$store.settings.status = `Save failed: ${e.message || e}`;
+            Alpine.store('toasts').add('Failed to save settings', 'error');
+          } finally {
+            this.$store.settings.saving = false;
+          }
+        },
+
+        formatLines(aggregates) {
+          const added = aggregates?.totals?.lines_added || 0;
+          const removed = aggregates?.totals?.lines_removed || 0;
+          return `+${formatNumber(added)}/-${formatNumber(removed)}`;
+        },
+
+        async loadRuns(offset = 0) {
+          this.$store.app.loading.runs = true;
+          const { agent, scope } = this.$store.app.filters;
+          const search = this.$store.runs.search;
+          const useSearch = search.active || search.query || search.repo || search.status;
+
+          try {
+            let url = '';
+            if (useSearch) {
+              const params = new URLSearchParams();
+              params.set('query', search.query);
+              params.set('mode', search.query ? 'fts' : 'keyword');
+              params.set('limit', this.runsLimit);
+              params.set('offset', offset);
+              if (scope) params.set('scope', scope);
+              if (agent && agent !== 'all') params.set('agent_type', agent);
+              if (search.status) params.set('status', search.status);
+              if (search.repo) params.set('repo', search.repo);
+              url = `/api/search?${params.toString()}`;
+            } else {
+              url = `/api/runs?limit=${this.runsLimit}&offset=${offset}&scope=${scope}&agent_type=${agent}`;
+            }
+
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error('Failed');
+            const data = await resp.json();
+
+            if (data.mode === 'fts' && data.results) {
+              this.$store.runs.items = data.results || [];
+              this.$store.runs.pagination = data.pagination || { offset: 0, total: 0, has_more: false };
+            } else {
+            this.$store.runs.items = data.runs || [];
+            this.$store.runs.pagination = data.pagination || { offset: 0, total: 0, has_more: false };
+          }
+          this.$store.runs.selectedRun = null;
+          this.$store.runs.selectedIndex = -1;
+          this.$store.runs.transcript = [];
+          setAgenticScope(null);
+        } catch (e) {
+            console.error('Failed to load runs:', e);
+            Alpine.store('toasts').add('Failed to load runs', 'error');
+          } finally {
+            this.$store.app.loading.runs = false;
+          }
+        },
+
+        async loadTranscript(run) {
+          if (!run) return;
+          this.$store.app.loading.transcript = true;
+          try {
+            const params = new URLSearchParams();
+            params.set('source', run.source || 'trace');
+            const resp = await fetch(`/api/runs/${run.run_id}/messages?${params.toString()}`);
+            if (!resp.ok) throw new Error('Transcript not available');
+            const data = await resp.json();
+            this.$store.runs.transcript = data.messages || [];
+          } catch (e) {
+            console.error('Failed to load transcript:', e);
+            Alpine.store('toasts').add('Failed to load transcript', 'error');
+            this.$store.runs.transcript = [];
+          } finally {
+            this.$store.app.loading.transcript = false;
+          }
+        },
+
+        selectRun(index) {
+          const run = this.$store.runs.items[index];
+          if (!run) return;
+          this.$store.runs.selectedRun = run;
+          this.$store.runs.selectedIndex = index;
+          setAgenticScope(run);
+          this.loadTranscript(run);
+        },
+
+        searchRuns() {
+          this.$store.runs.search.active = true;
+          this.loadRuns(0);
+        },
+
+        clearSearch() {
+          this.$store.runs.search = { query: '', repo: '', status: '', active: false };
+          this.loadRuns(0);
+        },
+
+        togglePreview(runId) {
+          const current = this.$store.runs.previewOpen[runId] || false;
+          this.$store.runs.previewOpen = { ...this.$store.runs.previewOpen, [runId]: !current };
+        },
+
+        getAgentLetter(type) {
+          const map = { claude: 'C', codex: 'X', opencode: 'O' };
+          return map[type] || '?';
+        },
+
+        getStatusClass(run) {
+          const baseStatus = run.status || 'completed';
+          const statusValue = (run.error_count > 0 && baseStatus === 'completed') ? 'error' : baseStatus;
+          return statusValue === 'error' ? 'error' : (statusValue === 'running' ? 'running' : 'completed');
+        },
+
+        getStatusText(run) {
+          const baseStatus = run.status || 'completed';
+          return (run.error_count > 0 && baseStatus === 'completed') ? 'error' : baseStatus;
+        },
+
+        get searchSummary() {
+          const search = this.$store.runs.search;
+          const pagination = this.$store.runs.pagination;
+          const activeFilters = search.query || search.repo || search.status;
+          const total = pagination.total || 0;
+          const visible = this.$store.runs.items.length;
+
+          if (activeFilters) {
+            const queryLabel = search.query ? ` for "${search.query}"` : '';
+            return `Filtered runs${queryLabel}: ${total} (showing ${visible}).`;
+          }
+          return `Total runs: ${total}.`;
+        },
+
+        get paginationInfo() {
+          const p = this.$store.runs.pagination;
+          const currentPage = Math.floor(p.offset / this.runsLimit) + 1;
+          const totalPages = Math.ceil(p.total / this.runsLimit);
+          return `Page ${currentPage} of ${totalPages} (${p.total} sessions)`;
+        },
+
+        async loadMemories() {
+          this.$store.memories.loading = true;
+          const filters = this.$store.memories.filters;
+          try {
+            const params = new URLSearchParams();
+            if (filters.query) params.set('query', filters.query);
+            if (filters.type) params.set('type', filters.type);
+            if (filters.state) params.set('state', filters.state);
+            if (filters.project) params.set('project', filters.project);
+            const resp = await fetch(`/api/memories?${params.toString()}`);
+            if (!resp.ok) throw new Error('Failed to load memories');
+            const data = await resp.json();
+            this.$store.memories.items = data.items || [];
+            if (Number.isFinite(data.total)) {
+              this.$store.memories.summary = `${data.total} memories`;
+            } else {
+              this.$store.memories.summary = data.summary || '';
+            }
+            if (this.$store.memories.selectedId) {
+              const stillExists = this.$store.memories.items.some(m => m.id === this.$store.memories.selectedId);
+              if (!stillExists) {
+                this.$store.memories.selectedId = null;
+                this.$store.memories.selected = null;
+                this.$store.memories.draft = null;
+              }
+            }
+          } catch (e) {
+            console.error('Failed to load memories:', e);
+            Alpine.store('toasts').add('Failed to load memories', 'error');
+          } finally {
+            this.$store.memories.loading = false;
+          }
+        },
+
+        async selectMemory(memoryId) {
+          if (!memoryId) return;
+          if (
+            this.$store.memories.selectedId === memoryId &&
+            this.$store.memories.selected &&
+            this.$store.memories.selected.id === memoryId &&
+            this.$store.memories.selected.body
+          ) {
+            return;
+          }
+          this.$store.memories.selectedId = memoryId;
+          this.$store.memories.statusText = '';
+          try {
+            const resp = await fetch(`/api/memories/${memoryId}`);
+            if (!resp.ok) throw new Error('Memory not found');
+            const data = await resp.json();
+            const memory = data.memory;
+            if (!memory) throw new Error('Memory not found');
+            this.$store.memories.selected = memory;
+            this.$store.memories.draft = {
+              title: memory.title || '',
+              body: memory.body || '',
+              kind: memory.kind || 'pattern',
+              confidence: memory.confidence || 0,
+              tags: formatCommaList(memory.tags),
+            };
+            this.$store.memories.dirty = false;
+          } catch (e) {
+            console.error('Failed to load memory:', e);
+            Alpine.store('toasts').add('Failed to load memory', 'error');
+          }
+        },
+
+        markMemoryDirty() {
+          this.$store.memories.dirty = true;
+          this.$store.memories.statusText = 'Unsaved changes';
+        },
+
+        resetMemoryDraft() {
+          const memory = this.$store.memories.selected;
+          if (!memory) return;
+          this.$store.memories.draft = {
+            title: memory.title || '',
+            body: memory.body || '',
+            kind: memory.kind || 'pattern',
+            confidence: memory.confidence || 0,
+            tags: formatCommaList(memory.tags),
+          };
+          this.$store.memories.dirty = false;
+          this.$store.memories.statusText = 'Reset changes';
+        },
+
+        async saveMemory() {
+          if (DASHBOARD_READ_ONLY) {
+            this.$store.memories.statusText = 'Read-only dashboard. Use CLI memory commands for edits.';
+            Alpine.store('toasts').add('Read-only dashboard. Use `lerim memory` commands for edits.', 'info');
+            return;
+          }
+          const memoryId = this.$store.memories.selectedId;
+          if (!memoryId || !this.$store.memories.draft) return;
+          this.$store.memories.saving = true;
+          this.$store.memories.statusText = 'Saving...';
+          try {
+            const payload = {
+              title: this.$store.memories.draft.title,
+              body: this.$store.memories.draft.body,
+              kind: this.$store.memories.draft.kind,
+              confidence: this.$store.memories.draft.confidence,
+              tags: parseCommaList(this.$store.memories.draft.tags),
+            };
+            const resp = await fetch(`/api/memories/${memoryId}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            if (!resp.ok) throw new Error('Failed to update memory');
+            const data = await resp.json();
+            if (data.memory) {
+              this.$store.memories.selected = data.memory;
+            }
+            this.$store.memories.dirty = false;
+            this.$store.memories.statusText = 'Saved.';
+            this.loadMemories();
+          } catch (e) {
+            console.error('Failed to save memory:', e);
+            this.$store.memories.statusText = 'Save failed.';
+            Alpine.store('toasts').add('Failed to save memory', 'error');
+          } finally {
+            this.$store.memories.saving = false;
+          }
+        },
+
+        async deleteMemory() {
+          if (DASHBOARD_READ_ONLY) {
+            Alpine.store('toasts').add('Read-only dashboard. Use CLI memory commands for deletes.', 'info');
+            return;
+          }
+          const memoryId = this.$store.memories.selectedId;
+          if (!memoryId) return;
+          if (!confirm('Delete this memory?')) return;
+          this.$store.memories.deleting = true;
+          try {
+            const resp = await fetch(`/api/memories/${memoryId}`, { method: 'DELETE' });
+            if (!resp.ok) throw new Error('Failed to delete memory');
+            this.$store.memories.selectedId = null;
+            this.$store.memories.selected = null;
+            this.$store.memories.draft = null;
+            this.$store.memories.dirty = false;
+            this.$store.memories.statusText = '';
+            this.loadMemories();
+          } catch (e) {
+            console.error('Failed to delete memory:', e);
+            Alpine.store('toasts').add('Failed to delete memory', 'error');
+          } finally {
+            this.$store.memories.deleting = false;
+          }
+        },
+
+        async runReflect(preset, customPrompt) {
+          if (DASHBOARD_READ_ONLY) {
+            this.reflectOutput = 'Dashboard is read-only. Use `lerim chat` from CLI.';
+            return;
+          }
+          const run = this.$store.runs.selectedRun;
+          if (!run) {
+            this.reflectOutput = 'Select a run first.';
+            return;
+          }
+
+          this.reflectOutput = 'Reflecting...';
+          this.$store.app.loading.reflect = true;
+
+          try {
+            const resp = await fetch('/api/reflect', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                agent: run.agent_type,
+                session_id: run.run_id,
+                preset: preset || 'custom',
+                custom_prompt: customPrompt || '',
+                all_projects: true,
+              })
+            });
+
+            if (!resp.ok) throw new Error('Reflection failed');
+            const data = await resp.json();
+            this.reflectOutput = data.result || data.error || 'No results';
+          } catch (e) {
+            this.reflectOutput = 'Reflection failed: ' + e.message;
+          } finally {
+            this.$store.app.loading.reflect = false;
+          }
+        },
+
+        sortBy(field) {
+          if (this.sortField === field) {
+            this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+          } else {
+            this.sortField = field;
+            this.sortDir = 'desc';
+          }
+          this.$store.runs.items.sort((a, b) => {
+            let va = a[field], vb = b[field];
+            if (va == null) va = '';
+            if (vb == null) vb = '';
+            if (typeof va === 'string') va = va.toLowerCase();
+            if (typeof vb === 'string') vb = vb.toLowerCase();
+            if (va < vb) return this.sortDir === 'asc' ? -1 : 1;
+            if (va > vb) return this.sortDir === 'asc' ? 1 : -1;
+            return 0;
+          });
+          const sel = this.$store.runs.selectedRun;
+          if (sel) {
+            this.$store.runs.selectedIndex = this.$store.runs.items.findIndex(r => r.run_id === sel.run_id);
+          }
+        },
+
+        sortIndicator(field) {
+          if (this.sortField !== field) return '';
+          return this.sortDir === 'asc' ? '\u25B2' : '\u25BC';
+        },
+
+        formatNumber,
+        formatDuration,
+        formatDateTime,
+        relativeTime,
+        sanitizeSnippet,
+      };
+    }
+  </script>
+</body>
+</html>

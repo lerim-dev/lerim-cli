@@ -1,0 +1,91 @@
+# Lerim default configuration — shipped with the package.
+# Override in ~/.lerim/config.toml (user) or <repo>/.lerim/config.toml (project).
+# API keys come from environment variables only.
+
+[data]
+dir = "~/.lerim"
+
+[memory]
+scope = "project_fallback_global"   # project_fallback_global | project_only | global_only
+project_dir_name = ".lerim"
+
+[memory.decay]
+enabled = true
+decay_days = 180                    # days of no access before full decay
+min_confidence_floor = 0.1          # decay never drops below this multiplier
+archive_threshold = 0.2             # effective confidence below this → archive candidate
+recent_access_grace_days = 30       # recently accessed memories skip archiving
+
+[server]
+host = "127.0.0.1"
+port = 8765
+poll_interval_minutes = 5
+
+[roles.lead]
+provider = "openrouter"               # zai | openrouter | openai
+model = "z-ai/glm-4.7-flash"
+api_base = ""
+fallback_models = [
+  "zai:glm-4.7-flash",
+]
+timeout_seconds = 300
+max_iterations = 24
+
+[roles.explorer]
+provider = "openrouter"
+model = "z-ai/glm-4.7-flash"
+api_base = ""
+fallback_models = [
+  "zai:glm-4.7-flash",
+]
+timeout_seconds = 180
+max_iterations = 16
+
+[roles.extract]
+provider = "openrouter"
+model = "z-ai/glm-4.7-flash"
+api_base = ""
+fallback_models = [
+  "zai:glm-4.7-flash",
+]
+timeout_seconds = 180
+max_iterations = 24
+max_llm_calls = 24
+
+[roles.summarize]
+provider = "openrouter"
+model = "z-ai/glm-4.7-flash"
+api_base = ""
+fallback_models = [
+  "zai:glm-4.7-flash",
+]
+timeout_seconds = 180
+max_iterations = 24
+max_llm_calls = 24
+
+[tracing]
+enabled = false                          # set true or LERIM_TRACING=1 to enable
+include_httpx = false                    # capture raw HTTP request/response bodies
+include_content = true                   # include prompt/completion text in spans
+
+# --- Planned features (uncomment when implemented) ---
+# [embeddings]
+# provider = "local"
+# model = "Alibaba-NLP/gte-modernbert-base"
+# chunk_tokens = 800
+# chunk_overlap_tokens = 200
+# max_input_tokens = 8192
+
+# [search]
+# mode = "files"                       # files | fts | hybrid
+# enable_fts = false
+# enable_vectors = false
+# enable_graph = true
+# graph_depth = 1
+# graph_export = false
+
+# [paths]
+# claude_dir = "~/.claude/projects"
+# codex_dir = "~/.codex/sessions"
+# opencode_dir = "~/.local/share/opencode"
+# cursor_dir = "~/Library/Application Support/Cursor/User/globalStorage"

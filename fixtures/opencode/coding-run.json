@@ -1,0 +1,135 @@
+{
+  "schema_version": "0.1",
+  "run_id": "opencode-run-001-i9j0k1l2",
+  "agent_type": "opencode",
+  "status": "completed",
+  "started_at": "2026-01-24T16:00:00Z",
+  "ended_at": "2026-01-24T16:03:20Z",
+  "repo": {
+    "name": "data-pipeline",
+    "path": "/home/user/projects/data-pipeline",
+    "vcs": "git",
+    "branch": "main",
+    "commit": "789abc012def345678901234567890123456789a"
+  },
+  "workspace": {
+    "workspace_id": "ws-opencode-local",
+    "name": "OpenCode Local",
+    "path": "/home/user/projects",
+    "host": "dev-workstation"
+  },
+  "messages": [
+    {
+      "message_id": "msg-o001",
+      "role": "user",
+      "content": "Add retry logic to the data fetcher with exponential backoff",
+      "timestamp": "2026-01-24T16:00:00Z"
+    },
+    {
+      "message_id": "msg-o002",
+      "role": "assistant",
+      "content": "I'll add retry logic with exponential backoff to handle transient failures. Let me examine the current fetcher implementation.",
+      "timestamp": "2026-01-24T16:00:10Z",
+      "model": "claude-3-sonnet-20240229",
+      "provider": "anthropic",
+      "usage": {
+        "input_tokens": 95,
+        "output_tokens": 35,
+        "total_tokens": 130,
+        "cost_usd": 0.002
+      }
+    },
+    {
+      "message_id": "msg-o003",
+      "role": "assistant",
+      "content": "Done! I've added retry logic with exponential backoff (base 2 seconds, max 5 retries). The implementation handles connection errors, timeouts, and rate limits.",
+      "timestamp": "2026-01-24T16:03:10Z",
+      "model": "claude-3-sonnet-20240229",
+      "provider": "anthropic",
+      "usage": {
+        "input_tokens": 680,
+        "output_tokens": 245,
+        "total_tokens": 925,
+        "cost_usd": 0.012
+      }
+    }
+  ],
+  "tool_calls": [
+    {
+      "call_id": "oc-001",
+      "name": "read",
+      "status": "completed",
+      "input": {
+        "path": "src/fetcher.py"
+      },
+      "output": {
+        "lines": 145
+      },
+      "started_at": "2026-01-24T16:00:20Z",
+      "ended_at": "2026-01-24T16:00:21Z",
+      "duration_ms": 80
+    },
+    {
+      "call_id": "oc-002",
+      "name": "edit",
+      "status": "completed",
+      "input": {
+        "path": "src/fetcher.py",
+        "operation": "insert"
+      },
+      "started_at": "2026-01-24T16:01:00Z",
+      "ended_at": "2026-01-24T16:01:02Z",
+      "duration_ms": 1500
+    },
+    {
+      "call_id": "oc-003",
+      "name": "bash",
+      "status": "completed",
+      "input": {
+        "command": "python -m pytest tests/test_fetcher.py -v"
+      },
+      "output": {
+        "exit_code": 0
+      },
+      "started_at": "2026-01-24T16:02:00Z",
+      "ended_at": "2026-01-24T16:03:00Z",
+      "duration_ms": 60000
+    }
+  ],
+  "file_changes": [
+    {
+      "path": "src/fetcher.py",
+      "change_type": "modified",
+      "summary": "Added retry decorator with exponential backoff",
+      "bytes_changed": 892,
+      "timestamp": "2026-01-24T16:01:02Z"
+    },
+    {
+      "path": "tests/test_fetcher.py",
+      "change_type": "modified",
+      "summary": "Added tests for retry behavior",
+      "bytes_changed": 456,
+      "timestamp": "2026-01-24T16:01:30Z"
+    }
+  ],
+  "terminal_commands": [
+    {
+      "command": "python -m pytest tests/test_fetcher.py -v",
+      "cwd": "/home/user/projects/data-pipeline",
+      "exit_code": 0,
+      "stdout_snippet": "test_fetcher.py::test_retry_on_connection_error PASSED\ntest_fetcher.py::test_exponential_backoff PASSED\ntest_fetcher.py::test_max_retries_exceeded PASSED",
+      "started_at": "2026-01-24T16:02:00Z",
+      "ended_at": "2026-01-24T16:03:00Z",
+      "duration_ms": 60000
+    }
+  ],
+  "errors": [],
+  "usage": {
+    "input_tokens": 775,
+    "output_tokens": 280,
+    "total_tokens": 1055,
+    "cost_usd": 0.014,
+    "model": "claude-3-sonnet-20240229",
+    "provider": "anthropic"
+  }
+}

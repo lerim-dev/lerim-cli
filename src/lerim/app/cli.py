@@ -1,0 +1,897 @@
+"""Command-line interface for Lerim runtime, memory, and service operations."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from dataclasses import asdict
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Literal, cast
+
+import frontmatter
+
+from lerim import __version__
+from lerim.adapters.registry import (
+    KNOWN_PLATFORMS,
+    connect_platform,
+    get_connected_agents,
+    list_platforms,
+    load_platforms,
+    remove_platform,
+)
+from lerim.app.arg_utils import (
+    parse_agent_filter,
+    parse_csv,
+    parse_duration_to_seconds,
+)
+from lerim.app.dashboard import run_dashboard_server
+from lerim.app.daemon import resolve_window_bounds, run_maintain_once, run_sync_once
+from lerim.app.daemon import run_daemon_forever, run_daemon_once
+from lerim.config.project_scope import resolve_data_dirs
+from lerim.config.logging import configure_logging
+from lerim.config.settings import get_config
+from lerim.config.tracing import configure_tracing
+from lerim.memory.memory_repo import build_memory_paths, reset_memory_root
+from lerim.memory.memory_record import MemoryRecord, MemoryType, memory_folder, slugify
+from lerim.runtime.agent import LerimAgent
+from lerim.runtime.prompts.chat import build_chat_prompt, looks_like_auth_error
+from lerim.sessions.catalog import (
+    count_fts_indexed,
+    count_session_jobs_by_status,
+    latest_service_run,
+)
+
+
+def _emit(message: object = "", *, file: Any | None = None) -> None:
+    """Write one CLI output line to stdout or a provided file-like target."""
+    target = file if file is not None else sys.stdout
+    target.write(f"{message}\n")
+
+
+def _emit_structured(*, title: str, payload: dict[str, Any], as_json: bool) -> None:
+    """Emit a dict payload either as JSON or as key/value lines."""
+    if as_json:
+        _emit(json.dumps(payload, indent=2, ensure_ascii=True))
+        return
+    _emit(title)
+    for key, value in payload.items():
+        _emit(f"- {key}: {value}")
+
+
+def _hoist_global_json_flag(raw: list[str]) -> list[str]:
+    """Allow ``--json`` before or after subcommands by normalizing argv order."""
+    if "--json" not in raw:
+        return raw
+    return ["--json"] + [item for item in raw if item != "--json"]
+
+
+def _list_memory_files(memory_dir: Path) -> list[Path]:
+    """List all markdown files in canonical memory primitive folders."""
+    paths: list[Path] = []
+    for mtype in MemoryType:
+        folder = memory_dir / memory_folder(mtype)
+        if folder.exists():
+            paths.extend(sorted(folder.rglob("*.md")))
+    return paths
+
+
+def _read_memory_frontmatter(path: Path) -> dict[str, Any] | None:
+    """Read frontmatter from a memory markdown file. Returns None on parse error."""
+    try:
+        post = frontmatter.load(str(path))
+        fm = dict(post.metadata)
+        fm["_body"] = post.content
+        fm["_path"] = str(path)
+        return fm
+    except Exception:
+        return None
+
+
+def _format_memory_hit(fm: dict[str, Any]) -> str:
+    """Render one compact human-readable memory summary line."""
+    mid = fm.get("id", "?")
+    title = fm.get("title", "?")
+    confidence = fm.get("confidence", "?")
+    return f"{mid} conf={confidence} title={title}"
+
+
+def _cmd_connect(args: argparse.Namespace) -> int:
+    """Handle ``lerim connect`` actions (list/auto/remove/connect)."""
+    config = get_config()
+    platforms_path = config.platforms_path
+    action = getattr(args, "platform_name", None)
+
+    if action == "list" or action is None:
+        entries = list_platforms(platforms_path)
+        if not entries:
+            _emit("No platforms connected.")
+            return 0
+        _emit(f"Connected platforms: {len(entries)}")
+        for entry in entries:
+            status = "ok" if entry["exists"] else "missing"
+            _emit(
+                f"- {entry['name']}: {entry['path']} ({entry['session_count']} sessions, {status})"
+            )
+        return 0
+
+    if action == "auto":
+        connected = 0
+        for name in KNOWN_PLATFORMS:
+            result = connect_platform(platforms_path, name, custom_path=None)
+            if result.get("status") == "connected":
+                connected += 1
+        _emit(f"Auto connected: {connected}")
+        return 0
+
+    if action == "remove":
+        name = getattr(args, "extra_arg", None)
+        if not name:
+            _emit("Usage: lerim connect remove <platform>", file=sys.stderr)
+            return 2
+        removed = remove_platform(platforms_path, name)
+        _emit(f"Removed: {name}" if removed else f"Platform not connected: {name}")
+        return 0
+
+    name = action
+    if name not in KNOWN_PLATFORMS:
+        _emit(f"Unknown platform: {name}", file=sys.stderr)
+        _emit(f"Known platforms: {', '.join(KNOWN_PLATFORMS)}", file=sys.stderr)
+        return 2
+
+    existing = load_platforms(platforms_path)
+    existing_path = (existing.get("platforms", {}).get(name) or {}).get("path")
+    result = connect_platform(
+        platforms_path, name, custom_path=getattr(args, "path", None)
+    )
+    status = str(result.get("status") or "")
+    if status == "path_not_found":
+        _emit(f"Path not found: {result.get('path')}", file=sys.stderr)
+        return 1
+    if status == "unknown_platform":
+        _emit(f"Unknown platform: {name}", file=sys.stderr)
+        return 1
+
+    _emit(f"Connected: {name}")
+    _emit(f"- Path: {result.get('path')}")
+    _emit(f"- Sessions: {result.get('session_count')}")
+    if existing_path and existing_path == result.get("path"):
+        _emit("- Path unchanged, no initial reindex trigger.")
+    return 0
+
+
+def _cmd_sync(args: argparse.Namespace) -> int:
+    """Run one sync command invocation and print summary output."""
+    try:
+        window_start, window_end = resolve_window_bounds(
+            window=args.window,
+            since_raw=args.since,
+            until_raw=args.until,
+            parse_duration_to_seconds=parse_duration_to_seconds,
+        )
+    except ValueError as exc:
+        _emit(str(exc), file=sys.stderr)
+        return 2
+
+    code, summary = run_sync_once(
+        run_id=args.run_id,
+        agent_filter=parse_agent_filter(args.agent),
+        no_extract=args.no_extract,
+        force=args.force,
+        max_sessions=args.max_sessions,
+        dry_run=args.dry_run,
+        ignore_lock=args.ignore_lock,
+        trigger="manual",
+        window_start=window_start,
+        window_end=window_end,
+    )
+    payload = asdict(summary)
+    _emit_structured(title="Sync summary:", payload=payload, as_json=args.json)
+    return code
+
+
+def _cmd_maintain(args: argparse.Namespace) -> int:
+    """Run one maintain command invocation and print summary output."""
+    code, payload = run_maintain_once(
+        force=args.force,
+        dry_run=args.dry_run,
+    )
+    _emit_structured(title="Maintain summary:", payload=payload, as_json=args.json)
+    return code
+
+
+def _cmd_daemon(args: argparse.Namespace) -> int:
+    """Handle daemon commands for one-shot or continuous execution."""
+    if args.once:
+        payload = run_daemon_once()
+        _emit_structured(
+            title="Daemon once result:", payload=payload, as_json=args.json
+        )
+        return 0
+    run_daemon_forever(poll_seconds=args.poll_seconds)
+    return 0
+
+
+def _cmd_dashboard(args: argparse.Namespace) -> int:
+    """Run the dashboard server with provided host/port args."""
+    return run_dashboard_server(host=args.host, port=args.port)
+
+
+def search_memory(
+    question: str,
+    project_filter: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Search memory by keyword tokens with file-scan approach."""
+    config = get_config()
+    files = _list_memory_files(config.memory_dir)
+    all_fm: list[dict[str, Any]] = []
+    for path in files:
+        fm = _read_memory_frontmatter(path)
+        if fm:
+            all_fm.append(fm)
+    if not question.strip():
+        return all_fm[:limit]
+    tokens = [token.lower() for token in question.split() if token.strip()]
+    hits: list[dict[str, Any]] = []
+    for fm in all_fm:
+        haystack = " ".join(
+            [
+                str(fm.get("title", "")),
+                str(fm.get("_body", "")),
+                " ".join(fm.get("tags", [])),
+            ]
+        ).lower()
+        if any(token in haystack for token in tokens):
+            hits.append(fm)
+    return (hits or all_fm)[:limit]
+
+
+def _cmd_memory_search(args: argparse.Namespace) -> int:
+    """Search stored memories and print list or JSON output."""
+    hits = search_memory(args.query, limit=args.limit, project_filter=args.project)
+    if args.json:
+        _emit(json.dumps(hits, indent=2, ensure_ascii=True, default=str))
+        return 0
+    if not hits:
+        _emit("No matching memories.")
+        return 0
+    for fm in hits:
+        _emit(_format_memory_hit(fm))
+    return 0
+
+
+def _cmd_memory_list(args: argparse.Namespace) -> int:
+    """List recent memories, optionally filtered by project."""
+    config = get_config()
+    files = _list_memory_files(config.memory_dir)
+    items: list[dict[str, Any]] = []
+    for path in files:
+        fm = _read_memory_frontmatter(path)
+        if fm:
+            items.append(fm)
+    items = items[: args.limit]
+    if args.json:
+        _emit(json.dumps(items, indent=2, ensure_ascii=True, default=str))
+        return 0
+    for fm in items:
+        _emit(_format_memory_hit(fm))
+    return 0
+
+
+def _cmd_memory_add(args: argparse.Namespace) -> int:
+    """Add one memory item from CLI flags."""
+    config = get_config()
+    primitive = MemoryType(str(args.primitive or "learning"))
+    if primitive == MemoryType.summary:
+        _emit("Primitive 'summary' is not allowed in memory add", file=sys.stderr)
+        return 2
+    primitive_value = cast(
+        Literal["decision", "learning"],
+        "decision" if primitive == MemoryType.decision else "learning",
+    )
+    kind = str(args.kind or "insight")
+    record = MemoryRecord(
+        id=slugify(args.title),
+        primitive=primitive_value,
+        kind=kind,
+        title=args.title,
+        body=args.body,
+        confidence=args.confidence,
+        tags=parse_csv(args.tags),
+    )
+    folder = config.memory_dir / memory_folder(primitive)
+    folder.mkdir(parents=True, exist_ok=True)
+    filename = (
+        f"{datetime.now(timezone.utc).strftime('%Y%m%d')}-{slugify(args.title)}.md"
+    )
+    filepath = folder / filename
+    filepath.write_text(record.to_markdown(), encoding="utf-8")
+    _emit(f"Added memory: {record.id} -> {filepath}")
+    return 0
+
+
+def _cmd_memory_export(args: argparse.Namespace) -> int:
+    """Export memories as Markdown or JSON to stdout or a file."""
+    config = get_config()
+    files = _list_memory_files(config.memory_dir)
+    items: list[dict[str, Any]] = []
+    for path in files:
+        fm = _read_memory_frontmatter(path)
+        if fm:
+            items.append(fm)
+
+    if args.format == "json":
+        output = json.dumps(items, indent=2, ensure_ascii=True, default=str)
+    else:
+        lines = ["# Lerim Memory Export", ""]
+        for fm in items:
+            title = fm.get("title", "?")
+            mid = fm.get("id", "?")
+            confidence = fm.get("confidence", "?")
+            body = str(fm.get("_body", "")).strip()[:260]
+            lines.append(f"## {title} ({mid})")
+            lines.append(f"- confidence: {confidence}")
+            lines.append(body)
+            lines.append("")
+        output = "\n".join(lines)
+    if args.output:
+        path = Path(args.output).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            output + ("\n" if not output.endswith("\n") else ""), encoding="utf-8"
+        )
+        _emit(f"Exported: {path}")
+    else:
+        _emit(output)
+    return 0
+
+
+def _cmd_chat(args: argparse.Namespace) -> int:
+    """Run one chat query against the runtime agent."""
+    config = get_config()
+    memory_root = str(config.memory_dir)
+    hits: list[dict[str, Any]] = []
+    context_docs: list[dict[str, Any]] = []
+    prompt = build_chat_prompt(
+        args.question, hits, context_docs, memory_root=memory_root
+    )
+    agent = LerimAgent()
+    response, session_id = agent.chat(
+        prompt, cwd=str(Path.cwd()), memory_root=memory_root
+    )
+    if looks_like_auth_error(response):
+        _emit(response, file=sys.stderr)
+        return 1
+    if args.json:
+        _emit(
+            json.dumps(
+                {
+                    "response": response,
+                    "agent_session_id": session_id,
+                    "memory_ids": [fm.get("id", "") for fm in hits],
+                    "fallback_used": False,
+                },
+                indent=2,
+                ensure_ascii=True,
+            )
+        )
+    else:
+        _emit(response)
+    return 0
+
+
+def _cmd_memory_reset(args: argparse.Namespace) -> int:
+    """Reset memory/index trees for project/global roots."""
+    if not args.yes:
+        _emit("Refusing to reset without --yes", file=sys.stderr)
+        return 2
+    config = get_config()
+    resolved = resolve_data_dirs(
+        scope=config.memory_scope,
+        project_dir_name=config.memory_project_dir_name,
+        global_data_dir=config.global_data_dir or config.data_dir,
+        repo_path=Path.cwd(),
+    )
+    targets: list[Path] = []
+    selected_scope = str(args.scope or "both")
+    if selected_scope in {"project", "both"} and resolved.project_data_dir:
+        targets.append(resolved.project_data_dir)
+    if selected_scope in {"global", "both"}:
+        targets.append(resolved.global_data_dir)
+
+    seen: set[Path] = set()
+    summaries: list[dict[str, Any]] = []
+    for data_root in targets:
+        root = data_root.resolve()
+        if root in seen:
+            continue
+        seen.add(root)
+        layout = build_memory_paths(root)
+        result = reset_memory_root(layout)
+        summaries.append(
+            {"data_dir": str(root), "removed": result.get("removed") or []}
+        )
+
+    if args.json:
+        _emit(json.dumps({"reset": summaries}, indent=2, ensure_ascii=True))
+    else:
+        _emit("Memory reset completed:")
+        for item in summaries:
+            _emit(f"- {item['data_dir']}: removed={len(item['removed'])}")
+    return 0
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    """Print runtime status summary across memory, queue, and services."""
+    config = get_config()
+    memory_count = len(_list_memory_files(config.memory_dir))
+    payload = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "connected_agents": get_connected_agents(config.platforms_path),
+        "platforms": list_platforms(config.platforms_path),
+        "memory_count": memory_count,
+        "sessions_indexed_count": count_fts_indexed(),
+        "queue": count_session_jobs_by_status(),
+        "latest_sync": latest_service_run("sync"),
+        "latest_maintain": latest_service_run("maintain"),
+    }
+    if args.json:
+        _emit(json.dumps(payload, indent=2, ensure_ascii=True))
+    else:
+        _emit("Lerim status:")
+        _emit(f"- connected_agents: {len(payload['connected_agents'])}")
+        _emit(f"- memory_count: {payload['memory_count']}")
+        _emit(f"- sessions_indexed_count: {payload['sessions_indexed_count']}")
+        _emit(f"- queue: {payload['queue']}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Construct the canonical Lerim command-line parser."""
+    _F = argparse.RawDescriptionHelpFormatter  # noqa: N806
+    parser = argparse.ArgumentParser(
+        prog="lerim",
+        formatter_class=_F,
+        description="Lerim -- continual learning layer for coding agents.\n"
+        "Indexes agent sessions, extracts memories, and answers questions\n"
+        "using accumulated project knowledge.",
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit structured JSON instead of human-readable text (works with status, memory list, etc.)",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    # ── connect ──────────────────────────────────────────────────────
+    connect = sub.add_parser(
+        "connect",
+        formatter_class=_F,
+        help="Manage connected agent platforms",
+        description=(
+            "Register, list, or remove agent platform connections.\n"
+            "Lerim reads session data from connected platforms to build memory.\n\n"
+            "Supported platforms: claude, codex, cursor, opencode\n\n"
+            "Examples:\n"
+            "  lerim connect list              # show all connected platforms\n"
+            "  lerim connect auto              # auto-detect and connect all known platforms\n"
+            "  lerim connect claude             # connect the Claude platform\n"
+            "  lerim connect claude --path /custom/sessions\n"
+            "  lerim connect remove claude      # disconnect Claude"
+        ),
+    )
+    connect.add_argument(
+        "platform_name",
+        nargs="?",
+        help="Action or platform name: 'list' (show connections), 'auto' (connect all detected), "
+        "'remove' (disconnect, needs extra_arg), or a platform name to connect",
+    )
+    connect.add_argument(
+        "extra_arg",
+        nargs="?",
+        help="Used with 'remove' action -- the platform name to disconnect (e.g. lerim connect remove claude)",
+    )
+    connect.add_argument(
+        "--path",
+        help="Custom filesystem path to the platform's session store (overrides auto-detected path)",
+    )
+    connect.set_defaults(func=_cmd_connect)
+
+    # ── sync ─────────────────────────────────────────────────────────
+    sync = sub.add_parser(
+        "sync",
+        formatter_class=_F,
+        help="Index new sessions and extract memories (hot path)",
+        description=(
+            "Hot-path: discover new agent sessions from connected platforms,\n"
+            "enqueue them, and run DSPy extraction to create memory primitives.\n\n"
+            "Time window controls which sessions to scan. You can use:\n"
+            "  --window <duration>   a relative window like 7d, 24h, 30m (default: 30d)\n"
+            "  --window all          scan all sessions ever recorded\n"
+            "  --since / --until     absolute ISO-8601 bounds (overrides --window)\n\n"
+            "Examples:\n"
+            "  lerim sync                          # sync last 30 days (default)\n"
+            "  lerim sync --window 7d              # sync last 7 days only\n"
+            "  lerim sync --window all             # sync everything\n"
+            "  lerim sync --agent claude,codex     # only sync these platforms\n"
+            "  lerim sync --run-id abc123 --force  # re-extract a specific session\n"
+            "  lerim sync --since 2026-02-01T00:00:00Z --until 2026-02-08T00:00:00Z\n"
+            "  lerim sync --no-extract             # index and enqueue only, skip extraction\n"
+            "  lerim sync --dry-run                # preview what would happen, no writes\n"
+            "  lerim sync --max-sessions 100       # process up to 100 sessions"
+        ),
+    )
+    sync.add_argument(
+        "--run-id",
+        help="Target a single session by its run ID. Bypasses the normal index scan "
+        "and fetches this session directly. Use with --force to re-extract.",
+    )
+    sync.add_argument(
+        "--agent",
+        help="Comma-separated list of platforms to sync (e.g. 'claude,codex'). "
+        "Omit to sync all connected platforms.",
+    )
+    sync.add_argument(
+        "--window",
+        default="30d",
+        help="Time window for session discovery. Accepts durations like 30s, 2m, 1h, 7d, "
+        "or the literal 'all' to scan every session. Ignored when --since is set. (default: 30d)",
+    )
+    sync.add_argument(
+        "--since",
+        help="Absolute start bound (ISO-8601, e.g. 2026-02-01T00:00:00Z). Overrides --window.",
+    )
+    sync.add_argument(
+        "--until",
+        help="Absolute end bound (ISO-8601). Defaults to now if omitted. Only used with --since.",
+    )
+    sync.add_argument(
+        "--max-sessions",
+        type=int,
+        default=50,
+        help="Maximum number of sessions to extract in one run. (default: 50)",
+    )
+    sync.add_argument(
+        "--no-extract",
+        action="store_true",
+        help="Index and enqueue sessions but skip DSPy extraction entirely. "
+        "Useful to populate the queue without creating memories yet.",
+    )
+    sync.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-extraction of sessions that were already processed. "
+        "Without this, already-extracted sessions are skipped.",
+    )
+    sync.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview mode: skip all writes (no indexing, no enqueuing, no extraction). "
+        "Shows what would happen without changing anything.",
+    )
+    sync.add_argument(
+        "--ignore-lock",
+        action="store_true",
+        help="Skip the filesystem writer lock. Useful for debugging, but risks "
+        "corruption if another sync is running concurrently.",
+    )
+    sync.set_defaults(func=_cmd_sync)
+
+    # ── maintain ─────────────────────────────────────────────────────
+    maintain = sub.add_parser(
+        "maintain",
+        formatter_class=_F,
+        help="Refine existing memories offline (cold path)",
+        description=(
+            "Cold-path: offline memory refinement. Scans existing memories and\n"
+            "merges duplicates, archives low-value items, and consolidates related\n"
+            "memories. Archived items go to memory/archived/{decisions,learnings}/.\n\n"
+            "Examples:\n"
+            "  lerim maintain                # run one maintenance pass\n"
+            "  lerim maintain --force        # force maintenance even if recently run\n"
+            "  lerim maintain --dry-run      # preview only, no writes"
+        ),
+    )
+    maintain.add_argument(
+        "--force",
+        action="store_true",
+        help="Force maintenance even if a recent run was completed.",
+    )
+    maintain.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview mode: record a run but skip all actual memory changes.",
+    )
+    maintain.set_defaults(func=_cmd_maintain)
+
+    # ── daemon ───────────────────────────────────────────────────────
+    daemon = sub.add_parser(
+        "daemon",
+        formatter_class=_F,
+        help="Run recurring sync + maintain loop",
+        description=(
+            "Runs a continuous loop: sync (index + extract) then maintain (refine),\n"
+            "repeating at a configurable interval. Use --once for a single cycle.\n\n"
+            "Examples:\n"
+            "  lerim daemon                  # run forever with default poll interval\n"
+            "  lerim daemon --once           # run one sync+maintain cycle and exit\n"
+            "  lerim daemon --poll-seconds 120  # poll every 2 minutes"
+        ),
+    )
+    daemon.add_argument(
+        "--once",
+        action="store_true",
+        help="Run exactly one sync+maintain cycle and exit (instead of looping forever).",
+    )
+    daemon.add_argument(
+        "--poll-seconds",
+        type=int,
+        help="Seconds between cycles. Overrides config poll_interval_minutes. Minimum 30s.",
+    )
+    daemon.set_defaults(func=_cmd_daemon)
+
+    # ── dashboard ────────────────────────────────────────────────────
+    dashboard = sub.add_parser(
+        "dashboard",
+        formatter_class=_F,
+        help="Start local read-only dashboard web server",
+        description=(
+            "Launch a local HTTP dashboard to browse memories, sessions, and status.\n"
+            "Opens a read-only web UI -- no writes are performed.\n\n"
+            "Examples:\n"
+            "  lerim dashboard                          # start on default host/port\n"
+            "  lerim dashboard --host 0.0.0.0 --port 9000  # custom bind address"
+        ),
+    )
+    dashboard.add_argument(
+        "--host",
+        help="Bind address for the dashboard server (default: 127.0.0.1 or config value).",
+    )
+    dashboard.add_argument(
+        "--port",
+        type=int,
+        help="Bind port for the dashboard server (default: 8765 or config value).",
+    )
+    dashboard.set_defaults(func=_cmd_dashboard)
+
+    # ── memory (parent group) ────────────────────────────────────────
+    memory = sub.add_parser(
+        "memory",
+        formatter_class=_F,
+        help="Memory store operations (search, list, add, export, reset)",
+        description=(
+            "Subcommands for managing the memory store directly.\n"
+            "Memories are stored as markdown files in .lerim/memory/.\n\n"
+            "Subcommands:\n"
+            "  search   Search memories by keyword\n"
+            "  list     List recent memory items\n"
+            "  add      Create a new memory manually\n"
+            "  export   Export all memories to file or stdout\n"
+            "  reset    Destructive wipe of memory data"
+        ),
+    )
+    memory_sub = memory.add_subparsers(dest="memory_command")
+
+    memory_search = memory_sub.add_parser(
+        "search",
+        formatter_class=_F,
+        help="Search memories by keyword",
+        description=(
+            "Full-text keyword search across memory titles, bodies, and tags.\n"
+            "Matches are case-insensitive substrings.\n\n"
+            "Examples:\n"
+            "  lerim memory search 'database migration'\n"
+            "  lerim memory search pytest --limit 5"
+        ),
+    )
+    memory_search.add_argument(
+        "query", help="Search string to match against memory title, body, and tags."
+    )
+    memory_search.add_argument(
+        "--project", help="Filter results to a specific project (not yet implemented)."
+    )
+    memory_search.add_argument(
+        "--limit", type=int, default=20, help="Maximum results to return. (default: 20)"
+    )
+    memory_search.set_defaults(func=_cmd_memory_search)
+
+    memory_list = memory_sub.add_parser(
+        "list",
+        formatter_class=_F,
+        help="List recent memory items",
+        description=(
+            "Display a list of stored memories (decisions and learnings),\n"
+            "ordered by recency.\n\n"
+            "Examples:\n"
+            "  lerim memory list\n"
+            "  lerim memory list --limit 10\n"
+            "  lerim memory list --json       # structured JSON output"
+        ),
+    )
+    memory_list.add_argument(
+        "--project", help="Filter to a specific project (not yet implemented)."
+    )
+    memory_list.add_argument(
+        "--limit", type=int, default=50, help="Maximum items to display. (default: 50)"
+    )
+    memory_list.set_defaults(func=_cmd_memory_list)
+
+    memory_add = memory_sub.add_parser(
+        "add",
+        formatter_class=_F,
+        help="Manually create a new memory record",
+        description=(
+            "Create a single memory record from CLI flags.\n"
+            "Writes a markdown file to .lerim/memory/{decisions,learnings}/.\n\n"
+            "Examples:\n"
+            '  lerim memory add --title "Use uv for deps" --body "uv is faster than pip"\n'
+            '  lerim memory add --title "API auth pattern" --body "Use bearer tokens" '
+            "--primitive decision\n"
+            '  lerim memory add --title "Slow test" --body "Integration suite takes 5min" '
+            "--kind friction --confidence 0.9 --tags ci,testing"
+        ),
+    )
+    memory_add.add_argument(
+        "--title", required=True, help="Short descriptive title for the memory."
+    )
+    memory_add.add_argument(
+        "--body", required=True, help="Full body content of the memory."
+    )
+    memory_add.add_argument(
+        "--primitive",
+        default="learning",
+        choices=[item.value for item in MemoryType if item != MemoryType.summary],
+        help="Primitive type: 'decision' (a choice made) or 'learning' (an insight gained). (default: learning)",
+    )
+    memory_add.add_argument(
+        "--kind",
+        default="insight",
+        help="Semantic kind label. One of: insight, procedure, friction, pitfall, preference. (default: insight)",
+    )
+    memory_add.add_argument(
+        "--confidence",
+        type=float,
+        default=0.7,
+        help="Confidence score from 0.0 to 1.0. (default: 0.7)",
+    )
+    memory_add.add_argument(
+        "--tags",
+        help="Comma-separated tags for categorization (e.g. 'python,testing,ci').",
+    )
+    memory_add.set_defaults(func=_cmd_memory_add)
+
+    memory_export = memory_sub.add_parser(
+        "export",
+        formatter_class=_F,
+        help="Export all memories to file or stdout",
+        description=(
+            "Export every memory record as JSON or markdown.\n"
+            "Prints to stdout by default, or writes to a file with --output.\n\n"
+            "Examples:\n"
+            "  lerim memory export                          # markdown to stdout\n"
+            "  lerim memory export --format json            # JSON to stdout\n"
+            "  lerim memory export --format json --output memories.json"
+        ),
+    )
+    memory_export.add_argument(
+        "--project", help="Filter to a specific project (not yet implemented)."
+    )
+    memory_export.add_argument(
+        "--format",
+        choices=["json", "markdown"],
+        default="markdown",
+        help="Output format: 'json' (frontmatter dicts) or 'markdown' (heading + body preview). (default: markdown)",
+    )
+    memory_export.add_argument(
+        "--output",
+        help="File path to write to. Creates parent directories if needed. Omit to print to stdout.",
+    )
+    memory_export.set_defaults(func=_cmd_memory_export)
+
+    memory_reset = memory_sub.add_parser(
+        "reset",
+        formatter_class=_F,
+        help="DESTRUCTIVE: wipe memory, workspace, and index data",
+        description=(
+            "Irreversibly delete memory/, workspace/, and index/ under the selected\n"
+            "scope, then recreate canonical empty folders.\n\n"
+            "Scopes:\n"
+            "  project  -- reset <repo>/.lerim/ only\n"
+            "  global   -- reset ~/.lerim/ only (includes sessions DB)\n"
+            "  both     -- reset both project and global roots (default)\n\n"
+            "The sessions DB lives in global index/, so --scope project alone\n"
+            "does NOT reset the session queue. Use 'global' or 'both' for a full wipe.\n\n"
+            "Examples:\n"
+            "  lerim memory reset --yes                     # wipe everything\n"
+            "  lerim memory reset --scope project --yes     # project data only\n"
+            "  lerim memory reset --yes && lerim sync --max-sessions 5  # fresh start"
+        ),
+    )
+    memory_reset.add_argument(
+        "--scope",
+        choices=["project", "global", "both"],
+        default="both",
+        help="What to reset: 'project' (.lerim/ in repo), 'global' (~/.lerim/), or 'both'. (default: both)",
+    )
+    memory_reset.add_argument(
+        "--yes",
+        action="store_true",
+        help="Required safety flag to confirm destructive reset. Without this, the command refuses to run.",
+    )
+    memory_reset.set_defaults(func=_cmd_memory_reset)
+
+    # ── chat ─────────────────────────────────────────────────────────
+    chat = sub.add_parser(
+        "chat",
+        formatter_class=_F,
+        help="Ask a question using accumulated memory as context",
+        description=(
+            "One-shot query: ask Lerim a question and get an answer informed by\n"
+            "memories extracted from your agent sessions.\n\n"
+            "Examples:\n"
+            "  lerim chat 'What auth pattern do we use?'\n"
+            '  lerim chat "How is the database configured?" --limit 5'
+        ),
+    )
+    chat.add_argument(
+        "question", help="Your question (use quotes if it contains spaces)."
+    )
+    chat.add_argument(
+        "--project", help="Scope to a specific project (not yet implemented)."
+    )
+    chat.add_argument(
+        "--limit",
+        type=int,
+        default=12,
+        help="Maximum number of memory items to include as context. (default: 12)",
+    )
+    chat.set_defaults(func=_cmd_chat)
+
+    # ── status ───────────────────────────────────────────────────────
+    status = sub.add_parser(
+        "status",
+        formatter_class=_F,
+        help="Show runtime status (platforms, memory count, queue, last runs)",
+        description=(
+            "Print a summary of the current Lerim runtime state:\n"
+            "connected platforms, memory count, session queue stats,\n"
+            "and timestamps of the latest sync/maintain runs.\n\n"
+            "Examples:\n"
+            "  lerim status\n"
+            "  lerim status --json    # structured JSON output"
+        ),
+    )
+    status.set_defaults(func=_cmd_status)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entrypoint for CLI invocation with global flags and dispatch."""
+    configure_logging()
+    configure_tracing(get_config())
+    parser = build_parser()
+    args = parser.parse_args(_hoist_global_json_flag(list(argv or sys.argv[1:])))
+
+    if not getattr(args, "command", None):
+        parser.print_help()
+        return 0
+
+    if args.command == "memory" and not getattr(args, "memory_command", None):
+        parser.parse_args([args.command, "--help"])
+        return 0
+
+    handler = getattr(args, "func", None)
+    if handler is None:
+        parser.print_help()
+        return 2
+    return int(handler(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

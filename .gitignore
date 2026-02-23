@@ -1,0 +1,46 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+
+# Frontend dependencies
+dashboard/frontend/**/node_modules/
+
+
+# Agent pipeline state and reports
+out/agent-pipeline/
+automation/agent_pipeline/state.json
+
+# Worktrees (if inside repo)
+.agent-worktrees/
+.agent-pipeline/
+site/
+.claude/settings.local.json
+.claude/settings.local_.json
+
+
+.env
+*.local.toml
+.vscode/
+.cursor/
+.tmp/
+specs/
+.lerim/
+
+dev-docs/
+
+# Test artifacts
+snapshot_report.html
+qa_artifacts/*
+
+# Local browser/db state
+orb.db/
+
+AGENTS.md
+CLAUDE.md 

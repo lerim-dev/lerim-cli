@@ -1,0 +1,43 @@
+"""Session catalog and queue helpers."""
+
+from lerim.sessions.catalog import (
+    IndexedSession,
+    claim_session_jobs,
+    complete_session_job,
+    count_fts_indexed,
+    count_session_jobs_by_status,
+    enqueue_session_job,
+    fail_session_job,
+    fetch_session_doc,
+    get_indexed_run_ids,
+    index_new_sessions,
+    index_session_for_fts,
+    init_sessions_db,
+    latest_service_run,
+    list_session_jobs,
+    list_sessions_for_vectors,
+    list_sessions_window,
+    record_service_run,
+    update_session_extract_fields,
+)
+
+__all__ = [
+    "init_sessions_db",
+    "index_session_for_fts",
+    "fetch_session_doc",
+    "update_session_extract_fields",
+    "count_fts_indexed",
+    "get_indexed_run_ids",
+    "IndexedSession",
+    "index_new_sessions",
+    "list_sessions_window",
+    "list_sessions_for_vectors",
+    "enqueue_session_job",
+    "claim_session_jobs",
+    "complete_session_job",
+    "fail_session_job",
+    "list_session_jobs",
+    "count_session_jobs_by_status",
+    "record_service_run",
+    "latest_service_run",
+]
