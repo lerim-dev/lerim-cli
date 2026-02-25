@@ -65,6 +65,7 @@ Execution rules:
 - Read extract.json from artifact paths.
 - The summary pipeline writes the summary directly to memory_root/summaries/ via --memory-root. Do NOT write summary files yourself.
 - For candidate matching, use explore(query) to gather evidence.
+- You can call up to 4 explore() calls in the SAME tool-call turn for parallel execution when you have independent queries (e.g. one per extracted candidate).
 - Explorer subagent is read-only and returns evidence envelopes.
 - Lead agent is the only writer and final decider.
 - Deterministic decision policy for non-summary candidates:
