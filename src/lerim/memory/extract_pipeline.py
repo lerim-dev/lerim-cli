@@ -35,8 +35,10 @@ class MemoryExtractSignature(dspy.Signature):
     4) For each window, use llm_query() to extract only durable, high-value items:
        - decision: explicit stable choice / configuration / policy.
          Trigger words: "decision", "we will", "use X not Y", "always do", "never do", "set X to Y".
-       - learning: reusable lesson / fix / pitfall / friction signal.
-         Trigger words: "lesson", "fix", "found that", "struggled with", "wasted time on".
+       - learning: reusable lesson / fix / pitfall / friction signal / user preference / habit.
+         Trigger words: "lesson", "fix", "found that", "struggled with", "wasted time on",
+         "I prefer", "I like", "I want", "I always", "my style", "don't like", "hate when",
+         "keep it", "make sure", "never use", "always use", "I usually", "my convention".
        - When in doubt, prefer learning.
     5) For every extracted item, keep one short verbatim evidence quote (<=200 chars).
     6) After processing all windows, MERGE near-duplicates across windows.
@@ -48,15 +50,18 @@ class MemoryExtractSignature(dspy.Signature):
     - procedure: a step-by-step fix or workflow.
     - friction: a blocker, struggle, or time-waster.
     - pitfall: a mistake to avoid.
-    - preference: a soft preference (not a hard decision).
+    - preference: a user preference, habit, convention, or style choice.
+      Examples: coding style, tool choices, naming conventions, communication preferences,
+      workflow habits, formatting rules, library preferences.
 
     Tags: assign descriptive group/cluster labels for categorization. No limit on count.
-    Examples: queue, heartbeat, docker, ci-cd, patching, error-handling.
+    Examples: queue, heartbeat, docker, ci-cd, patching, error-handling, coding-style, naming.
 
     Focus on high-value items:
     - repeated struggles and blockers
     - lessons and fixes that worked
     - decisions to reuse later
+    - user preferences, habits, and conventions (what the user likes/dislikes, how they work)
     """
 
     transcript: str = dspy.InputField(
@@ -98,6 +103,9 @@ def _extract_candidates_with_rlm(
                 metrics=metrics or {},
             )
         except Exception:
+            result = None
+        # Fallback to Predict if RLM failed or returned empty candidates
+        if result is None or not getattr(result, "primitives", None):
             predictor = dspy.Predict(MemoryExtractSignature)
             result = predictor(
                 transcript=transcript,
@@ -201,6 +209,8 @@ if __name__ == "__main__":
                         '{"role":"user","content":"Queue jobs got stuck again. Heartbeat drift caused retries and duplicate claims."}',
                         '{"role":"assistant","content":"Fix worked: heartbeat every 15s, max_attempts=3, then dead_letter. Add metrics for retries and dead letters."}',
                         '{"role":"user","content":"Decision: do not copy traces into Lerim. Keep only session_path and metadata; extract directly from source file."}',
+                        '{"role":"user","content":"I prefer short functions, max 20 lines. I always want docstrings on every function. Never use abbreviations in variable names."}',
+                        '{"role":"assistant","content":"Got it. I will keep functions under 20 lines, add docstrings everywhere, and use full descriptive variable names."}',
                     ]
                 )
                 + "\n",
@@ -227,6 +237,7 @@ if __name__ == "__main__":
             assert len(body) >= 24, "self-test failed: body too short"
 
             text_blob = f"{title} {body}".lower()
+            kind_val = str(item.get("kind") or "").strip().lower()
             if any(
                 keyword in text_blob
                 for keyword in (
@@ -235,10 +246,18 @@ if __name__ == "__main__":
                     "file path",
                     "retry",
                     "friction",
+                    "short function",
+                    "docstring",
+                    "abbreviat",
+                    "variable name",
+                    "20 line",
                 )
             ):
                 quality_hits += 1
+            if kind_val == "preference":
+                quality_hits += 1
 
-        assert quality_hits >= 1, (
-            "self-test failed: extracted memories miss expected session signals"
+        assert quality_hits >= 2, (
+            "self-test failed: extracted memories miss expected session signals "
+            "(need at least technical + preference hits)"
         )
