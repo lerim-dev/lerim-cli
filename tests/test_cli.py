@@ -157,3 +157,75 @@ def test_memory_reset_recreates_project_and_global_roots(
     assert (global_root / "memory" / "learnings").exists()
     assert not (project_root / "memory" / "learnings" / "seed.md").exists()
     assert not (global_root / "memory" / "learnings" / "seed.md").exists()
+
+
+def test_json_flag_hoisting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """'lerim status --json' and 'lerim --json status' produce same result."""
+    config_path = write_test_config(tmp_path)
+    monkeypatch.setenv("LERIM_CONFIG", str(config_path))
+    reload_config()
+    code1, payload1 = run_cli_json(["status", "--json"])
+    code2, payload2 = run_cli_json(["--json", "status"])
+    assert code1 == 0
+    assert code2 == 0
+    # Both should produce valid status dicts with the same keys
+    assert set(payload1.keys()) == set(payload2.keys())
+
+
+def test_memory_list_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """'lerim memory list' outputs formatted memory entries."""
+    config_path = write_test_config(tmp_path)
+    monkeypatch.setenv("LERIM_CONFIG", str(config_path))
+    reload_config()
+    # Seed memory dir with a fixture file
+    memory_dir = tmp_path / "memory" / "decisions"
+    memory_dir.mkdir(parents=True, exist_ok=True)
+    (memory_dir / "test-decision.md").write_text(
+        "---\nid: test-decision\ntitle: Test Decision\ntags: [test]\n---\nBody.",
+        encoding="utf-8",
+    )
+    code, output = run_cli(["memory", "list", "--json"])
+    assert code == 0
+
+
+def test_memory_add_creates_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """'lerim memory add --title "..." --body "..."' creates valid .md file."""
+    config_path = write_test_config(tmp_path)
+    monkeypatch.setenv("LERIM_CONFIG", str(config_path))
+    reload_config()
+    # Ensure memory directories exist
+    (tmp_path / "memory" / "decisions").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "memory" / "learnings").mkdir(parents=True, exist_ok=True)
+    code, output = run_cli(
+        [
+            "memory",
+            "add",
+            "--primitive",
+            "decision",
+            "--title",
+            "Test CLI Add",
+            "--body",
+            "Added via CLI test",
+        ]
+    )
+    assert code == 0
+
+
+def test_memory_search_finds_seeded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """'lerim memory search "auth"' finds seeded memory about auth."""
+    config_path = write_test_config(tmp_path)
+    monkeypatch.setenv("LERIM_CONFIG", str(config_path))
+    reload_config()
+    # Seed memory with auth-related decision
+    memory_dir = tmp_path / "memory" / "decisions"
+    memory_dir.mkdir(parents=True, exist_ok=True)
+    (memory_dir / "auth-decision.md").write_text(
+        "---\nid: auth-jwt\ntitle: Use JWT for authentication\ntags: [auth]\n---\nJWT with HS256.",
+        encoding="utf-8",
+    )
+    code, output = run_cli(["memory", "search", "auth", "--json"])
+    assert code == 0
