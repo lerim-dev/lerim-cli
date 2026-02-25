@@ -312,10 +312,6 @@ lerim memory reset --yes        # wipe everything
 lerim sync --max-sessions 5     # re-sync newest conversations
 ```
 
-## Migration from Acreta
-
-If you previously used Acreta, the data directories have moved from `~/.acreta/` to `~/.lerim/` and from `<repo>/.acreta/` to `<repo>/.lerim/`. Existing data is not migrated automatically. Run `lerim memory reset --yes && lerim sync` to start fresh.
-
 ## Docs
 
 - Runtime architecture: `docs/architecture.md`
