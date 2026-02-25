@@ -279,15 +279,6 @@
     .status-pill.error { background: rgba(248, 113, 113, 0.15); color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
     .status-pill.running { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); }
 
-    .runs-grid {
-      display: grid;
-      gap: 1rem;
-    }
-
-    @media (min-width: 1200px) {
-      .runs-grid { grid-template-columns: 2fr 1.1fr; }
-    }
-
     .memory-grid {
       display: grid;
       gap: 1rem;
@@ -344,32 +335,6 @@
       color: var(--lerim-muted);
     }
 
-    .chat-message {
-      background: rgba(15, 23, 42, 0.35);
-      border: 1px solid rgba(34, 211, 238, 0.1);
-      border-radius: 12px;
-      padding: 0.75rem;
-      margin-bottom: 0.75rem;
-    }
-
-    .chat-message.user {
-      border-color: rgba(245, 158, 11, 0.3);
-    }
-
-    .chat-message.tool {
-      border-color: rgba(148, 163, 184, 0.25);
-    }
-
-    .chat-meta {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.7rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--lerim-muted);
-      margin-bottom: 0.4rem;
-    }
-
     .chat-block {
       font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       font-size: 0.78rem;
@@ -380,13 +345,183 @@
       color: #cbd5f5;
     }
 
-    .analysis-output {
-      background: rgba(15, 23, 42, 0.6);
-      border: 1px solid var(--lerim-border);
-      border-radius: 12px;
+    .run-viewer-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 5000;
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      padding: 14px;
+      background: rgba(6, 10, 18, 0.86);
+      backdrop-filter: blur(7px);
+    }
+
+    .run-viewer-shell {
+      width: min(1260px, 100%);
+      max-height: 100%;
+      border-radius: 16px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      background: linear-gradient(165deg, rgba(14, 22, 33, 0.98), rgba(10, 15, 24, 0.96));
+      box-shadow: 0 34px 70px rgba(0, 0, 0, 0.45);
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      overflow: hidden;
+    }
+
+    .run-viewer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.8rem;
+      padding: 0.9rem 1rem;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+      background: rgba(15, 23, 42, 0.55);
+    }
+
+    .run-viewer-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #dbe7fb;
+    }
+
+    .run-viewer-subtitle {
+      margin-top: 0.18rem;
+      font-size: 0.8rem;
+      color: var(--lerim-muted);
+    }
+
+    .run-viewer-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      padding: 0.72rem 1rem;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+      background: rgba(8, 12, 19, 0.48);
+    }
+
+    .run-viewer-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.28rem;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      padding: 0.23rem 0.58rem;
+      font-size: 0.72rem;
+      color: #c7d4e8;
+      background: rgba(15, 23, 42, 0.66);
+    }
+
+    .run-viewer-chat {
+      overflow: auto;
       padding: 1rem;
+      display: grid;
+      gap: 0.66rem;
+      background:
+        radial-gradient(1000px 600px at 16% -26%, rgba(34, 211, 238, 0.06), transparent 68%),
+        radial-gradient(900px 540px at 92% -34%, rgba(245, 158, 11, 0.08), transparent 70%),
+        rgba(8, 12, 19, 0.75);
+    }
+
+    .run-chat-row {
+      display: flex;
+    }
+
+    .run-chat-row.user {
+      justify-content: flex-end;
+    }
+
+    .run-chat-row.tool,
+    .run-chat-row.system,
+    .run-chat-row.assistant {
+      justify-content: flex-start;
+    }
+
+    .run-chat-bubble {
+      width: min(86%, 860px);
+      border-radius: 14px;
+      border: 1px solid rgba(148, 163, 184, 0.26);
+      background: rgba(12, 18, 28, 0.85);
+      padding: 0.72rem 0.8rem;
+      box-shadow: 0 10px 22px rgba(0, 0, 0, 0.22);
+    }
+
+    .run-chat-row.user .run-chat-bubble {
+      border-color: rgba(245, 158, 11, 0.38);
+      background: rgba(59, 35, 6, 0.65);
+    }
+
+    .run-chat-row.tool .run-chat-bubble {
+      border-color: rgba(34, 211, 238, 0.34);
+      background: rgba(7, 30, 36, 0.6);
+    }
+
+    .run-chat-row.system .run-chat-bubble {
+      border-color: rgba(148, 163, 184, 0.35);
+      background: rgba(30, 41, 59, 0.5);
+    }
+
+    .run-chat-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.8rem;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #9fb2cd;
+      margin-bottom: 0.34rem;
+    }
+
+    .run-chat-content {
       white-space: pre-wrap;
-      min-height: 120px;
+      word-break: break-word;
+      font-size: 0.86rem;
+      line-height: 1.45;
+      color: #dde7f6;
+    }
+
+    .run-chat-tool-toggle {
+      margin-top: 0.5rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 8px;
+      background: rgba(15, 23, 42, 0.35);
+      overflow: hidden;
+    }
+
+    .run-chat-tool-toggle summary {
+      cursor: pointer;
+      padding: 0.45rem 0.58rem;
+      color: #9fb2cd;
+      font-size: 0.74rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .run-chat-tool-toggle pre {
+      margin: 0;
+      border-top: 1px solid rgba(148, 163, 184, 0.18);
+      padding: 0.62rem;
+      white-space: pre-wrap;
+      max-height: 260px;
+      overflow: auto;
+    }
+
+    @media (max-width: 991.98px) {
+      .run-viewer-overlay {
+        padding: 0;
+      }
+
+      .run-viewer-shell {
+        width: 100%;
+        max-height: 100vh;
+        border-radius: 0;
+      }
+
+      .run-chat-bubble {
+        width: 96%;
+      }
     }
 
     .toast-container {
@@ -686,6 +821,7 @@
                 </div>
               </div>
               <div class="text-muted small mt-3" x-text="searchSummary"></div>
+              <div class="text-muted small mt-1">Select a session row, then click Open to view the full chat.</div>
             </div>
           </div>
 
@@ -716,6 +852,7 @@
                         <th @click="sortBy('total_tokens')">Tokens</th>
                         <th @click="sortBy('branch_display')">Project / Branch</th>
                         <th>ID</th>
+                        <th>Open</th>
                       </tr>
                     </thead>
                     <template x-for="(run, idx) in $store.runs.items" :key="run.run_id">
@@ -731,9 +868,12 @@
                           <td x-text="formatNumber(run.total_tokens)"></td>
                           <td class="text-muted" x-text="run.branch_display || run.project || '-'" :title="run.repo_name || ''"></td>
                           <td class="text-muted small" x-text="run.short_id || run.run_id?.slice(0,8) || '-'" :title="run.run_id"></td>
+                          <td>
+                            <button class="btn btn-sm btn-outline-primary" @click.stop="openRunViewer(idx)">Open</button>
+                          </td>
                         </tr>
                         <tr x-show="$store.runs.previewOpen[run.run_id]">
-                          <td colspan="10">
+                          <td colspan="11">
                             <div class="text-muted" x-html="sanitizeSnippet(run.snippet || run.preview || '')"></div>
                           </td>
                         </tr>
@@ -752,61 +892,6 @@
             </div>
           </div>
 
-          <div class="runs-grid mt-3">
-            <div class="card">
-              <div class="card-header">
-                <div class="card-title" x-text="$store.runs.selectedRun ? 'Transcript · ' + $store.runs.selectedRun.run_id.slice(0, 8) : 'Transcript'"></div>
-              </div>
-              <div class="card-body">
-                <template x-if="!$store.runs.selectedRun">
-                  <div class="text-muted">Select a run to view the transcript.</div>
-                </template>
-                <template x-if="$store.runs.selectedRun">
-                  <div>
-                    <template x-if="$store.app.loading.transcript">
-                      <div class="text-muted">Loading transcript...</div>
-                    </template>
-                    <template x-if="!$store.app.loading.transcript && $store.runs.transcript.length === 0">
-                      <div class="text-muted">No transcript data available.</div>
-                    </template>
-                    <template x-if="!$store.app.loading.transcript && $store.runs.transcript.length > 0">
-                      <div>
-                        <template x-for="(msg, i) in $store.runs.transcript" :key="i">
-                          <div class="chat-message" :class="msg.role || 'assistant'">
-                            <div class="chat-meta">
-                              <span x-text="msg.role === 'tool' ? (msg.tool_name || 'Tool') : msg.role"></span>
-                              <span x-text="msg.timestamp ? formatDateTime(msg.timestamp) : ''"></span>
-                            </div>
-                            <div x-show="msg.content" x-text="msg.content"></div>
-                            <div class="chat-block mt-2" x-show="msg.tool_input" x-text="msg.tool_input ? JSON.stringify(msg.tool_input, null, 2) : ''"></div>
-                            <div class="chat-block mt-2" x-show="msg.tool_output" x-text="msg.tool_output ? JSON.stringify(msg.tool_output, null, 2) : ''"></div>
-                          </div>
-                        </template>
-                      </div>
-                    </template>
-                  </div>
-                </template>
-              </div>
-            </div>
-            <div class="card">
-              <div class="card-header">
-                <div class="card-title">Reflect on this run</div>
-              </div>
-              <div class="card-body">
-                <p class="text-muted">Ask a custom question or use a preset.</p>
-                <div class="btn-list mb-3">
-                  <button class="btn btn-outline-secondary" @click="runReflect('summary')" :disabled="DASHBOARD_READ_ONLY">Summary</button>
-                  <button class="btn btn-outline-secondary" @click="runReflect('next_actions')" :disabled="DASHBOARD_READ_ONLY">Next Actions</button>
-                  <button class="btn btn-outline-secondary" @click="runReflect('pitfalls')" :disabled="DASHBOARD_READ_ONLY">Pitfalls</button>
-                </div>
-                <div class="input-group mb-3">
-                  <input class="form-control" type="text" placeholder="Ask about this run..." x-model="reflectInput" />
-                  <button class="btn btn-primary" @click="runReflect(null, reflectInput)" :disabled="DASHBOARD_READ_ONLY">Ask</button>
-                </div>
-                <div class="analysis-output" x-text="reflectOutput"></div>
-              </div>
-            </div>
-          </div>
         </section>
 
         <!-- Memories -->
@@ -1302,6 +1387,67 @@
             </div>
           </div>
         </section>
+
+        <div
+          class="run-viewer-overlay"
+          x-show="$store.runs.viewerOpen"
+          x-transition.opacity.duration.150ms
+          x-on:keydown.escape.window="closeRunViewer()"
+          @click.self="closeRunViewer()"
+          x-cloak
+        >
+          <div class="run-viewer-shell" role="dialog" aria-modal="true" aria-label="Session chat viewer">
+            <div class="run-viewer-header">
+              <div>
+                <div class="run-viewer-title">Session Chat</div>
+                <div class="run-viewer-subtitle" x-text="$store.runs.selectedRun ? ($store.runs.selectedRun.run_id || '') : ''"></div>
+              </div>
+              <button class="btn btn-outline-secondary" @click="closeRunViewer()">Close</button>
+            </div>
+            <div class="run-viewer-meta" x-show="$store.runs.selectedRun">
+              <span class="run-viewer-chip" x-text="($store.runs.selectedRun?.agent_type || 'unknown').toUpperCase()"></span>
+              <span class="run-viewer-chip" x-text="($store.runs.selectedRun?.branch_display || $store.runs.selectedRun?.project || '-')"></span>
+              <span class="run-viewer-chip" x-text="'Status: ' + getStatusText($store.runs.selectedRun || {})"></span>
+              <span class="run-viewer-chip" x-text="'Duration: ' + formatDuration($store.runs.selectedRun?.duration_ms)"></span>
+              <span class="run-viewer-chip" x-text="'Tokens: ' + formatNumber($store.runs.selectedRun?.total_tokens)"></span>
+              <span class="run-viewer-chip" x-text="'Messages: ' + formatNumber($store.runs.selectedRun?.message_count)"></span>
+            </div>
+            <div class="run-viewer-chat" x-ref="runViewerScroll">
+              <template x-if="!$store.runs.selectedRun">
+                <div class="text-muted">Select a run to view transcript chat.</div>
+              </template>
+              <template x-if="$store.runs.selectedRun && $store.app.loading.transcript">
+                <div class="text-muted">Loading transcript...</div>
+              </template>
+              <template x-if="$store.runs.selectedRun && !$store.app.loading.transcript && $store.runs.transcript.length === 0">
+                <div class="text-muted">No transcript data available for this run.</div>
+              </template>
+              <template x-if="$store.runs.selectedRun && !$store.app.loading.transcript && $store.runs.transcript.length > 0">
+                <div>
+                  <template x-for="(msg, i) in $store.runs.transcript" :key="i">
+                    <div class="run-chat-row" :class="getTranscriptRoleClass(msg)">
+                      <div class="run-chat-bubble">
+                        <div class="run-chat-meta">
+                          <span x-text="getTranscriptRoleLabel(msg)"></span>
+                          <span x-text="msg.timestamp ? formatDateTime(msg.timestamp) : ''"></span>
+                        </div>
+                        <div class="run-chat-content" x-show="formatTranscriptContent(msg.content)" x-text="formatTranscriptContent(msg.content)"></div>
+                        <details class="run-chat-tool-toggle" x-show="msg.tool_input !== undefined && msg.tool_input !== null && msg.tool_input !== ''">
+                          <summary>Tool Input</summary>
+                          <pre class="chat-block" x-text="formatTranscriptContent(msg.tool_input)"></pre>
+                        </details>
+                        <details class="run-chat-tool-toggle" x-show="msg.tool_output !== undefined && msg.tool_output !== null && msg.tool_output !== ''">
+                          <summary>Tool Output</summary>
+                          <pre class="chat-block" x-text="formatTranscriptContent(msg.tool_output)"></pre>
+                        </details>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
 
       </div>
     </div>
@@ -1852,7 +1998,6 @@
           stats_extended: false,
           runs: false,
           transcript: false,
-          reflect: false,
           searching: false,
         },
       });
@@ -1893,6 +2038,7 @@
         selectedRun: null,
         selectedIndex: -1,
         transcript: [],
+        viewerOpen: false,
         search: {
           query: '',
           repo: '',
@@ -1981,11 +2127,9 @@
           { id: 'refine', label: 'Pipeline' },
           { id: 'settings', label: 'Settings' },
         ],
-        runsLimit: 30,
+        runsLimit: 50,
         sortField: 'started_at',
         sortDir: 'desc',
-        reflectInput: '',
-        reflectOutput: '',
         memoryExplorerApp: null,
         init() {
           this.loadStats();
@@ -2455,11 +2599,12 @@
             this.$store.runs.items = data.runs || [];
             this.$store.runs.pagination = data.pagination || { offset: 0, total: 0, has_more: false };
           }
-          this.$store.runs.selectedRun = null;
-          this.$store.runs.selectedIndex = -1;
-          this.$store.runs.transcript = [];
-          setAgenticScope(null);
-        } catch (e) {
+            this.$store.runs.selectedRun = null;
+            this.$store.runs.selectedIndex = -1;
+            this.$store.runs.transcript = [];
+            this.$store.runs.viewerOpen = false;
+            setAgenticScope(null);
+          } catch (e) {
             console.error('Failed to load runs:', e);
             Alpine.store('toasts').add('Failed to load runs', 'error');
           } finally {
@@ -2477,6 +2622,9 @@
             if (!resp.ok) throw new Error('Transcript not available');
             const data = await resp.json();
             this.$store.runs.transcript = data.messages || [];
+            if (this.$store.runs.viewerOpen) {
+              this.$nextTick(() => this.scrollTranscriptToBottom());
+            }
           } catch (e) {
             console.error('Failed to load transcript:', e);
             Alpine.store('toasts').add('Failed to load transcript', 'error');
@@ -2493,6 +2641,51 @@
           this.$store.runs.selectedIndex = index;
           setAgenticScope(run);
           this.loadTranscript(run);
+        },
+
+        openRunViewer(index) {
+          if (!Number.isInteger(index) || index < 0) return;
+          this.selectRun(index);
+          this.$store.runs.viewerOpen = true;
+          if (!this.$store.app.loading.transcript) {
+            this.$nextTick(() => this.scrollTranscriptToBottom());
+          }
+        },
+
+        closeRunViewer() {
+          this.$store.runs.viewerOpen = false;
+        },
+
+        scrollTranscriptToBottom() {
+          const scroller = this.$refs.runViewerScroll;
+          if (!scroller) return;
+          scroller.scrollTop = scroller.scrollHeight;
+        },
+
+        formatTranscriptContent(value) {
+          if (value === undefined || value === null) return '';
+          if (typeof value === 'string') return value;
+          try {
+            return JSON.stringify(value, null, 2);
+          } catch {
+            return String(value);
+          }
+        },
+
+        getTranscriptRoleClass(msg) {
+          const role = (msg?.role || 'assistant').toLowerCase();
+          if (role === 'user') return 'user';
+          if (role === 'tool') return 'tool';
+          if (role === 'system') return 'system';
+          return 'assistant';
+        },
+
+        getTranscriptRoleLabel(msg) {
+          const role = (msg?.role || 'assistant').toLowerCase();
+          if (role === 'tool') return msg?.tool_name ? `Tool · ${msg.tool_name}` : 'Tool';
+          if (role === 'user') return 'User';
+          if (role === 'system') return 'System';
+          return 'Assistant';
         },
 
         searchRuns() {
@@ -2714,43 +2907,6 @@
             Alpine.store('toasts').add('Failed to delete memory', 'error');
           } finally {
             this.$store.memories.deleting = false;
-          }
-        },
-
-        async runReflect(preset, customPrompt) {
-          if (DASHBOARD_READ_ONLY) {
-            this.reflectOutput = 'Dashboard is read-only. Use `lerim chat` from CLI.';
-            return;
-          }
-          const run = this.$store.runs.selectedRun;
-          if (!run) {
-            this.reflectOutput = 'Select a run first.';
-            return;
-          }
-
-          this.reflectOutput = 'Reflecting...';
-          this.$store.app.loading.reflect = true;
-
-          try {
-            const resp = await fetch('/api/reflect', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                agent: run.agent_type,
-                session_id: run.run_id,
-                preset: preset || 'custom',
-                custom_prompt: customPrompt || '',
-                all_projects: true,
-              })
-            });
-
-            if (!resp.ok) throw new Error('Reflection failed');
-            const data = await resp.json();
-            this.reflectOutput = data.result || data.error || 'No results';
-          } catch (e) {
-            this.reflectOutput = 'Reflection failed: ' + e.message;
-          } finally {
-            this.$store.app.loading.reflect = false;
           }
         },
 
