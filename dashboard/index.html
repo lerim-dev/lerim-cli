@@ -2320,9 +2320,7 @@
 
         onFilterChange() {
           this.loadStats();
-          if (this.$store.app.activeTab === 'runs') {
-            this.loadRuns(0);
-          }
+          this.loadRuns(0);
         },
 
         refresh() {
