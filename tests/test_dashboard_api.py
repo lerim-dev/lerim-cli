@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+
 
 from lerim.app.dashboard import (
     _compute_stats,
     _detect_primitive,
+    _extract_session_details,
     _filter_memories,
     _parse_int,
     _scope_bounds,
@@ -70,6 +73,44 @@ def test_compute_stats_aggregation():
     assert stats["derived"]["duration_data_available"] is True
     assert "derived" in stats
     assert "by_agent" in stats
+
+
+def test_extract_session_details_reads_codex_payload_model(tmp_path):
+    """_extract_session_details reads model/tool from Codex payload rows."""
+    trace = tmp_path / "codex.jsonl"
+    rows = [
+        {"type": "session_meta", "payload": {"model_provider": "openai"}},
+        {
+            "type": "event_msg",
+            "payload": {
+                "type": "agent_message_delta",
+                "model": "gpt-5.3-codex",
+                "collaboration_mode": {"settings": {"model": "gpt-5.3-codex"}},
+            },
+        },
+        {"type": "response_item", "payload": {"type": "function_call", "name": "Read"}},
+    ]
+    trace.write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+    )
+    details = _extract_session_details(str(trace))
+    assert details["model"] == "gpt-5.3-codex"
+    assert details["tools"]["Read"] == 1
+
+
+def test_extract_session_details_reads_cursor_model(tmp_path):
+    """_extract_session_details reads model/tool from Cursor trace rows."""
+    trace = tmp_path / "cursor.jsonl"
+    rows = [
+        {"modelConfig": {"modelName": "composer-1.5"}},
+        {"type": "tool_call", "name": "read_file"},
+    ]
+    trace.write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+    )
+    details = _extract_session_details(str(trace))
+    assert details["model"] == "composer-1.5"
+    assert details["tools"]["read_file"] == 1
 
 
 def test_filter_memories_by_query():

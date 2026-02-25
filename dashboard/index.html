@@ -69,8 +69,9 @@
       width: 36px;
       height: 36px;
       border-radius: 10px;
-      background: linear-gradient(140deg, var(--lerim-accent-2), var(--lerim-accent));
+      object-fit: cover;
       box-shadow: 0 12px 24px rgba(15, 23, 42, 0.45);
+      flex-shrink: 0;
     }
 
     .lerim-title {
@@ -647,10 +648,10 @@
     <header class="navbar navbar-expand-md navbar-dark lerim-nav">
       <div class="container-xl">
         <div class="lerim-brand">
-          <span class="lerim-logo"></span>
+          <img class="lerim-logo" src="/assets/lerim.png" alt="Lerim logo" />
           <div>
             <div class="lerim-title">Lerim</div>
-            <div class="lerim-subtitle">Continuous memory + learning layer for agents</div>
+            <div class="lerim-subtitle">Continual learning layer for agents</div>
           </div>
         </div>
         <div class="navbar-nav ms-auto align-items-center gap-3 flex-row flex-wrap">

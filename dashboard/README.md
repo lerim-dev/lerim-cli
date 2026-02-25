@@ -4,6 +4,7 @@ Unified dashboard frontend lives here.
 
 - `index.html`: main dashboard page (tabs, Alpine stores, UI actions).
 - `assets/graph-explorer/`: built graph explorer bundle used by Memories tab.
+- `assets/lerim.png`: dashboard brand logo used in the top navbar.
 - `frontend/graph-explorer/`: Vite + TypeScript source for graph explorer bundle.
 
 Served by `src/lerim/app/dashboard.py` from this folder as the static root.
