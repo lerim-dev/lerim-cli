@@ -48,6 +48,7 @@ Answer the user question using the memory evidence below.
 Retrieval contract:
 - Lead handles retrieval strategy.
 - Delegate the memory-explorer subagent for two-phase memory retrieval.
+- You can call up to 4 explore() calls in the SAME tool-call turn for parallel execution when you have independent queries.
 - Search project-first, then global fallback.
 - Return evidence with file paths and line refs.
 - Use explicit ids/slugs only in related references (no wikilink syntax).

@@ -32,15 +32,23 @@ site/
 .tmp/
 specs/
 .lerim/
+.playwright-cli/
+.logfire/
+.pytest_cache/
+.ruff_cache/
+.claude/
+
 
 dev-docs/
 
 # Test artifacts
 snapshot_report.html
 qa_artifacts/*
+.pytest_tmp/
 
 # Local browser/db state
 orb.db/
 
 AGENTS.md
 CLAUDE.md 
+

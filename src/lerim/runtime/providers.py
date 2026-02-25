@@ -8,7 +8,7 @@ from typing import Literal
 import dspy
 from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.models.openrouter import OpenRouterModel
+from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
@@ -85,6 +85,7 @@ def _build_single_orchestration_model(
     model: str,
     api_base: str,
     config: Config,
+    openrouter_provider_order: tuple[str, ...] = (),
 ):
     """Build one PydanticAI model object for a provider/model pair."""
     provider_name = provider.strip().lower()
@@ -92,7 +93,20 @@ def _build_single_orchestration_model(
         provider_obj = OpenRouterProvider(
             api_key=_api_key_for_provider(config, "openrouter")
         )
-        return OpenRouterModel(model_name=model, provider=provider_obj)
+        settings = None
+        if openrouter_provider_order:
+            settings = OpenRouterModelSettings(
+                openrouter_provider={"order": list(openrouter_provider_order)}
+            )
+        return OpenRouterModel(
+            model_name=model, provider=provider_obj, settings=settings
+        )
+    if provider_name == "ollama":
+        provider_obj = OpenAIProvider(
+            api_key="ollama",
+            base_url=api_base or "http://127.0.0.1:11434/v1",
+        )
+        return OpenAIChatModel(model_name=model, provider=provider_obj)
     if provider_name in {"zai", "openai"}:
         provider_obj = OpenAIProvider(
             api_key=_api_key_for_provider(config, provider_name),
@@ -125,6 +139,7 @@ def build_orchestration_model_from_role(
         model=role_cfg.model,
         api_base=role_cfg.api_base,
         config=cfg,
+        openrouter_provider_order=role_cfg.openrouter_provider_order,
     )
     fallback_specs = [parse_fallback_spec(item) for item in role_cfg.fallback_models]
     if not fallback_specs:
@@ -135,76 +150,112 @@ def build_orchestration_model_from_role(
             model=item.model,
             api_base="",
             config=cfg,
+            openrouter_provider_order=role_cfg.openrouter_provider_order,
         )
         for item in fallback_specs
     ]
     return FallbackModel(primary, *fallback_models)
 
 
+def _build_dspy_lm_for_provider(
+    *,
+    provider: str,
+    model: str,
+    api_base: str,
+    cfg: Config,
+    role_label: str,
+    openrouter_provider_order: tuple[str, ...] = (),
+) -> dspy.LM:
+    """Build a single DSPy LM object from provider/model/api_base."""
+    if provider == "ollama":
+        return dspy.LM(
+            f"ollama_chat/{model}",
+            api_key="ollama",
+            api_base=api_base or _default_api_base("ollama"),
+            cache=False,
+        )
+    if provider == "openrouter":
+        api_key = _api_key_for_provider(cfg, "openrouter")
+        if not api_key:
+            raise RuntimeError(
+                f"missing_api_key:OPENROUTER_API_KEY required for {role_label}"
+            )
+        extra_body: dict | None = None
+        if openrouter_provider_order:
+            extra_body = {"provider": {"order": list(openrouter_provider_order)}}
+        return dspy.LM(
+            f"openrouter/{model}",
+            api_key=api_key,
+            api_base=api_base or _default_api_base("openrouter"),
+            cache=False,
+            extra_body=extra_body,
+        )
+    if provider in {"zai", "openai"}:
+        api_key = _api_key_for_provider(cfg, provider)
+        env_name = "ZAI_API_KEY" if provider == "zai" else "OPENAI_API_KEY"
+        if not api_key:
+            raise RuntimeError(f"missing_api_key:{env_name} required for {role_label}")
+        return dspy.LM(
+            f"openai/{model}",
+            api_key=api_key,
+            api_base=api_base or _default_api_base(provider),
+            cache=False,
+        )
+    raise RuntimeError(f"unsupported_dspy_provider:{provider}")
+
+
 def build_dspy_lm(
     role: DSPyRoleName,
     *,
     config: Config | None = None,
-    configure_global: bool = False,
 ) -> dspy.LM:
-    """Build a DSPy LM object for extract/summarize roles."""
+    """Build a DSPy LM object for extract/summarize roles.
+
+    Returns the LM without calling dspy.configure() globally.
+    Callers should use dspy.context(lm=lm) for thread-safe execution.
+    """
     cfg = config or get_config()
     role_cfg = _dspy_role_config(cfg, role)
-    provider = role_cfg.provider.strip().lower()
-    api_base = role_cfg.api_base or _default_api_base(provider)
+    return _build_dspy_lm_for_provider(
+        provider=role_cfg.provider.strip().lower(),
+        model=role_cfg.model,
+        api_base=role_cfg.api_base,
+        cfg=cfg,
+        role_label=f"roles.{role}.provider={role_cfg.provider}",
+        openrouter_provider_order=role_cfg.openrouter_provider_order,
+    )
 
-    if provider == "ollama":
-        lm = dspy.LM(
-            f"ollama_chat/{role_cfg.model}",
-            api_key="ollama",
-            api_base=api_base,
-            cache=False,
-        )
-    elif provider == "openrouter":
-        api_key = _api_key_for_provider(cfg, "openrouter")
-        if not api_key:
-            raise RuntimeError(
-                f"missing_api_key:OPENROUTER_API_KEY required for roles.{role}.provider=openrouter"
-            )
-        lm = dspy.LM(
-            f"openrouter/{role_cfg.model}",
-            api_key=api_key,
-            api_base=api_base,
-            cache=False,
-        )
-    elif provider in {"zai", "openai"}:
-        api_key = _api_key_for_provider(cfg, provider)
-        env_name = "ZAI_API_KEY" if provider == "zai" else "OPENAI_API_KEY"
-        if not api_key:
-            raise RuntimeError(
-                f"missing_api_key:{env_name} required for roles.{role}.provider={provider}"
-            )
-        lm = dspy.LM(
-            f"openai/{role_cfg.model}",
-            api_key=api_key,
-            api_base=api_base,
-            cache=False,
-        )
-    else:
-        raise RuntimeError(f"unsupported_dspy_provider:{provider}")
 
-    if configure_global:
-        dspy.configure(lm=lm)
-    return lm
+def build_dspy_sub_lm(
+    role: DSPyRoleName,
+    *,
+    config: Config | None = None,
+) -> dspy.LM:
+    """Build a DSPy sub-LM for RLM sub-calls (llm_query/llm_query_batched)."""
+    cfg = config or get_config()
+    role_cfg = _dspy_role_config(cfg, role)
+    return _build_dspy_lm_for_provider(
+        provider=role_cfg.sub_provider.strip().lower(),
+        model=role_cfg.sub_model,
+        api_base=role_cfg.api_base,
+        cfg=cfg,
+        role_label=f"roles.{role}.sub_provider={role_cfg.sub_provider}",
+        openrouter_provider_order=role_cfg.openrouter_provider_order,
+    )
 
 
 def list_provider_models(provider: str) -> list[str]:
     """Return static provider model suggestions for dashboard UI selections."""
     normalized = str(provider).strip().lower()
     options = {
-        "zai": ["glm-4.7-flash", "glm-4.5-air"],
+        "zai": ["glm-4.5-air"],
         "openrouter": [
+            "qwen/qwen3-coder-30b-a3b-instruct",
             "anthropic/claude-sonnet-4-5-20250929",
             "anthropic/claude-haiku-4-5-20251001",
-            "z-ai/glm-4.7-flash",
         ],
         "openai": ["gpt-5-mini", "gpt-5"],
-        "ollama": ["qwen3:8b", "qwen3:14b"],
+        "ollama": ["qwen3:8b", "qwen3:4b", "qwen3:14b"],
     }
     return list(options.get(normalized, []))
 
@@ -220,7 +271,7 @@ if __name__ == "__main__":
     if lead_cfg.fallback_models:
         assert isinstance(lead_model, FallbackModel)
 
-    dspy_model = build_dspy_lm("extract", config=cfg, configure_global=False)
+    dspy_model = build_dspy_lm("extract", config=cfg)
     assert isinstance(dspy_model, dspy.LM)
 
     print(

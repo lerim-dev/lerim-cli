@@ -40,11 +40,16 @@ class LLMRoleConfig:
     fallback_models: tuple[str, ...]
     timeout_seconds: int
     max_iterations: int
+    openrouter_provider_order: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class DSPyRoleConfig:
-    """Role config for DSPy extraction and summarization pipelines."""
+    """Role config for DSPy extraction and summarization pipelines.
+
+    sub_provider/sub_model configure the cheaper LM used for RLM sub-LLM calls
+    (llm_query / llm_query_batched).  When empty they fall back to provider/model.
+    """
 
     provider: str
     model: str
@@ -52,6 +57,9 @@ class DSPyRoleConfig:
     timeout_seconds: int
     max_iterations: int
     max_llm_calls: int
+    sub_provider: str
+    sub_model: str
+    openrouter_provider_order: tuple[str, ...]
 
 
 def load_toml_file(path: Path | None) -> dict[str, Any]:
@@ -140,12 +148,13 @@ def ensure_user_config_exists() -> Path:
 # Override only keys you need.
 
 # [roles.lead]
-# provider = "zai"
-# model = "glm-4.7-flash"
+# provider = "openrouter"
+# model = "qwen/qwen3-coder-30b-a3b-instruct"
 
 # [roles.extract]
 # provider = "ollama"
 # model = "qwen3:8b"
+# sub_model = "qwen3:4b"
 """,
         encoding="utf-8",
     )
@@ -167,7 +176,7 @@ def _ensure_project_config_exists(data_root: Path) -> Path:
 # scope = "project_fallback_global"
 
 # [roles.lead]
-# model = "glm-4.7-flash"
+# model = "qwen/qwen3-coder-30b-a3b-instruct"
 """,
         encoding="utf-8",
     )
@@ -244,6 +253,9 @@ class Config:
     server_host: str
     server_port: int
     poll_interval_minutes: int
+    sync_window_days: int
+    sync_max_sessions: int
+    sync_max_workers: int
 
     lead_role: LLMRoleConfig
     explorer_role: LLMRoleConfig
@@ -322,6 +334,9 @@ class Config:
                 "fallback_models": list(self.lead_role.fallback_models),
                 "timeout_seconds": self.lead_role.timeout_seconds,
                 "max_iterations": self.lead_role.max_iterations,
+                "openrouter_provider_order": list(
+                    self.lead_role.openrouter_provider_order
+                ),
             },
             "explorer_role": {
                 "provider": self.explorer_role.provider,
@@ -330,6 +345,9 @@ class Config:
                 "fallback_models": list(self.explorer_role.fallback_models),
                 "timeout_seconds": self.explorer_role.timeout_seconds,
                 "max_iterations": self.explorer_role.max_iterations,
+                "openrouter_provider_order": list(
+                    self.explorer_role.openrouter_provider_order
+                ),
             },
             "extract_role": {
                 "provider": self.extract_role.provider,
@@ -338,6 +356,11 @@ class Config:
                 "timeout_seconds": self.extract_role.timeout_seconds,
                 "max_iterations": self.extract_role.max_iterations,
                 "max_llm_calls": self.extract_role.max_llm_calls,
+                "sub_provider": self.extract_role.sub_provider,
+                "sub_model": self.extract_role.sub_model,
+                "openrouter_provider_order": list(
+                    self.extract_role.openrouter_provider_order
+                ),
             },
             "summarize_role": {
                 "provider": self.summarize_role.provider,
@@ -346,6 +369,11 @@ class Config:
                 "timeout_seconds": self.summarize_role.timeout_seconds,
                 "max_iterations": self.summarize_role.max_iterations,
                 "max_llm_calls": self.summarize_role.max_llm_calls,
+                "sub_provider": self.summarize_role.sub_provider,
+                "sub_model": self.summarize_role.sub_model,
+                "openrouter_provider_order": list(
+                    self.summarize_role.openrouter_provider_order
+                ),
             },
             "decay_enabled": self.decay_enabled,
             "decay_days": self.decay_days,
@@ -356,6 +384,16 @@ class Config:
             "tracing_include_httpx": self.tracing_include_httpx,
             "tracing_include_content": self.tracing_include_content,
         }
+
+
+def _to_string_tuple(value: Any) -> tuple[str, ...]:
+    """Normalize a TOML list/string into a tuple of non-empty strings."""
+    if isinstance(value, list):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    if isinstance(value, str):
+        parts = [item.strip() for item in value.split(",")]
+        return tuple(item for item in parts if item)
+    return ()
 
 
 def _build_llm_role(
@@ -371,6 +409,9 @@ def _build_llm_role(
         fallback_models=_to_fallback_models(raw.get("fallback_models")),
         timeout_seconds=_to_int(raw.get("timeout_seconds"), 300, minimum=30),
         max_iterations=_to_int(raw.get("max_iterations"), 24, minimum=1),
+        openrouter_provider_order=_to_string_tuple(
+            raw.get("openrouter_provider_order")
+        ),
     )
 
 
@@ -380,6 +421,8 @@ def _build_dspy_role(
     """Build one DSPy role config from TOML payload."""
     provider = _to_non_empty_string(raw.get("provider")) or default_provider
     model = _to_non_empty_string(raw.get("model")) or default_model
+    sub_provider = _to_non_empty_string(raw.get("sub_provider")) or provider
+    sub_model = _to_non_empty_string(raw.get("sub_model")) or model
     return DSPyRoleConfig(
         provider=provider,
         model=model,
@@ -387,6 +430,11 @@ def _build_dspy_role(
         timeout_seconds=_to_int(raw.get("timeout_seconds"), 120, minimum=10),
         max_iterations=_to_int(raw.get("max_iterations"), 24, minimum=1),
         max_llm_calls=_to_int(raw.get("max_llm_calls"), 24, minimum=1),
+        sub_provider=sub_provider,
+        sub_model=sub_model,
+        openrouter_provider_order=_to_string_tuple(
+            raw.get("openrouter_provider_order")
+        ),
     )
 
 
@@ -409,7 +457,7 @@ def load_config() -> Config:
         if isinstance(toml_data.get("roles", {}), dict)
         else {}
     )
-    runtime = (
+    _runtime = (  # noqa: F841 — reserved for future use
         toml_data.get("runtime", {})
         if isinstance(toml_data.get("runtime", {}), dict)
         else {}
@@ -449,8 +497,8 @@ def load_config() -> Config:
 
     lead_role = _build_llm_role(
         roles.get("lead", {}) if isinstance(roles.get("lead", {}), dict) else {},
-        default_provider="zai",
-        default_model="glm-4.7-flash",
+        default_provider="openrouter",
+        default_model="qwen/qwen3-coder-30b-a3b-instruct",
     )
     explorer_role = _build_llm_role(
         roles.get("explorer", {})
@@ -501,8 +549,11 @@ def load_config() -> Config:
         server_host=_to_non_empty_string(server.get("host")) or "127.0.0.1",
         server_port=port,
         poll_interval_minutes=_to_int(
-            server.get("poll_interval_minutes"), 5, minimum=1
+            server.get("poll_interval_minutes"), 30, minimum=1
         ),
+        sync_window_days=_to_int(server.get("sync_window_days"), 7, minimum=1),
+        sync_max_sessions=_to_int(server.get("sync_max_sessions"), 50, minimum=1),
+        sync_max_workers=_to_int(server.get("sync_max_workers"), 4, minimum=1),
         lead_role=lead_role,
         explorer_role=explorer_role,
         extract_role=extract_role,

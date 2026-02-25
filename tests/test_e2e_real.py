@@ -31,7 +31,11 @@ class TestE2EReal(unittest.TestCase):
             tmp_path = Path(tmp)
             config_path = write_test_config(
                 tmp_path,
-                agent={"provider": "zai", "model": "glm-4.7-flash", "timeout": 120},
+                agent={
+                    "provider": "openrouter",
+                    "model": "qwen/qwen3-coder-30b-a3b-instruct",
+                    "timeout": 120,
+                },
                 embeddings={"provider": "openai", "model": "text-embedding-3-small"},
             )
             os.environ["LERIM_CONFIG"] = str(config_path)

@@ -8,6 +8,7 @@ import sqlite3
 import socket
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -272,7 +273,8 @@ def resolve_window_bounds(
         return since, until
 
     if not window:
-        seconds = parse_duration_to_seconds("30d")
+        days = get_config().sync_window_days
+        seconds = parse_duration_to_seconds(f"{days}d")
         return until - timedelta(seconds=seconds), until
     if window == "all":
         try:
@@ -293,6 +295,60 @@ def resolve_window_bounds(
         return parsed, until
     seconds = parse_duration_to_seconds(window)
     return until - timedelta(seconds=seconds), until
+
+
+def _process_one_job(job: dict[str, Any]) -> dict[str, Any]:
+    """Process a single claimed session job. Thread-safe (own agent instance)."""
+    rid = str(job.get("run_id") or "")
+    if not rid:
+        return {"status": "skipped"}
+    attempts = max(int(job.get("attempts") or 1), 1)
+    try:
+        with _job_heartbeat(rid, heartbeat_session_job):
+            session_path = str(job.get("session_path") or "").strip()
+            if not session_path:
+                doc = fetch_session_doc(rid) or {}
+                session_path = str(doc.get("session_path") or "").strip()
+            agent = LerimAgent(default_cwd=str(Path.cwd()))
+            result = agent.sync(Path(session_path))
+    except Exception as exc:
+        fail_session_job(
+            rid,
+            error=str(exc),
+            retry_backoff_seconds=_retry_backoff_seconds(attempts),
+        )
+        return {"status": "failed"}
+    counts = result.get("counts") or {}
+    complete_session_job(rid)
+    return {
+        "status": "extracted",
+        "learnings_new": int(counts.get("add") or 0),
+        "learnings_updated": int(counts.get("update") or 0),
+    }
+
+
+def _process_claimed_jobs(
+    claimed: list[dict[str, Any]],
+    *,
+    max_workers: int = 4,
+) -> tuple[int, int, int, int]:
+    """Process claimed jobs in parallel. Returns (extracted, failed, new, updated)."""
+    extracted = 0
+    failed = 0
+    learnings_new = 0
+    learnings_updated = 0
+    workers = min(max(max_workers, 1), len(claimed)) if claimed else 1
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_process_one_job, job): job for job in claimed}
+        for future in as_completed(futures):
+            result = future.result()
+            if result["status"] == "extracted":
+                extracted += 1
+                learnings_new += result.get("learnings_new", 0)
+                learnings_updated += result.get("learnings_updated", 0)
+            elif result["status"] == "failed":
+                failed += 1
+    return extracted, failed, learnings_new, learnings_updated
 
 
 def run_sync_once(
@@ -367,6 +423,7 @@ def run_sync_once(
                         session_path=item.session_path,
                         start_time=item.start_time,
                         trigger=trigger,
+                        force=item.changed,
                     )
                     if queued:
                         queued_sessions += 1
@@ -389,34 +446,11 @@ def run_sync_once(
             target_run_ids = [
                 str(item.get("run_id") or "") for item in claimed if item.get("run_id")
             ]
-            lead_agent = LerimAgent(default_cwd=str(Path.cwd()))
-            for job in claimed:
-                rid = str(job.get("run_id") or "")
-                if not rid:
-                    continue
-                attempts = max(int(job.get("attempts") or 1), 1)
-                try:
-                    with _job_heartbeat(rid, heartbeat_session_job):
-                        session_path = str(job.get("session_path") or "").strip()
-                        if not session_path:
-                            doc = fetch_session_doc(rid) or {}
-                            session_path = str(doc.get("session_path") or "").strip()
-                        result = lead_agent.sync(Path(session_path))
-                except (
-                    Exception
-                ) as exc:  # pragma: no cover - defensive guard for runtime stability.
-                    failed += 1
-                    fail_session_job(
-                        rid,
-                        error=str(exc),
-                        retry_backoff_seconds=_retry_backoff_seconds(attempts),
-                    )
-                    continue
-                extracted += 1
-                counts = result.get("counts") or {}
-                learnings_new += int(counts.get("add") or 0)
-                learnings_updated += int(counts.get("update") or 0)
-                complete_session_job(rid)
+            max_workers = get_config().sync_max_workers
+            extracted, failed, learnings_new, learnings_updated = _process_claimed_jobs(
+                claimed,
+                max_workers=max_workers,
+            )
 
         summary = SyncSummary(
             indexed_sessions=indexed_sessions,
@@ -527,8 +561,9 @@ def run_maintain_once(
 
 def run_daemon_once() -> dict:
     """Run one daemon loop containing sync then maintain."""
+    config = get_config()
     window_start, window_end = resolve_window_bounds(
-        window="30d",
+        window=f"{config.sync_window_days}d",
         since_raw=None,
         until_raw=None,
         parse_duration_to_seconds=parse_duration_to_seconds,
@@ -539,7 +574,7 @@ def run_daemon_once() -> dict:
         agent_filter=None,
         no_extract=False,
         force=False,
-        max_sessions=50,
+        max_sessions=config.sync_max_sessions,
         dry_run=False,
         ignore_lock=False,
         trigger="daemon",

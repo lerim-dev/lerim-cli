@@ -7,6 +7,7 @@ from pathlib import Path
 
 from lerim.adapters.base import SessionRecord, ViewerMessage, ViewerSession
 from lerim.adapters.common import (
+    compute_file_hash,
     count_non_empty_files,
     in_window,
     load_jsonl_dict_lines,
@@ -150,21 +151,24 @@ def iter_sessions(
     traces_dir: Path | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
-    known_run_ids: set[str] | None = None,
+    known_run_hashes: dict[str, str] | None = None,
 ) -> list[SessionRecord]:
-    """Enumerate Codex sessions and build index summaries."""
+    """Enumerate Codex sessions, skipping those whose content hash is unchanged."""
     base = traces_dir or default_path()
     if base is None or not base.exists():
         return []
 
     records: list[SessionRecord] = []
     for path in base.rglob("*.jsonl"):
-        if known_run_ids and path.stem in known_run_ids:
-            continue
+        run_id = path.stem
+        file_hash = compute_file_hash(path)
+        if known_run_hashes and run_id in known_run_hashes:
+            if known_run_hashes[run_id] == file_hash:
+                continue
+
         entries = load_jsonl_dict_lines(path)
         if not entries:
             continue
-        run_id = path.stem
         start_time: datetime | None = None
         repo_name: str | None = None
         message_count = 0
@@ -226,6 +230,7 @@ def iter_sessions(
                 error_count=errors,
                 total_tokens=total_tokens,
                 summaries=summaries[:5],
+                content_hash=file_hash,
             )
         )
     return records

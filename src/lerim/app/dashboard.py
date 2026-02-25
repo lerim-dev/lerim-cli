@@ -1,10 +1,16 @@
-"""Read-only dashboard HTTP server and memory graph/query API handlers."""
+"""Read-only dashboard HTTP server and memory graph/query API handlers.
+
+Serves a single-page Alpine.js dashboard with ECharts visualizations.
+Backend provides JSON APIs for session stats, run listings, memory
+exploration, pipeline status, and config management.
+"""
 
 from __future__ import annotations
 
 import json
 import mimetypes
 import sqlite3
+import tomllib
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,7 +20,13 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from lerim.adapters.common import load_jsonl_dict_lines
 from lerim.config.logging import logger
-from lerim.config.settings import get_config, get_config_sources, get_user_config_path
+from lerim.config.settings import (
+    Config,
+    get_config,
+    get_config_sources,
+    get_user_config_path,
+    reload_config,
+)
 from lerim.memory.extract_pipeline import build_extract_report
 import frontmatter as fm_lib
 
@@ -34,11 +46,87 @@ DASHBOARD_DIR = REPO_ROOT / "dashboard"
 MAX_BODY_BYTES = 1_000_000
 READ_ONLY_MESSAGE = "Dashboard is read-only. Use CLI commands for write actions."
 _REPORT_CACHE: dict[str, Any] = {"at": None, "value": None}
+_SESSION_DETAILS_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def _iso_now() -> str:
     """Return current UTC time as ISO string."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _extract_session_details(session_path: str) -> dict[str, Any]:
+    """Extract model name and tool usage counts from a session JSONL trace.
+
+    Results are cached per session_path for the server lifetime.
+    Handles Claude, Codex, and OpenCode JSONL formats.
+    """
+    if session_path in _SESSION_DETAILS_CACHE:
+        return _SESSION_DETAILS_CACHE[session_path]
+    result: dict[str, Any] = {"model": "", "tools": {}}
+
+    def _pick_model(row: dict[str, Any], msg_obj: Any, payload_obj: Any) -> str:
+        """Pick best-effort model id from known trace formats."""
+        msg = msg_obj if isinstance(msg_obj, dict) else {}
+        payload = payload_obj if isinstance(payload_obj, dict) else {}
+        model_cfg = row.get("modelConfig")
+        model_info = row.get("modelInfo")
+        payload_info = payload.get("info")
+        collab = payload.get("collaboration_mode")
+        collab_settings = collab.get("settings") if isinstance(collab, dict) else None
+        payload_session = payload.get("session")
+        candidates: list[Any] = [
+            row.get("model"),
+            row.get("model_name"),
+            msg.get("model"),
+            model_cfg.get("modelName") if isinstance(model_cfg, dict) else "",
+            model_info.get("modelName") if isinstance(model_info, dict) else "",
+            payload.get("model"),
+            payload_info.get("model") if isinstance(payload_info, dict) else "",
+            collab_settings.get("model") if isinstance(collab_settings, dict) else "",
+            payload_session.get("model") if isinstance(payload_session, dict) else "",
+        ]
+        for value in candidates:
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
+
+    try:
+        rows = load_jsonl_dict_lines(Path(session_path).expanduser())
+        for row in rows:
+            # Claude format: message.model, tool_use blocks in content
+            msg = row.get("message") if isinstance(row.get("message"), dict) else {}
+            payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+
+            picked_model = _pick_model(row, msg, payload)
+            if picked_model and not result["model"]:
+                result["model"] = picked_model
+
+            for block in (
+                msg.get("content", []) if isinstance(msg.get("content"), list) else []
+            ):
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    name = str(block.get("name", "unknown"))
+                    result["tools"][name] = result["tools"].get(name, 0) + 1
+
+            # OpenCode format: model field at top level, tool_name field
+            if row.get("tool_name"):
+                name = str(row["tool_name"])
+                result["tools"][name] = result["tools"].get(name, 0) + 1
+
+            # Cursor format tool call events
+            if row.get("type") == "tool_call" and row.get("name"):
+                name = str(row["name"])
+                result["tools"][name] = result["tools"].get(name, 0) + 1
+
+            # Codex format: type=response_item with function_call
+            if payload.get("type") == "function_call":
+                name = str(payload.get("name", "unknown"))
+                result["tools"][name] = result["tools"].get(name, 0) + 1
+    except Exception:
+        pass
+    _SESSION_DETAILS_CACHE[session_path] = result
+    return result
 
 
 def _parse_int(
@@ -78,9 +166,9 @@ def _sqlite_rows(
     where: list[str] = []
     params: list[Any] = []
     if since is not None:
-        where.append("start_time >= ?")
+        where.append("(start_time >= ? OR start_time IS NULL)")
         params.append(since.isoformat())
-    where.append("start_time <= ?")
+    where.append("(start_time <= ? OR start_time IS NULL)")
     params.append(until.isoformat())
     if agent_type and agent_type != "all":
         where.append("agent_type = ?")
@@ -98,8 +186,34 @@ FROM session_docs {where_sql} ORDER BY start_time DESC, indexed_at DESC"""
 def _serialize_run(row: dict[str, Any]) -> dict[str, Any]:
     """Normalize a DB row to dashboard run JSON payload shape."""
     started = row.get("start_time")
+    repo_name = row.get("repo_name") or ""
+    session_path = str(row.get("session_path") or "")
+    # Extract project name from repo_path (folder path) or session_path
+    repo_path = str(row.get("repo_path") or "")
+    project = ""
+    if repo_path:
+        project = Path(repo_path).name
+    elif session_path:
+        # Claude paths: ~/.claude/projects/-Users-...-project/uuid.jsonl
+        sp = Path(session_path)
+        if "projects" in sp.parts:
+            idx = sp.parts.index("projects")
+            if idx + 1 < len(sp.parts):
+                encoded = sp.parts[idx + 1]
+                project = encoded.rsplit("-", 1)[-1] if "-" in encoded else encoded
+    # Build display label: prefer branch/project over raw path
+    branch_display = repo_name
+    if (
+        branch_display
+        and "/" in branch_display
+        and not branch_display.startswith(("feat/", "fix/", "main", "master", "dev"))
+    ):
+        # Looks like a full path, extract last component
+        branch_display = Path(branch_display).name
+    run_id = row.get("run_id") or ""
+    short_id = str(run_id)[:8] if run_id else ""
     return {
-        "run_id": row.get("run_id"),
+        "run_id": run_id,
         "agent_type": row.get("agent_type") or "unknown",
         "status": row.get("status") or "completed",
         "started_at": started,
@@ -108,7 +222,11 @@ def _serialize_run(row: dict[str, Any]) -> dict[str, Any]:
         "tool_call_count": int(row.get("tool_call_count") or 0),
         "error_count": int(row.get("error_count") or 0),
         "total_tokens": int(row.get("total_tokens") or 0),
-        "repo_name": row.get("repo_name") or "",
+        "repo_name": repo_name,
+        "project": project,
+        "branch_display": branch_display or project or short_id,
+        "short_id": short_id,
+        "session_path": session_path,
         "snippet": row.get("summary_text") or "",
         "preview": row.get("summary_text") or "",
         "source": "trace",
@@ -126,6 +244,8 @@ def _compute_stats(rows: list[sqlite3.Row]) -> dict[str, Any]:
         "duration_ms": 0,
         "input_tokens": 0,
         "output_tokens": 0,
+        "runs_with_errors": 0,
+        "unique_tools": 0,
     }
     by_agent: dict[str, dict[str, int]] = {}
     daily: dict[str, dict[str, int]] = {}
@@ -144,6 +264,8 @@ def _compute_stats(rows: list[sqlite3.Row]) -> dict[str, Any]:
         totals["errors"] += errors
         totals["tokens"] += tokens
         totals["duration_ms"] += duration
+        if errors > 0 or str(row["status"] or "").strip().lower() == "error":
+            totals["runs_with_errors"] += 1
 
         agent_stats = by_agent.setdefault(
             agent, {"runs": 0, "messages": 0, "tool_calls": 0, "tokens": 0}
@@ -174,17 +296,56 @@ def _compute_stats(rows: list[sqlite3.Row]) -> dict[str, Any]:
         hour_bucket["tool_calls"] += tools
         hour_bucket["tokens"] += tokens
 
+    # Extract model and tool usage from JSONL traces (cached per session)
+    model_usage: dict[str, dict[str, int]] = {}
+    tool_usage: dict[str, int] = {}
+    max_detail_sessions = 200
+    for row in rows[:max_detail_sessions]:
+        try:
+            session_path = str(row["session_path"] or "").strip()
+        except (KeyError, IndexError):
+            continue
+        if not session_path:
+            continue
+        details = _extract_session_details(session_path)
+        model_name = str(details.get("model") or "").strip()
+        if model_name:
+            bucket = model_usage.setdefault(
+                model_name, {"input": 0, "output": 0, "total": 0}
+            )
+            tokens = int(row["total_tokens"] or 0)
+            bucket["total"] += tokens
+            bucket["input"] += tokens // 2  # approximate split
+            bucket["output"] += tokens - (tokens // 2)
+        for tool_name, count in details.get("tools", {}).items():
+            tool_usage[tool_name] = tool_usage.get(tool_name, 0) + count
+
+    totals["unique_tools"] = len(tool_usage)
+    if totals["tokens"] > 0:
+        totals["input_tokens"] = totals["tokens"] // 2
+        totals["output_tokens"] = totals["tokens"] - totals["input_tokens"]
+
     runs = totals["runs"] or 1
+    duration_data_available = totals["duration_ms"] > 0
+    run_error_rate = round((totals["runs_with_errors"] / runs) * 100, 2)
+    avg_messages = round(totals["messages"] / runs, 2)
+    avg_tool_calls = round(totals["tool_calls"] / runs, 2)
+    avg_duration = round(totals["duration_ms"] / runs, 2)
     derived = {
-        "avg_messages_per_run": round(totals["messages"] / runs, 2),
-        "avg_tool_calls_per_run": round(totals["tool_calls"] / runs, 2),
-        "avg_duration_ms": round(totals["duration_ms"] / runs, 2),
+        "avg_messages_per_session": avg_messages,
+        "avg_tool_calls_per_session": avg_tool_calls,
+        "avg_session_duration_ms": avg_duration,
+        "error_rate": run_error_rate,
+        "duration_data_available": duration_data_available,
+        # Backward-compatible aliases.
+        "avg_messages_per_run": avg_messages,
+        "avg_tool_calls_per_run": avg_tool_calls,
+        "avg_duration_ms": avg_duration,
+        "run_error_rate": run_error_rate,
     }
     daily_activity = []
     for day in sorted(daily.keys()):
         item = {"date": day, **daily[day]}
-        for agent in ("claude", "codex", "opencode", "cursor", "cline"):
-            item.setdefault(agent, 0)
         daily_activity.append(item)
     hourly_activity = []
     for hour in sorted(hourly.keys()):
@@ -193,8 +354,8 @@ def _compute_stats(rows: list[sqlite3.Row]) -> dict[str, Any]:
         "totals": totals,
         "derived": derived,
         "by_agent": by_agent,
-        "model_usage": {},
-        "tool_usage": {},
+        "model_usage": model_usage,
+        "tool_usage": tool_usage,
         "daily_activity": daily_activity,
         "hourly_activity": hourly_activity,
         "cache": {
@@ -289,9 +450,22 @@ def _filter_memories(
     items = all_items
     if type_filter:
         items = [item for item in items if _detect_primitive(item) == type_filter]
-    # state_filter is no longer supported (lifecycle_state removed)
-    _ = state_filter
-    _ = project_filter
+    if state_filter:
+        items = [
+            item
+            for item in items
+            if str(item.get("kind", "")).lower() == state_filter.lower()
+        ]
+    if project_filter:
+        token = project_filter.strip().lower()
+        if token:
+            items = [
+                item
+                for item in items
+                if token in str(item.get("source", "")).lower()
+                or token in str(item.get("_path", "")).lower()
+                or any(token in str(t).lower() for t in item.get("tags", []))
+            ]
     if query:
         token = query.strip().lower()
         if token:
@@ -323,8 +497,35 @@ def _edge_id(source: str, target: str, kind: str) -> str:
 def _memory_graph_options(items: list[dict[str, Any]]) -> dict[str, list[str]]:
     """Return available filter options derived from loaded memory items."""
     types = sorted({_detect_primitive(fm) for fm in items})
+    kinds = sorted({str(fm.get("kind", "")) for fm in items if fm.get("kind")})
     tags = sorted({str(t) for fm in items for t in fm.get("tags", []) if t})
-    return {"types": types, "states": [], "projects": [], "tags": tags}
+    projects: set[str] = set()
+    ignore_parts = {
+        ".",
+        "..",
+        "Users",
+        "home",
+        "codes",
+        "personal",
+        "memory",
+        "decisions",
+        "learnings",
+        "summaries",
+    }
+    for fm in items:
+        # Try to extract project from file path
+        path = str(fm.get("_path", ""))
+        if ".lerim" in path:
+            parent = path.split(".lerim")[0].rstrip("/")
+            if parent:
+                projects.add(Path(parent).name)
+    return {
+        "types": types,
+        "kinds": kinds,
+        "states": [],
+        "projects": sorted(projects),
+        "tags": tags,
+    }
 
 
 def _graph_filter_values(filters: dict[str, Any], key: str) -> list[str]:
@@ -511,6 +712,14 @@ def _build_memory_graph_payload(
     if truncated:
         warnings.append("Result truncated to requested node/edge limits.")
 
+    return {
+        "nodes": node_values,
+        "edges": edge_values,
+        "total_memories": matched_memories,
+        "truncated": truncated,
+        "warnings": warnings,
+    }
+
 
 def _memory_graph_query(payload: dict[str, Any]) -> dict[str, Any]:
     """Execute memory graph query with filters and return bounded payload."""
@@ -612,6 +821,128 @@ def _memory_graph_expand(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _serialize_full_config(config: Config) -> dict[str, Any]:
+    """Serialize full Config dataclass to a dashboard-friendly JSON dict."""
+
+    def _role_dict(role: Any) -> dict[str, Any]:
+        """Convert LLMRoleConfig or DSPyRoleConfig to a dict."""
+        base: dict[str, Any] = {
+            "provider": role.provider,
+            "model": role.model,
+            "api_base": getattr(role, "api_base", ""),
+            "timeout_seconds": role.timeout_seconds,
+            "max_iterations": role.max_iterations,
+            "openrouter_provider_order": list(
+                getattr(role, "openrouter_provider_order", ())
+            ),
+        }
+        if hasattr(role, "fallback_models"):
+            base["fallback_models"] = list(role.fallback_models)
+        if hasattr(role, "sub_model"):
+            base["sub_model"] = role.sub_model
+        if hasattr(role, "sub_provider"):
+            base["sub_provider"] = role.sub_provider
+        if hasattr(role, "max_llm_calls"):
+            base["max_llm_calls"] = role.max_llm_calls
+        return base
+
+    return {
+        "server": {
+            "host": config.server_host,
+            "port": config.server_port,
+            "poll_interval_minutes": config.poll_interval_minutes,
+            "sync_window_days": config.sync_window_days,
+            "sync_max_sessions": config.sync_max_sessions,
+            "sync_max_workers": config.sync_max_workers,
+        },
+        "memory": {
+            "scope": config.memory_scope,
+            "dir": str(config.memory_dir),
+        },
+        "roles": {
+            "lead": _role_dict(config.lead_role),
+            "explorer": _role_dict(config.explorer_role),
+            "extract": _role_dict(config.extract_role),
+            "summarize": _role_dict(config.summarize_role),
+        },
+        "tracing": {
+            "enabled": config.tracing_enabled,
+            "include_httpx": config.tracing_include_httpx,
+            "include_content": config.tracing_include_content,
+        },
+        "data_dir": str(config.data_dir),
+    }
+
+
+def _save_config_patch(patch: dict[str, Any]) -> dict[str, Any]:
+    """Apply config patch to user config TOML file and return updated config.
+
+    Reads existing ~/.lerim/config.toml, merges the patch, writes back.
+    Returns the new effective config.
+    """
+    user_path = get_user_config_path()
+    user_path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing: dict[str, Any] = {}
+    if user_path.exists():
+        with open(user_path, "rb") as fh:
+            existing = tomllib.load(fh)
+
+    def deep_merge(base: dict, overlay: dict) -> dict:
+        """Recursively merge overlay into base."""
+        merged = dict(base)
+        for key, value in overlay.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = deep_merge(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+
+    merged = deep_merge(existing, patch)
+
+    # Write back as TOML (simple serializer, no tomli_w needed)
+    lines = ["# Lerim user config (managed by dashboard)\n"]
+    _toml_write_dict(lines, merged, prefix="")
+    user_path.write_text("".join(lines), encoding="utf-8")
+
+    # Clear cached config so next get_config() reads fresh
+    return _serialize_full_config(reload_config())
+
+
+def _toml_write_dict(lines: list[str], data: dict[str, Any], prefix: str) -> None:
+    """Write a dict as TOML lines. Handles nested tables and basic types."""
+    scalars = {}
+    tables = {}
+    for key, value in data.items():
+        if isinstance(value, dict):
+            tables[key] = value
+        else:
+            scalars[key] = value
+    for key, value in scalars.items():
+        lines.append(f"{key} = {_toml_value(value)}\n")
+    for key, value in tables.items():
+        section = f"{prefix}{key}" if not prefix else f"{prefix}.{key}"
+        lines.append(f"\n[{section}]\n")
+        _toml_write_dict(lines, value, section)
+
+
+def _toml_value(value: Any) -> str:
+    """Serialize a Python value to TOML literal."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return str(value)
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(value, (list, tuple)):
+        items = ", ".join(_toml_value(item) for item in value)
+        return f"[{items}]"
+    return f'"{value}"'
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     """HTTP handler for read-only dashboard APIs and static assets."""
 
@@ -623,7 +954,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _json(self, payload: dict | list, status: int = HTTPStatus.OK) -> None:
         """Write JSON response with status code."""
-        body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
+        body = json.dumps(payload, ensure_ascii=True, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -723,9 +1054,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         where = []
         params: list[Any] = []
         if since is not None:
-            where.append("d.start_time >= ?")
+            where.append("(d.start_time >= ? OR d.start_time IS NULL)")
             params.append(since.isoformat())
-        where.append("d.start_time <= ?")
+        where.append("(d.start_time <= ? OR d.start_time IS NULL)")
         params.append(until.isoformat())
         if agent and agent != "all":
             where.append("d.agent_type = ?")
@@ -862,21 +1193,13 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
         self._json(report)
 
     def _api_config(self) -> None:
-        """Return effective read-only runtime config used by dashboard."""
+        """Return full effective runtime config used by dashboard."""
         config = get_config()
-        effective_provider = config.lead_role.provider
-        effective_model = config.lead_role.model
         payload = {
-            "effective": {
-                "provider": effective_provider,
-                "agent_model": effective_model,
-                "agent_timeout": config.lead_role.timeout_seconds,
-                "llm_provider": effective_provider,
-                "llm_model": effective_model,
-            },
+            "effective": _serialize_full_config(config),
             "sources": get_config_sources(),
             "user_config_path": str(get_user_config_path()),
-            "read_only": True,
+            "read_only": False,
         }
         self._json(payload)
 
@@ -916,8 +1239,30 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
             return
         self._error(HTTPStatus.NOT_FOUND, "Not found")
 
+    def _api_config_save(self) -> None:
+        """Save config patch to user config TOML file."""
+        body = self._read_json_body()
+        patch = body.get("patch")
+        if not isinstance(patch, dict) or not patch:
+            self._error(HTTPStatus.BAD_REQUEST, "Missing 'patch' object in body")
+            return
+        try:
+            updated = _save_config_patch(patch)
+            self._json(
+                {
+                    "effective": updated,
+                    "sources": get_config_sources(),
+                    "user_config_path": str(get_user_config_path()),
+                }
+            )
+        except Exception as exc:
+            self._error(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                f"Failed to save config: {exc}",
+            )
+
     def _handle_api_post(self, path: str) -> None:
-        """Dispatch POST API routes to supported read-only actions."""
+        """Dispatch POST API routes to supported actions."""
         if path == "/api/memory-graph/query":
             payload = self._read_json_body()
             self._json(_memory_graph_query(payload))
@@ -925,6 +1270,9 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
         if path == "/api/memory-graph/expand":
             payload = self._read_json_body()
             self._json(_memory_graph_expand(payload))
+            return
+        if path == "/api/config":
+            self._api_config_save()
             return
         if path in {"/api/refine/run", "/api/reflect"}:
             self._error(HTTPStatus.FORBIDDEN, READ_ONLY_MESSAGE)
@@ -959,7 +1307,11 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
         self._error(HTTPStatus.FORBIDDEN, READ_ONLY_MESSAGE)
 
     def do_PATCH(self) -> None:  # noqa: N802
-        """Reject mutating PATCH requests in read-only dashboard mode."""
+        """Handle PATCH requests - config save allowed, others rejected."""
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/config":
+            self._api_config_save()
+            return
         self._error(HTTPStatus.FORBIDDEN, READ_ONLY_MESSAGE)
 
     def do_DELETE(self) -> None:  # noqa: N802

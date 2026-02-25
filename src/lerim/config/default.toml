@@ -19,49 +19,50 @@ recent_access_grace_days = 30       # recently accessed memories skip archiving
 [server]
 host = "127.0.0.1"
 port = 8765
-poll_interval_minutes = 5
+poll_interval_minutes = 30
+sync_window_days = 7
+sync_max_sessions = 50
+sync_max_workers = 4
 
 [roles.lead]
 provider = "openrouter"               # zai | openrouter | openai
-model = "z-ai/glm-4.7-flash"
+model = "x-ai/grok-4.1-fast"
 api_base = ""
-fallback_models = [
-  "zai:glm-4.7-flash",
-]
+fallback_models = []
 timeout_seconds = 300
 max_iterations = 24
+openrouter_provider_order = []
 
 [roles.explorer]
 provider = "openrouter"
-model = "z-ai/glm-4.7-flash"
+model = "x-ai/grok-4.1-fast"
 api_base = ""
-fallback_models = [
-  "zai:glm-4.7-flash",
-]
+fallback_models = []
 timeout_seconds = 180
 max_iterations = 16
+openrouter_provider_order = []
 
 [roles.extract]
 provider = "openrouter"
-model = "z-ai/glm-4.7-flash"
+model = "x-ai/grok-4.1-fast"
+sub_model = "x-ai/grok-4.1-fast"
 api_base = ""
-fallback_models = [
-  "zai:glm-4.7-flash",
-]
+fallback_models = []
 timeout_seconds = 180
-max_iterations = 24
-max_llm_calls = 24
+max_iterations = 8
+max_llm_calls = 12
+openrouter_provider_order = []
 
 [roles.summarize]
 provider = "openrouter"
-model = "z-ai/glm-4.7-flash"
+model = "x-ai/grok-4.1-fast"
+sub_model = "x-ai/grok-4.1-fast"
 api_base = ""
-fallback_models = [
-  "zai:glm-4.7-flash",
-]
+fallback_models = []
 timeout_seconds = 180
-max_iterations = 24
-max_llm_calls = 24
+max_iterations = 8
+max_llm_calls = 12
+openrouter_provider_order = []
 
 [tracing]
 enabled = false                          # set true or LERIM_TRACING=1 to enable

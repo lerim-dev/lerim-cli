@@ -69,8 +69,9 @@
       width: 36px;
       height: 36px;
       border-radius: 10px;
-      background: linear-gradient(140deg, var(--lerim-accent-2), var(--lerim-accent));
+      object-fit: cover;
       box-shadow: 0 12px 24px rgba(15, 23, 42, 0.45);
+      flex-shrink: 0;
     }
 
     .lerim-title {
@@ -264,6 +265,8 @@
     .agent-badge.claude { background: #f59e0b; }
     .agent-badge.codex { background: #22d3ee; }
     .agent-badge.opencode { background: #34d399; }
+    .agent-badge.cursor { background: #e879f9; }
+    .agent-badge.cline { background: #fb923c; }
 
     .status-pill {
       padding: 0.25rem 0.6rem;
@@ -276,15 +279,6 @@
     .status-pill.completed { background: rgba(34, 197, 94, 0.15); color: #4ade80; border-color: rgba(34, 197, 94, 0.4); }
     .status-pill.error { background: rgba(248, 113, 113, 0.15); color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
     .status-pill.running { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); }
-
-    .runs-grid {
-      display: grid;
-      gap: 1rem;
-    }
-
-    @media (min-width: 1200px) {
-      .runs-grid { grid-template-columns: 2fr 1.1fr; }
-    }
 
     .memory-grid {
       display: grid;
@@ -342,32 +336,6 @@
       color: var(--lerim-muted);
     }
 
-    .chat-message {
-      background: rgba(15, 23, 42, 0.35);
-      border: 1px solid rgba(34, 211, 238, 0.1);
-      border-radius: 12px;
-      padding: 0.75rem;
-      margin-bottom: 0.75rem;
-    }
-
-    .chat-message.user {
-      border-color: rgba(245, 158, 11, 0.3);
-    }
-
-    .chat-message.tool {
-      border-color: rgba(148, 163, 184, 0.25);
-    }
-
-    .chat-meta {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.7rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--lerim-muted);
-      margin-bottom: 0.4rem;
-    }
-
     .chat-block {
       font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       font-size: 0.78rem;
@@ -378,13 +346,271 @@
       color: #cbd5f5;
     }
 
-    .analysis-output {
-      background: rgba(15, 23, 42, 0.6);
-      border: 1px solid var(--lerim-border);
-      border-radius: 12px;
+    .run-viewer-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 5000;
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      padding: 14px;
+      background: rgba(6, 10, 18, 0.86);
+      backdrop-filter: blur(7px);
+    }
+
+    .run-viewer-shell {
+      width: min(1260px, 100%);
+      max-height: 100%;
+      border-radius: 16px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      background: linear-gradient(165deg, rgba(14, 22, 33, 0.98), rgba(10, 15, 24, 0.96));
+      box-shadow: 0 34px 70px rgba(0, 0, 0, 0.45);
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      overflow: hidden;
+    }
+
+    .run-viewer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.8rem;
+      padding: 0.9rem 1rem;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+      background: rgba(15, 23, 42, 0.55);
+    }
+
+    .run-viewer-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #dbe7fb;
+    }
+
+    .run-viewer-subtitle {
+      margin-top: 0.18rem;
+      font-size: 0.8rem;
+      color: var(--lerim-muted);
+    }
+
+    .run-viewer-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      padding: 0.72rem 1rem;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+      background: rgba(8, 12, 19, 0.48);
+    }
+
+    .run-viewer-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.28rem;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      padding: 0.23rem 0.58rem;
+      font-size: 0.72rem;
+      color: #c7d4e8;
+      background: rgba(15, 23, 42, 0.66);
+    }
+
+    .run-viewer-chat {
+      overflow: auto;
       padding: 1rem;
+      display: grid;
+      gap: 0.66rem;
+      background:
+        radial-gradient(1000px 600px at 16% -26%, rgba(34, 211, 238, 0.06), transparent 68%),
+        radial-gradient(900px 540px at 92% -34%, rgba(245, 158, 11, 0.08), transparent 70%),
+        rgba(8, 12, 19, 0.75);
+    }
+
+    .run-chat-row {
+      display: flex;
+    }
+
+    .run-chat-row.user {
+      justify-content: flex-end;
+    }
+
+    .run-chat-row.tool,
+    .run-chat-row.system,
+    .run-chat-row.assistant {
+      justify-content: flex-start;
+    }
+
+    .run-chat-bubble {
+      width: min(86%, 860px);
+      border-radius: 14px;
+      border: 1px solid rgba(148, 163, 184, 0.26);
+      background: rgba(12, 18, 28, 0.85);
+      padding: 0.72rem 0.8rem;
+      box-shadow: 0 10px 22px rgba(0, 0, 0, 0.22);
+    }
+
+    .run-chat-row.user .run-chat-bubble {
+      border-color: rgba(245, 158, 11, 0.38);
+      background: rgba(59, 35, 6, 0.65);
+    }
+
+    .run-chat-row.tool .run-chat-bubble {
+      border-color: rgba(34, 211, 238, 0.34);
+      background: rgba(7, 30, 36, 0.6);
+    }
+
+    .run-chat-row.system .run-chat-bubble {
+      border-color: rgba(148, 163, 184, 0.35);
+      background: rgba(30, 41, 59, 0.5);
+    }
+
+    .run-chat-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.8rem;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #9fb2cd;
+      margin-bottom: 0.34rem;
+    }
+
+    .run-chat-content {
+      white-space: normal;
+      word-break: break-word;
+      font-size: 0.86rem;
+      line-height: 1.45;
+      color: #dde7f6;
+    }
+
+    .run-chat-markdown > *:first-child {
+      margin-top: 0;
+    }
+
+    .run-chat-markdown > *:last-child {
+      margin-bottom: 0;
+    }
+
+    .run-chat-markdown h1,
+    .run-chat-markdown h2,
+    .run-chat-markdown h3,
+    .run-chat-markdown h4 {
+      margin: 0.7rem 0 0.45rem;
+      font-size: 0.95rem;
+      line-height: 1.35;
+      color: #f1f6ff;
+      letter-spacing: 0.01em;
+    }
+
+    .run-chat-markdown h1 { font-size: 1.08rem; }
+    .run-chat-markdown h2 { font-size: 1rem; }
+    .run-chat-markdown h3 { font-size: 0.93rem; }
+
+    .run-chat-markdown p,
+    .run-chat-markdown ul,
+    .run-chat-markdown ol,
+    .run-chat-markdown blockquote,
+    .run-chat-markdown pre {
+      margin: 0.45rem 0;
+    }
+
+    .run-chat-markdown ul,
+    .run-chat-markdown ol {
+      padding-left: 1.2rem;
+    }
+
+    .run-chat-markdown li {
+      margin: 0.16rem 0;
+    }
+
+    .run-chat-markdown hr {
+      border: none;
+      border-top: 1px solid rgba(148, 163, 184, 0.3);
+      margin: 0.7rem 0;
+    }
+
+    .run-chat-markdown blockquote {
+      border-left: 3px solid rgba(56, 189, 248, 0.45);
+      padding-left: 0.7rem;
+      color: #bed1eb;
+      opacity: 0.95;
+    }
+
+    .run-chat-markdown code {
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.78rem;
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 6px;
+      padding: 0.08rem 0.32rem;
+      color: #d4e3fb;
+    }
+
+    .run-chat-markdown pre {
+      background: rgba(9, 16, 28, 0.78);
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 8px;
+      padding: 0.62rem;
+      overflow: auto;
+    }
+
+    .run-chat-markdown pre code {
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      padding: 0;
+      color: #dbe9ff;
+      display: block;
+      white-space: pre;
+      line-height: 1.4;
+    }
+
+    .run-chat-markdown a {
+      color: #67d7ff;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .run-chat-tool-toggle {
+      margin-top: 0.5rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 8px;
+      background: rgba(15, 23, 42, 0.35);
+      overflow: hidden;
+    }
+
+    .run-chat-tool-toggle summary {
+      cursor: pointer;
+      padding: 0.45rem 0.58rem;
+      color: #9fb2cd;
+      font-size: 0.74rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .run-chat-tool-toggle pre {
+      margin: 0;
+      border-top: 1px solid rgba(148, 163, 184, 0.18);
+      padding: 0.62rem;
       white-space: pre-wrap;
-      min-height: 120px;
+      max-height: 260px;
+      overflow: auto;
+    }
+
+    @media (max-width: 991.98px) {
+      .run-viewer-overlay {
+        padding: 0;
+      }
+
+      .run-viewer-shell {
+        width: 100%;
+        max-height: 100vh;
+        border-radius: 0;
+      }
+
+      .run-chat-bubble {
+        width: 96%;
+      }
     }
 
     .toast-container {
@@ -422,10 +648,10 @@
     <header class="navbar navbar-expand-md navbar-dark lerim-nav">
       <div class="container-xl">
         <div class="lerim-brand">
-          <span class="lerim-logo"></span>
+          <img class="lerim-logo" src="/assets/lerim.png" alt="Lerim logo" />
           <div>
             <div class="lerim-title">Lerim</div>
-            <div class="lerim-subtitle">Continuous memory + learning layer for agents</div>
+            <div class="lerim-subtitle">Continual learning layer for agents</div>
           </div>
         </div>
         <div class="navbar-nav ms-auto align-items-center gap-3 flex-row flex-wrap">
@@ -436,6 +662,7 @@
               <option value="claude">Claude</option>
               <option value="codex">Codex</option>
               <option value="opencode">OpenCode</option>
+              <option value="cursor">Cursor</option>
             </select>
           </div>
           <div class="lerim-filter">
@@ -495,7 +722,10 @@
                 <div class="card-body">
                   <div class="stat-label">Sessions</div>
                   <div class="stat-value" x-text="formatNumber($store.stats.totals.runs)"></div>
-                  <div class="stat-sub" x-text="'Avg ' + formatDuration($store.stats.derived.avg_session_duration_ms) + '/session'"></div>
+                  <div
+                    class="stat-sub"
+                    x-text="$store.stats.derived.duration_data_available ? ('Avg ' + formatDuration($store.stats.derived.avg_session_duration_ms) + '/session') : 'Avg n/a/session'"
+                  ></div>
                 </div>
               </div>
             </div>
@@ -504,7 +734,7 @@
                 <div class="card-body">
                   <div class="stat-label">Messages</div>
                   <div class="stat-value" style="color:#4ade80" x-text="formatNumber($store.stats.totals.messages)"></div>
-                  <div class="stat-sub" x-text="$store.stats.derived.avg_messages_per_session + '/session'"></div>
+                  <div class="stat-sub" x-text="formatNumber($store.stats.derived.avg_messages_per_session) + '/session'"></div>
                 </div>
               </div>
             </div>
@@ -522,7 +752,7 @@
                 <div class="card-body">
                   <div class="stat-label">Errors</div>
                   <div class="stat-value" style="color:#f87171" x-text="formatNumber($store.stats.totals.errors)"></div>
-                  <div class="stat-sub" x-text="$store.stats.derived.error_rate + '% error rate'"></div>
+                  <div class="stat-sub" x-text="formatPercent($store.stats.derived.error_rate) + '% error rate'"></div>
                 </div>
               </div>
             </div>
@@ -539,7 +769,11 @@
               <div class="card card-sm">
                 <div class="card-body">
                   <div class="stat-label">Total Time</div>
-                  <div class="stat-value" style="color:#38bdf8" x-text="formatDuration($store.stats.totals.duration_ms)"></div>
+                  <div
+                    class="stat-value"
+                    style="color:#38bdf8"
+                    x-text="$store.stats.derived.duration_data_available ? formatDuration($store.stats.totals.duration_ms) : 'n/a'"
+                  ></div>
                   <div class="stat-sub" x-text="'Across ' + $store.stats.totals.runs + ' sessions'"></div>
                 </div>
               </div>
@@ -642,7 +876,7 @@
                   </div>
                 </div>
                 <div class="card-body">
-                  <div class="chart-shell" data-chart="hourly">
+                  <div class="chart-shell tall" data-chart="hourly">
                     <div id="chart-hourly" class="chart-canvas"></div>
                     <div class="chart-empty">No hourly data</div>
                   </div>
@@ -683,6 +917,7 @@
                 </div>
               </div>
               <div class="text-muted small mt-3" x-text="searchSummary"></div>
+              <div class="text-muted small mt-1">Select a session row, then click Open to view the full chat.</div>
             </div>
           </div>
 
@@ -707,11 +942,12 @@
                         <th @click="sortBy('status')">Status</th>
                         <th @click="sortBy('started_at')">Started</th>
                         <th @click="sortBy('duration_ms')">Duration</th>
-                        <th @click="sortBy('message_count')">Messages</th>
+                        <th @click="sortBy('message_count')">Msgs</th>
                         <th @click="sortBy('tool_call_count')">Tools</th>
-                        <th @click="sortBy('error_count')">Errors</th>
+                        <th @click="sortBy('error_count')">Errs</th>
                         <th @click="sortBy('total_tokens')">Tokens</th>
-                        <th @click="sortBy('repo_name')">Branch</th>
+                        <th @click="sortBy('branch_display')">Project / Branch</th>
+                        <th>ID</th>
                         <th>Open</th>
                       </tr>
                     </thead>
@@ -726,13 +962,14 @@
                           <td x-text="run.tool_call_count"></td>
                           <td x-text="run.error_count"></td>
                           <td x-text="formatNumber(run.total_tokens)"></td>
-                          <td x-text="run.repo_name || '-'" class="text-muted"></td>
+                          <td class="text-muted" x-text="run.branch_display || run.project || '-'" :title="run.repo_name || ''"></td>
+                          <td class="text-muted small" x-text="run.short_id || run.run_id?.slice(0,8) || '-'" :title="run.run_id"></td>
                           <td>
-                            <a class="btn btn-outline-primary btn-sm" :href="'/session/' + run.agent_type + '/' + run.run_id + '?back=runs'" @click.stop>Open</a>
+                            <button class="btn btn-sm btn-outline-primary" @click.stop="openRunViewer(idx)">Open</button>
                           </td>
                         </tr>
                         <tr x-show="$store.runs.previewOpen[run.run_id]">
-                          <td colspan="10">
+                          <td colspan="11">
                             <div class="text-muted" x-html="sanitizeSnippet(run.snippet || run.preview || '')"></div>
                           </td>
                         </tr>
@@ -751,61 +988,6 @@
             </div>
           </div>
 
-          <div class="runs-grid mt-3">
-            <div class="card">
-              <div class="card-header">
-                <div class="card-title" x-text="$store.runs.selectedRun ? 'Transcript · ' + $store.runs.selectedRun.run_id.slice(0, 8) : 'Transcript'"></div>
-              </div>
-              <div class="card-body">
-                <template x-if="!$store.runs.selectedRun">
-                  <div class="text-muted">Select a run to view the transcript.</div>
-                </template>
-                <template x-if="$store.runs.selectedRun">
-                  <div>
-                    <template x-if="$store.app.loading.transcript">
-                      <div class="text-muted">Loading transcript...</div>
-                    </template>
-                    <template x-if="!$store.app.loading.transcript && $store.runs.transcript.length === 0">
-                      <div class="text-muted">No transcript data available.</div>
-                    </template>
-                    <template x-if="!$store.app.loading.transcript && $store.runs.transcript.length > 0">
-                      <div>
-                        <template x-for="(msg, i) in $store.runs.transcript" :key="i">
-                          <div class="chat-message" :class="msg.role || 'assistant'">
-                            <div class="chat-meta">
-                              <span x-text="msg.role === 'tool' ? (msg.tool_name || 'Tool') : msg.role"></span>
-                              <span x-text="msg.timestamp ? formatDateTime(msg.timestamp) : ''"></span>
-                            </div>
-                            <div x-show="msg.content" x-text="msg.content"></div>
-                            <div class="chat-block mt-2" x-show="msg.tool_input" x-text="msg.tool_input ? JSON.stringify(msg.tool_input, null, 2) : ''"></div>
-                            <div class="chat-block mt-2" x-show="msg.tool_output" x-text="msg.tool_output ? JSON.stringify(msg.tool_output, null, 2) : ''"></div>
-                          </div>
-                        </template>
-                      </div>
-                    </template>
-                  </div>
-                </template>
-              </div>
-            </div>
-            <div class="card">
-              <div class="card-header">
-                <div class="card-title">Reflect on this run</div>
-              </div>
-              <div class="card-body">
-                <p class="text-muted">Ask a custom question or use a preset.</p>
-                <div class="btn-list mb-3">
-                  <button class="btn btn-outline-secondary" @click="runReflect('summary')" :disabled="DASHBOARD_READ_ONLY">Summary</button>
-                  <button class="btn btn-outline-secondary" @click="runReflect('next_actions')" :disabled="DASHBOARD_READ_ONLY">Next Actions</button>
-                  <button class="btn btn-outline-secondary" @click="runReflect('pitfalls')" :disabled="DASHBOARD_READ_ONLY">Pitfalls</button>
-                </div>
-                <div class="input-group mb-3">
-                  <input class="form-control" type="text" placeholder="Ask about this run..." x-model="reflectInput" />
-                  <button class="btn btn-primary" @click="runReflect(null, reflectInput)" :disabled="DASHBOARD_READ_ONLY">Ask</button>
-                </div>
-                <div class="analysis-output" x-text="reflectOutput"></div>
-              </div>
-            </div>
-          </div>
         </section>
 
         <!-- Memories -->
@@ -822,6 +1004,7 @@
               </button>
               <button
                 class="btn"
+                x-show="DASHBOARD_GRAPH_EXPLORER_ENABLED"
                 :class="$store.memories.view === 'graph' ? 'btn-primary' : 'btn-outline-secondary'"
                 @click="setMemoryView('graph')"
                 type="button"
@@ -829,7 +1012,10 @@
                 Graph Explorer
               </button>
             </div>
-            <div class="text-muted small" x-text="$store.memories.view === 'graph' ? 'Graph mode: query, filter, inspect, expand.' : 'Library mode: browse and edit memories.'"></div>
+            <div
+              class="text-muted small"
+              x-text="DASHBOARD_GRAPH_EXPLORER_ENABLED && $store.memories.view === 'graph' ? 'Graph mode: query, filter, inspect, expand.' : 'Library mode: browse and edit memories.'"
+            ></div>
           </div>
 
           <div class="memory-grid" x-show="$store.memories.view === 'library'">
@@ -845,34 +1031,57 @@
                   <div class="col-12">
                     <input class="form-control" type="text" placeholder="Search memories..." x-model="$store.memories.filters.query" @keydown.enter="loadMemories()" />
                   </div>
-                  <div class="col-6">
-                    <select class="form-select" x-model="$store.memories.filters.type" @change="loadMemories()">
-                      <option value="">All types</option>
-                      <option value="pattern">Pattern</option>
-                      <option value="convention">Convention</option>
-                      <option value="pitfall">Pitfall</option>
-                      <option value="preference">Preference</option>
-                      <option value="technique">Technique</option>
-                      <option value="context">Context</option>
-                      <option value="friction">Friction</option>
-                      <option value="delight">Delight</option>
-                    </select>
+                  <div class="col-12">
+                    <label class="form-label small text-muted">Type</label>
+                    <div class="d-flex flex-wrap gap-1">
+                      <template x-for="t in $store.memories.filterOptions.types" :key="t">
+                        <button
+                          class="btn btn-sm"
+                          :class="$store.memories.filters.type === t ? 'btn-primary' : 'btn-outline-secondary'"
+                          @click="$store.memories.filters.type = ($store.memories.filters.type === t ? '' : t); loadMemories()"
+                          x-text="t"
+                          style="font-size:0.75rem; padding:0.15rem 0.5rem"
+                        ></button>
+                      </template>
+                      <button
+                        class="btn btn-sm btn-ghost-secondary"
+                        x-show="$store.memories.filters.type"
+                        @click="$store.memories.filters.type = ''; loadMemories()"
+                        style="font-size:0.7rem"
+                      >Clear</button>
+                    </div>
                   </div>
-                  <div class="col-6">
-                    <select class="form-select" x-model="$store.memories.filters.state" @change="loadMemories()">
-                      <option value="">All states</option>
-                      <option value="candidate">Candidate</option>
-                      <option value="validated">Validated</option>
-                      <option value="established">Established</option>
-                      <option value="stale">Stale</option>
-                      <option value="archived">Archived</option>
-                    </select>
+                  <div class="col-12">
+                    <label class="form-label small text-muted">Kind</label>
+                    <div class="d-flex flex-wrap gap-1">
+                      <template x-for="k in $store.memories.filterOptions.kinds" :key="k">
+                        <button
+                          class="btn btn-sm"
+                          :class="$store.memories.filters.state === k ? 'btn-primary' : 'btn-outline-secondary'"
+                          @click="$store.memories.filters.state = ($store.memories.filters.state === k ? '' : k); loadMemories()"
+                          x-text="k"
+                          style="font-size:0.75rem; padding:0.15rem 0.5rem"
+                        ></button>
+                      </template>
+                      <button
+                        class="btn btn-sm btn-ghost-secondary"
+                        x-show="$store.memories.filters.state"
+                        @click="$store.memories.filters.state = ''; loadMemories()"
+                        style="font-size:0.7rem"
+                      >Clear</button>
+                    </div>
                   </div>
                   <div class="col-8">
-                    <input class="form-control" type="text" placeholder="Filter by project..." x-model="$store.memories.filters.project" @keydown.enter="loadMemories()" />
+                    <label class="form-label small text-muted">Project</label>
+                    <input class="form-control form-control-sm" type="text" placeholder="Filter by project..." x-model="$store.memories.filters.project" @keydown.enter="loadMemories()" list="project-options" />
+                    <datalist id="project-options">
+                      <template x-for="p in $store.memories.filterOptions.projects" :key="p">
+                        <option :value="p"></option>
+                      </template>
+                    </datalist>
                   </div>
-                  <div class="col-4">
-                    <button class="btn btn-outline-primary w-100" @click="loadMemories()" :disabled="$store.memories.loading">
+                  <div class="col-4 d-flex align-items-end">
+                    <button class="btn btn-outline-primary btn-sm w-100" @click="loadMemories()" :disabled="$store.memories.loading">
                       <span x-show="!$store.memories.loading">Refresh</span>
                       <span x-show="$store.memories.loading">Loading...</span>
                     </button>
@@ -925,17 +1134,13 @@
                     </div>
                     <div class="row g-2">
                       <div class="col-12 col-md-6">
-                        <label class="form-label">Type</label>
-                        <select class="form-select" x-model="$store.memories.draft.kind" @change="markMemoryDirty()">
-                          <option value="pattern">Pattern</option>
-                          <option value="convention">Convention</option>
-                          <option value="pitfall">Pitfall</option>
-                          <option value="preference">Preference</option>
-                          <option value="technique">Technique</option>
-                          <option value="context">Context</option>
-                          <option value="friction">Friction</option>
-                          <option value="delight">Delight</option>
-                        </select>
+                        <label class="form-label">Kind</label>
+                        <input class="form-control" type="text" x-model="$store.memories.draft.kind" @input="markMemoryDirty()" list="kind-options" />
+                        <datalist id="kind-options">
+                          <template x-for="k in $store.memories.filterOptions.kinds" :key="k">
+                            <option :value="k"></option>
+                          </template>
+                        </datalist>
                       </div>
                       <div class="col-12 col-md-6">
                         <label class="form-label">Confidence</label>
@@ -976,7 +1181,7 @@
             </div>
           </div>
 
-          <div class="card" x-cloak x-show="$store.memories.view === 'graph'" x-transition.opacity.duration.180ms>
+          <div class="card" x-cloak x-show="DASHBOARD_GRAPH_EXPLORER_ENABLED && $store.memories.view === 'graph'" x-transition.opacity.duration.180ms>
             <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap">
               <div>
                 <div class="card-title">Memory Graph Explorer</div>
@@ -992,112 +1197,122 @@
           </div>
         </section>
 
-        <!-- Session Intelligence -->
+        <!-- Pipeline (Sync & Maintain) -->
         <section class="pt-4" x-show="$store.app.activeTab === 'refine'">
-          <div class="card mb-3">
-            <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-              <div>
-                <div class="card-title">Session Intelligence</div>
-                <div class="text-muted small">Powered by <span class="text-info">lerim refine</span></div>
-              </div>
-              <div class="btn-list">
-                <button
-                  class="btn btn-primary"
-                  @click="runRefineNow()"
-                  :disabled="DASHBOARD_READ_ONLY || $store.refine.loading.run || ($store.refine.form.mode === 'session' && !$store.refine.form.run_id.trim())"
-                >
-                  <span x-show="!$store.refine.loading.run">Run Refine</span>
-                  <span x-show="$store.refine.loading.run">Running...</span>
-                </button>
-                <button class="btn btn-outline-secondary" @click="resetRefineOptions()" :disabled="$store.refine.loading.run">
-                  Reset Options
-                </button>
-                <button class="btn btn-outline-secondary" @click="loadRefineReport()">Refresh</button>
+          <!-- Pipeline Status -->
+          <div class="row row-cards mb-3">
+            <div class="col-12 col-lg-6">
+              <div class="card">
+                <div class="card-header">
+                  <div>
+                    <div class="card-title">Sync Pipeline</div>
+                    <div class="text-muted small">Discovers sessions, extracts memories</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="row g-3">
+                    <div class="col-4">
+                      <div class="stat-label">Status</div>
+                      <div class="stat-value small" :style="'color:' + ($store.refine.status.sync?.status === 'completed' ? '#4ade80' : ($store.refine.status.sync?.status === 'failed' ? '#f87171' : '#94a3b8'))" x-text="$store.refine.status.sync?.status || 'never run'"></div>
+                    </div>
+                    <div class="col-4">
+                      <div class="stat-label">Last Run</div>
+                      <div class="stat-value small" x-text="$store.refine.status.sync?.started_at ? relativeTime($store.refine.status.sync.started_at) : 'n/a'"></div>
+                    </div>
+                    <div class="col-4">
+                      <div class="stat-label">Trigger</div>
+                      <div class="stat-value small text-muted" x-text="$store.refine.status.sync?.trigger || 'n/a'"></div>
+                    </div>
+                  </div>
+                  <div class="text-muted small mt-3" x-show="$store.refine.status.sync?.details_json" x-text="typeof $store.refine.status.sync?.details_json === 'string' ? $store.refine.status.sync.details_json : JSON.stringify($store.refine.status.sync?.details_json || '')"></div>
+                  <div class="mt-3">
+                    <code class="text-muted small">Run: <span class="text-info">lerim sync</span> or <span class="text-info">lerim daemon --once</span></code>
+                  </div>
+                </div>
               </div>
             </div>
+            <div class="col-12 col-lg-6">
+              <div class="card">
+                <div class="card-header">
+                  <div>
+                    <div class="card-title">Maintain Pipeline</div>
+                    <div class="text-muted small">Merges, archives, consolidates memories</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="row g-3">
+                    <div class="col-4">
+                      <div class="stat-label">Status</div>
+                      <div class="stat-value small" :style="'color:' + ($store.refine.status.maintain?.status === 'completed' ? '#4ade80' : ($store.refine.status.maintain?.status === 'failed' ? '#f87171' : '#94a3b8'))" x-text="$store.refine.status.maintain?.status || 'never run'"></div>
+                    </div>
+                    <div class="col-4">
+                      <div class="stat-label">Last Run</div>
+                      <div class="stat-value small" x-text="$store.refine.status.maintain?.started_at ? relativeTime($store.refine.status.maintain.started_at) : 'n/a'"></div>
+                    </div>
+                    <div class="col-4">
+                      <div class="stat-label">Trigger</div>
+                      <div class="stat-value small text-muted" x-text="$store.refine.status.maintain?.trigger || 'n/a'"></div>
+                    </div>
+                  </div>
+                  <div class="text-muted small mt-3" x-show="$store.refine.status.maintain?.details_json" x-text="typeof $store.refine.status.maintain?.details_json === 'string' ? $store.refine.status.maintain.details_json : JSON.stringify($store.refine.status.maintain?.details_json || '')"></div>
+                  <div class="mt-3">
+                    <code class="text-muted small">Run: <span class="text-info">lerim maintain</span></code>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Queue Status -->
+          <div class="card mb-3">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <div>
+                <div class="card-title">Extraction Queue</div>
+                <div class="text-muted small">Session processing jobs</div>
+              </div>
+              <button class="btn btn-outline-secondary btn-sm" @click="loadRefineStatus()">Refresh</button>
+            </div>
             <div class="card-body">
-              <div class="row g-3 mb-3">
-                <div class="col-12 col-lg-3">
-                  <label class="form-label">Mode</label>
-                  <select class="form-select" x-model="$store.refine.form.mode" @change="setRefineMode($store.refine.form.mode)">
-                    <option value="window">Window</option>
-                    <option value="session">Single Session</option>
-                    <option value="backfill">Backfill</option>
-                  </select>
+              <div class="row row-cards">
+                <div class="col-4 col-lg-2">
+                  <div class="stat-label">Pending</div>
+                  <div class="stat-value" style="color:#fbbf24" x-text="formatNumber($store.refine.status.queue?.pending || 0)"></div>
                 </div>
-                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode !== 'session'">
-                  <label class="form-label">Window</label>
-                  <select class="form-select" x-model="$store.refine.form.window">
-                    <option value="">Use top Scope filter</option>
-                    <option value="1d">1d</option>
-                    <option value="7d">7d</option>
-                    <option value="30d">30d</option>
-                    <option value="all">all</option>
-                  </select>
+                <div class="col-4 col-lg-2">
+                  <div class="stat-label">Running</div>
+                  <div class="stat-value" style="color:#38bdf8" x-text="formatNumber($store.refine.status.queue?.running || 0)"></div>
                 </div>
-                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode === 'session'">
-                  <label class="form-label">Session run_id</label>
-                  <input class="form-control" type="text" placeholder="019c..." x-model="$store.refine.form.run_id" />
+                <div class="col-4 col-lg-2">
+                  <div class="stat-label">Done</div>
+                  <div class="stat-value" style="color:#4ade80" x-text="formatNumber($store.refine.status.queue?.done || 0)"></div>
                 </div>
-                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode !== 'session'">
-                  <label class="form-label">Agents</label>
-                  <input class="form-control" type="text" placeholder="Use top Agent filter" x-model="$store.refine.form.agents" />
+                <div class="col-4 col-lg-2">
+                  <div class="stat-label">Failed</div>
+                  <div class="stat-value" style="color:#f87171" x-text="formatNumber($store.refine.status.queue?.failed || 0)"></div>
                 </div>
-                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode !== 'session'">
-                  <label class="form-label">Max Sessions</label>
-                  <input class="form-control" type="number" min="1" step="1" x-model.number="$store.refine.form.max_sessions" />
-                </div>
-                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode === 'window'">
-                  <label class="form-label">Since (ISO/local)</label>
-                  <input class="form-control" type="text" placeholder="2026-02-07T12:00:00+00:00" x-model="$store.refine.form.since" />
-                </div>
-                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode === 'window'">
-                  <label class="form-label">Until (ISO/local)</label>
-                  <input class="form-control" type="text" placeholder="2026-02-07T15:00:00+00:00" x-model="$store.refine.form.until" />
-                </div>
-                <div class="col-12">
-                  <label class="form-label">Steps (comma-separated)</label>
-                  <input class="form-control" type="text" x-model="$store.refine.form.steps" />
-                </div>
-                <div class="col-12 d-flex gap-4 flex-wrap">
-                  <label class="form-check">
-                    <input class="form-check-input" type="checkbox" x-model="$store.refine.form.force" />
-                    <span class="form-check-label">Force rerun</span>
-                  </label>
-                </div>
-                <div class="col-12 text-muted small">
-                  CLI parity: <code>window/since/until/agents/max-sessions/steps/force</code> plus modes for <code>session</code> and <code>backfill</code>.
-                </div>
-              </div>
-
-              <div class="row row-cards mb-3">
-                <div class="col-6 col-lg-2">
-                  <div class="stat-label">Queue Pending</div>
-                  <div class="stat-value" x-text="formatNumber($store.refine.status.queue?.pending || 0)"></div>
-                </div>
-                <div class="col-6 col-lg-2">
-                  <div class="stat-label">Queue Running</div>
-                  <div class="stat-value" x-text="formatNumber($store.refine.status.queue?.running || 0)"></div>
-                </div>
-                <div class="col-6 col-lg-2">
+                <div class="col-4 col-lg-2">
                   <div class="stat-label">Dead Letter</div>
-                  <div class="stat-value" x-text="formatNumber($store.refine.status.queue?.dead_letter || 0)"></div>
-                </div>
-                <div class="col-6 col-lg-3">
-                  <div class="stat-label">Latest Sync</div>
-                  <div class="stat-value small text-wrap" x-text="$store.refine.status.sync?.status || 'n/a'"></div>
-                </div>
-                <div class="col-6 col-lg-3">
-                  <div class="stat-label">Latest Maintain</div>
-                  <div class="stat-value small text-wrap" x-text="$store.refine.status.maintain?.status || 'n/a'"></div>
+                  <div class="stat-value" style="color:#94a3b8" x-text="formatNumber($store.refine.status.queue?.dead_letter || 0)"></div>
                 </div>
               </div>
+            </div>
+          </div>
 
-              <div class="text-muted mb-3" x-show="$store.refine.loading.report">Loading report...</div>
-              <div class="text-muted mb-3" x-show="!$store.refine.loading.report && !$store.refine.report.aggregates">
-                No report yet. Run refine to generate the first report.
+          <!-- Extraction Report -->
+          <div class="card mb-3">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <div>
+                <div class="card-title">Latest Extraction Report</div>
+                <div class="text-muted small">Aggregated insights from sync pipeline</div>
               </div>
-              <div x-show="$store.refine.report.aggregates">
+              <button class="btn btn-outline-secondary btn-sm" @click="loadRefineReport()">Refresh</button>
+            </div>
+            <div class="card-body">
+              <div class="text-muted mb-3" x-show="$store.refine.loading.report">Loading report...</div>
+              <div class="text-muted mb-3" x-show="!$store.refine.loading.report && !$store.refine.report.aggregates?.totals?.messages">
+                No report data yet. Run <code>lerim sync</code> to generate.
+              </div>
+              <div x-show="$store.refine.report.aggregates?.totals?.messages">
                 <div class="row row-cards mb-3">
                   <div class="col-6 col-lg-2">
                     <div class="stat-label">Messages</div>
@@ -1120,121 +1335,14 @@
                     <div class="stat-value" x-text="formatNumber($store.refine.report.aggregates.derived?.messages_per_day || 0)"></div>
                   </div>
                 </div>
-
-                <div class="refine-glance mb-3" x-show="$store.refine.report.narratives?.at_a_glance">
+                <div class="refine-glance" x-show="$store.refine.report.narratives?.at_a_glance?.working">
                   <div class="refine-section-title">At a Glance</div>
-                  <div class="text-muted small mb-2" x-text="$store.refine.report.narratives.at_a_glance?.working || ''"></div>
-                  <div class="text-muted small mb-2" x-text="$store.refine.report.narratives.at_a_glance?.hindering || ''"></div>
-                  <div class="text-muted small mb-2" x-text="$store.refine.report.narratives.at_a_glance?.quick_wins || ''"></div>
-                  <div class="text-muted small" x-text="$store.refine.report.narratives.at_a_glance?.horizon || ''"></div>
+                  <div class="text-muted small mb-2" x-show="$store.refine.report.narratives.at_a_glance?.working" x-text="$store.refine.report.narratives.at_a_glance.working"></div>
+                  <div class="text-muted small mb-2" x-show="$store.refine.report.narratives.at_a_glance?.hindering" x-text="$store.refine.report.narratives.at_a_glance.hindering"></div>
+                  <div class="text-muted small mb-2" x-show="$store.refine.report.narratives.at_a_glance?.quick_wins" x-text="$store.refine.report.narratives.at_a_glance.quick_wins"></div>
+                  <div class="text-muted small" x-show="$store.refine.report.narratives.at_a_glance?.horizon" x-text="$store.refine.report.narratives.at_a_glance.horizon"></div>
                 </div>
               </div>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.project_areas?.length">
-            <div class="card-header">
-              <div class="card-title">What You Work On</div>
-            </div>
-            <div class="card-body">
-              <ul class="refine-list">
-                <template x-for="area in $store.refine.report.narratives.project_areas" :key="area.name">
-                  <li>
-                    <div class="fw-semibold" x-text="area.name"></div>
-                    <div class="text-muted small" x-text="area.description"></div>
-                  </li>
-                </template>
-              </ul>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.wins?.length">
-            <div class="card-header">
-              <div class="card-title">Impressive Things</div>
-            </div>
-            <div class="card-body">
-              <ul class="refine-list">
-                <template x-for="item in $store.refine.report.narratives.wins" :key="item">
-                  <li x-text="item"></li>
-                </template>
-              </ul>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.friction?.length">
-            <div class="card-header">
-              <div class="card-title">Where Things Go Wrong</div>
-            </div>
-            <div class="card-body">
-              <ul class="refine-list">
-                <template x-for="item in $store.refine.report.narratives.friction" :key="item.title">
-                  <li>
-                    <div class="fw-semibold" x-text="item.title"></div>
-                    <div class="text-muted small" x-text="item.description"></div>
-                    <div class="text-muted small" x-text="(item.examples || []).join(' · ')"></div>
-                  </li>
-                </template>
-              </ul>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.features?.length">
-            <div class="card-header">
-              <div class="card-title">Features to Try</div>
-            </div>
-            <div class="card-body">
-              <ul class="refine-list">
-                <template x-for="item in $store.refine.report.narratives.features" :key="item.title">
-                  <li>
-                    <div class="fw-semibold" x-text="item.title"></div>
-                    <div class="text-muted small" x-text="item.oneliner"></div>
-                    <div class="text-muted small" x-text="item.why"></div>
-                  </li>
-                </template>
-              </ul>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.patterns?.length">
-            <div class="card-header">
-              <div class="card-title">New Usage Patterns</div>
-            </div>
-            <div class="card-body">
-              <ul class="refine-list">
-                <template x-for="item in $store.refine.report.narratives.patterns" :key="item.title">
-                  <li>
-                    <div class="fw-semibold" x-text="item.title"></div>
-                    <div class="text-muted small" x-text="item.summary"></div>
-                  </li>
-                </template>
-              </ul>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.horizon?.length">
-            <div class="card-header">
-              <div class="card-title">On the Horizon</div>
-            </div>
-            <div class="card-body">
-              <ul class="refine-list">
-                <template x-for="item in $store.refine.report.narratives.horizon" :key="item.title">
-                  <li>
-                    <div class="fw-semibold" x-text="item.title"></div>
-                    <div class="text-muted small" x-text="item.possible"></div>
-                    <div class="text-muted small" x-text="item.tip"></div>
-                  </li>
-                </template>
-              </ul>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.feedback">
-            <div class="card-header">
-              <div class="card-title">Team Feedback</div>
-            </div>
-            <div class="card-body">
-              <div class="text-muted small mb-2" x-text="($store.refine.report.narratives.feedback?.team || []).join(' · ')"></div>
-              <div class="text-muted small" x-text="($store.refine.report.narratives.feedback?.model || []).join(' · ')"></div>
             </div>
           </div>
         </section>
@@ -1245,54 +1353,109 @@
             <div class="card-header d-flex justify-content-between align-items-center">
               <div>
                 <div class="card-title">Runtime Settings</div>
-                <div class="text-muted small">Changes are saved to ~/.lerim/config.toml.</div>
+                <div class="text-muted small">Changes are saved to <span x-text="$store.settings.user_config_path || '~/.lerim/config.toml'"></span></div>
               </div>
               <div class="d-flex gap-2">
-                <button class="btn btn-outline-primary btn-sm" @click="loadSettings()" :disabled="$store.settings.loading">
-                  Reload
-                </button>
-                <button class="btn btn-primary btn-sm" @click="saveSettings()" :disabled="DASHBOARD_READ_ONLY || $store.settings.saving">
+                <button class="btn btn-outline-primary btn-sm" @click="loadSettings()" :disabled="$store.settings.loading">Reload</button>
+                <button class="btn btn-primary btn-sm" @click="saveSettings()" :disabled="$store.settings.saving">
                   <span x-show="!$store.settings.saving">Save</span>
                   <span x-show="$store.settings.saving">Saving...</span>
                 </button>
               </div>
             </div>
             <div class="card-body">
-              <div class="row g-3">
-                <div class="col-12 col-md-4">
-                  <label class="form-label">Agent Provider</label>
-                  <select class="form-select" x-model="$store.settings.form.agent_provider" @change="loadModelOptions($store.settings.form.agent_provider)">
-                    <option value="anthropic">anthropic</option>
-                    <option value="zai">zai</option>
-                    <option value="openrouter">openrouter</option>
-                  </select>
+              <!-- Server section -->
+              <h4 class="mb-3" style="font-size:0.85rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--lerim-muted)">Server</h4>
+              <div class="row g-3 mb-4">
+                <div class="col-6 col-md-3">
+                  <label class="form-label">Host</label>
+                  <input class="form-control" type="text" x-model="$store.settings.form.server.host" />
                 </div>
-                <div class="col-12 col-md-8">
-                  <label class="form-label">Agent Model</label>
-                  <input class="form-control" list="agent-model-options" x-model="$store.settings.form.agent_model" />
-                  <datalist id="agent-model-options">
-                    <template x-for="model in $store.settings.model_options" :key="model">
-                      <option :value="model"></option>
-                    </template>
-                  </datalist>
+                <div class="col-6 col-md-3">
+                  <label class="form-label">Port</label>
+                  <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.server.port" />
                 </div>
-                <div class="col-12">
-                  <label class="form-label">Agent Timeout (sec)</label>
-                  <input class="form-control" type="number" min="1" step="1" x-model.number="$store.settings.form.agent_timeout" />
+                <div class="col-6 col-md-2">
+                  <label class="form-label">Poll (min)</label>
+                  <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.server.poll_interval_minutes" />
                 </div>
-                <div class="col-12 col-md-6">
-                  <label class="form-label">LLM Provider</label>
-                  <select class="form-select" x-model="$store.settings.form.llm_provider">
-                    <option value="anthropic">anthropic</option>
-                    <option value="zai">zai</option>
-                    <option value="openrouter">openrouter</option>
-                  </select>
+                <div class="col-6 col-md-2">
+                  <label class="form-label">Sync Window (days)</label>
+                  <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.server.sync_window_days" />
                 </div>
-                <div class="col-12 col-md-6">
-                  <label class="form-label">LLM Model</label>
-                  <input class="form-control" x-model="$store.settings.form.llm_model" />
+                <div class="col-6 col-md-2">
+                  <label class="form-label">Max Sessions</label>
+                  <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.server.sync_max_sessions" />
                 </div>
               </div>
+
+              <!-- Roles section -->
+              <template x-for="roleName in ['lead', 'explorer', 'extract', 'summarize']" :key="roleName">
+                <div class="mb-4">
+                  <h4 class="mb-3" style="font-size:0.85rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--lerim-muted)" x-text="'Role: ' + roleName"></h4>
+                  <div class="row g-3">
+                    <div class="col-6 col-md-3">
+                      <label class="form-label">Provider</label>
+                      <select class="form-select" x-model="$store.settings.form.roles[roleName].provider">
+                        <option value="openrouter">openrouter</option>
+                        <option value="zai">zai</option>
+                        <option value="anthropic">anthropic</option>
+                        <option value="openai">openai</option>
+                        <option value="ollama">ollama</option>
+                      </select>
+                    </div>
+                    <div class="col-6 col-md-5">
+                      <label class="form-label">Model</label>
+                      <input class="form-control" type="text" x-model="$store.settings.form.roles[roleName].model" list="agent-model-options" />
+                    </div>
+                    <div class="col-6 col-md-2">
+                      <label class="form-label">Timeout (s)</label>
+                      <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.roles[roleName].timeout_seconds" />
+                    </div>
+                    <div class="col-6 col-md-2">
+                      <label class="form-label">Max Iters</label>
+                      <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.roles[roleName].max_iterations" />
+                    </div>
+                    <div class="col-12 col-md-5" x-show="$store.settings.form.roles[roleName].sub_model !== undefined">
+                      <label class="form-label">Sub Model (DSPy)</label>
+                      <input class="form-control" type="text" x-model="$store.settings.form.roles[roleName].sub_model" />
+                    </div>
+                    <div class="col-6 col-md-2" x-show="$store.settings.form.roles[roleName].max_llm_calls !== undefined">
+                      <label class="form-label">Max LLM Calls</label>
+                      <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.roles[roleName].max_llm_calls" />
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Tracing section -->
+              <h4 class="mb-3" style="font-size:0.85rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--lerim-muted)">Tracing</h4>
+              <div class="row g-3 mb-3">
+                <div class="col-6 col-md-3">
+                  <label class="form-check">
+                    <input class="form-check-input" type="checkbox" x-model="$store.settings.form.tracing.enabled" />
+                    <span class="form-check-label">Enabled</span>
+                  </label>
+                </div>
+                <div class="col-6 col-md-3">
+                  <label class="form-check">
+                    <input class="form-check-input" type="checkbox" x-model="$store.settings.form.tracing.include_httpx" />
+                    <span class="form-check-label">Include HTTPX</span>
+                  </label>
+                </div>
+                <div class="col-6 col-md-3">
+                  <label class="form-check">
+                    <input class="form-check-input" type="checkbox" x-model="$store.settings.form.tracing.include_content" />
+                    <span class="form-check-label">Include Content</span>
+                  </label>
+                </div>
+              </div>
+
+              <datalist id="agent-model-options">
+                <template x-for="model in $store.settings.model_options" :key="model">
+                  <option :value="model"></option>
+                </template>
+              </datalist>
               <div class="text-muted small mt-3" x-text="$store.settings.status"></div>
             </div>
           </div>
@@ -1325,6 +1488,71 @@
           </div>
         </section>
 
+        <div
+          class="run-viewer-overlay"
+          x-show="$store.runs.viewerOpen"
+          x-transition.opacity.duration.150ms
+          x-on:keydown.escape.window="closeRunViewer()"
+          @click.self="closeRunViewer()"
+          x-cloak
+        >
+          <div class="run-viewer-shell" role="dialog" aria-modal="true" aria-label="Session chat viewer">
+            <div class="run-viewer-header">
+              <div>
+                <div class="run-viewer-title">Session Chat</div>
+                <div class="run-viewer-subtitle" x-text="$store.runs.selectedRun ? ($store.runs.selectedRun.run_id || '') : ''"></div>
+              </div>
+              <button class="btn btn-outline-secondary" @click="closeRunViewer()">Close</button>
+            </div>
+            <div class="run-viewer-meta" x-show="$store.runs.selectedRun">
+              <span class="run-viewer-chip" x-text="($store.runs.selectedRun?.agent_type || 'unknown').toUpperCase()"></span>
+              <span class="run-viewer-chip" x-text="($store.runs.selectedRun?.branch_display || $store.runs.selectedRun?.project || '-')"></span>
+              <span class="run-viewer-chip" x-text="'Status: ' + getStatusText($store.runs.selectedRun || {})"></span>
+              <span class="run-viewer-chip" x-text="'Duration: ' + formatDuration($store.runs.selectedRun?.duration_ms)"></span>
+              <span class="run-viewer-chip" x-text="'Tokens: ' + formatNumber($store.runs.selectedRun?.total_tokens)"></span>
+              <span class="run-viewer-chip" x-text="'Messages: ' + formatNumber($store.runs.selectedRun?.message_count)"></span>
+            </div>
+            <div class="run-viewer-chat" x-ref="runViewerScroll">
+              <template x-if="!$store.runs.selectedRun">
+                <div class="text-muted">Select a run to view transcript chat.</div>
+              </template>
+              <template x-if="$store.runs.selectedRun && $store.app.loading.transcript">
+                <div class="text-muted">Loading transcript...</div>
+              </template>
+              <template x-if="$store.runs.selectedRun && !$store.app.loading.transcript && $store.runs.transcript.length === 0">
+                <div class="text-muted">No transcript data available for this run.</div>
+              </template>
+              <template x-if="$store.runs.selectedRun && !$store.app.loading.transcript && $store.runs.transcript.length > 0">
+                <div>
+                  <template x-for="(msg, i) in $store.runs.transcript" :key="i">
+                    <div class="run-chat-row" :class="getTranscriptRoleClass(msg)">
+                      <div class="run-chat-bubble">
+                        <div class="run-chat-meta">
+                          <span x-text="getTranscriptRoleLabel(msg)"></span>
+                          <span x-text="msg.timestamp ? formatDateTime(msg.timestamp) : ''"></span>
+                        </div>
+                        <div
+                          class="run-chat-content run-chat-markdown"
+                          x-show="hasTranscriptContent(msg.content)"
+                          x-html="renderTranscriptMarkdown(msg.content)"
+                        ></div>
+                        <details class="run-chat-tool-toggle" x-show="msg.tool_input !== undefined && msg.tool_input !== null && msg.tool_input !== ''">
+                          <summary>Tool Input</summary>
+                          <pre class="chat-block" x-text="formatTranscriptContent(msg.tool_input)"></pre>
+                        </details>
+                        <details class="run-chat-tool-toggle" x-show="msg.tool_output !== undefined && msg.tool_output !== null && msg.tool_output !== ''">
+                          <summary>Tool Output</summary>
+                          <pre class="chat-block" x-text="formatTranscriptContent(msg.tool_output)"></pre>
+                        </details>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -1336,6 +1564,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <script src="/assets/graph-explorer/graph-explorer.js"></script>
   <script>
     function escapeHtml(str) {
@@ -1354,6 +1584,28 @@
       escaped = escaped.replace(/&lt;mark&gt;/g, '<mark>');
       escaped = escaped.replace(/&lt;\/mark&gt;/g, '</mark>');
       return escaped;
+    }
+
+    function markdownToSafeHtml(value) {
+      if (value === undefined || value === null) return '';
+      const text = typeof value === 'string' ? value : String(value);
+      if (!text.trim()) return '';
+      if (window.marked && window.DOMPurify) {
+        try {
+          const html = window.marked.parse(text, {
+            gfm: true,
+            breaks: true,
+            headerIds: false,
+            mangle: false,
+          });
+          return window.DOMPurify.sanitize(html, {
+            USE_PROFILES: { html: true },
+          });
+        } catch {
+          // fall through to plain-text rendering
+        }
+      }
+      return escapeHtml(text).replace(/\n/g, '<br>');
     }
 
     function parseCommaList(value) {
@@ -1381,6 +1633,12 @@
       if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
       if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
       return String(num);
+    }
+
+    function formatPercent(value) {
+      if (!Number.isFinite(value)) return '0';
+      const fixed = Number(value).toFixed(1);
+      return fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed;
     }
 
     function formatDuration(ms) {
@@ -1415,7 +1673,8 @@
       return `${diffDays}d ago`;
     }
 
-    const DASHBOARD_READ_ONLY = true;
+    const DASHBOARD_READ_ONLY = false;
+    const DASHBOARD_GRAPH_EXPLORER_ENABLED = false;
 
     function setAgenticScope(run) {
       if (!run) {
@@ -1433,6 +1692,8 @@
       claude: '#f59e0b',
       codex: '#22d3ee',
       opencode: '#34d399',
+      cursor: '#e879f9',
+      cline: '#fb923c',
       muted: '#94a3b8',
       accent: '#22d3ee',
       accent2: '#f59e0b',
@@ -1623,6 +1884,28 @@
       }
       toggleChartEmpty('daily', false);
       const labels = dailyActivity.map(item => item.date);
+      // Only show agents that have at least one session
+      const agentDefs = [
+        { key: 'claude', name: 'Claude', color: chartPalette.claude },
+        { key: 'codex', name: 'Codex', color: chartPalette.codex },
+        { key: 'opencode', name: 'OpenCode', color: chartPalette.opencode },
+        { key: 'cursor', name: 'Cursor', color: '#e879f9' },
+        { key: 'cline', name: 'Cline', color: '#fb923c' },
+      ];
+      const series = agentDefs
+        .filter(def => dailyActivity.some(item => (item[def.key] || 0) > 0))
+        .map(def => ({
+          name: def.name,
+          type: 'line',
+          data: dailyActivity.map(item => item[def.key] || 0),
+          areaStyle: { opacity: 0.2 },
+          smooth: true,
+          itemStyle: { color: def.color },
+        }));
+      if (!series.length) {
+        toggleChartEmpty('daily', true);
+        return;
+      }
       const chart = chartRegistry.get('daily');
       if (!chart) return;
       chart.setOption({
@@ -1637,32 +1920,7 @@
           boundaryGap: false,
         },
         yAxis: chartAxisDefaults({ type: 'value' }),
-        series: [
-          {
-            name: 'Claude',
-            type: 'line',
-            data: dailyActivity.map(item => item.claude || 0),
-            areaStyle: { opacity: 0.2 },
-            smooth: true,
-            itemStyle: { color: chartPalette.claude },
-          },
-          {
-            name: 'Codex',
-            type: 'line',
-            data: dailyActivity.map(item => item.codex || 0),
-            areaStyle: { opacity: 0.2 },
-            smooth: true,
-            itemStyle: { color: chartPalette.codex },
-          },
-          {
-            name: 'OpenCode',
-            type: 'line',
-            data: dailyActivity.map(item => item.opencode || 0),
-            areaStyle: { opacity: 0.2 },
-            smooth: true,
-            itemStyle: { color: chartPalette.opencode },
-          },
-        ],
+        series,
       }, { notMerge: true, lazyUpdate: true });
     }
 
@@ -1679,35 +1937,42 @@
         animation: false,
         tooltip: { trigger: 'axis' },
         legend: { textStyle: { color: chartPalette.muted } },
-        grid: { left: 16, right: 30, top: 24, bottom: 24, containLabel: true },
+        grid: { left: 16, right: 16, top: 30, bottom: 24, containLabel: true },
         xAxis: {
           ...chartAxisDefaults(),
           type: 'category',
           data: labels,
           boundaryGap: false,
         },
-        yAxis: chartAxisDefaults({ type: 'value' }),
+        yAxis: [
+          { ...chartAxisDefaults({ type: 'value' }), name: 'Count', nameTextStyle: { color: chartPalette.muted, fontSize: 10 } },
+          { ...chartAxisDefaults({ type: 'value' }), name: 'Tokens (K)', nameTextStyle: { color: chartPalette.muted, fontSize: 10 } },
+        ],
         series: [
           {
             name: 'Messages',
-            type: 'line',
+            type: 'bar',
+            yAxisIndex: 0,
             data: dailyActivity.map(item => item.messages || 0),
-            smooth: true,
             itemStyle: { color: '#4ade80' },
+            barWidth: 8,
           },
           {
             name: 'Tool Calls',
-            type: 'line',
+            type: 'bar',
+            yAxisIndex: 0,
             data: dailyActivity.map(item => item.tool_calls || 0),
-            smooth: true,
             itemStyle: { color: '#fbbf24' },
+            barWidth: 8,
           },
           {
             name: 'Tokens (K)',
             type: 'line',
+            yAxisIndex: 1,
             data: dailyActivity.map(item => Math.round((item.tokens || 0) / 1000)),
             smooth: true,
             itemStyle: { color: chartPalette.accent3 },
+            lineStyle: { width: 2 },
           },
         ],
       }, { notMerge: true, lazyUpdate: true });
@@ -1728,41 +1993,49 @@
         animation: false,
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
         legend: { textStyle: { color: chartPalette.muted } },
-        grid: { left: 16, right: 16, top: 24, bottom: 24, containLabel: true },
+        grid: { left: 16, right: 16, top: 30, bottom: 24, containLabel: true },
         xAxis: {
           ...chartAxisDefaults(),
           type: 'category',
           data: labels,
         },
-        yAxis: chartAxisDefaults({ type: 'value' }),
+        yAxis: [
+          { ...chartAxisDefaults({ type: 'value' }), name: 'Count', nameTextStyle: { color: chartPalette.muted, fontSize: 10 } },
+          { ...chartAxisDefaults({ type: 'value' }), name: 'Tokens (K)', nameTextStyle: { color: chartPalette.muted, fontSize: 10 } },
+        ],
         series: [
           {
             name: 'Sessions',
             type: 'bar',
-            stack: 'activity',
+            yAxisIndex: 0,
             data: labels.map((_, i) => hourMap[i]?.sessions || 0),
             itemStyle: { color: '#60a5fa' },
+            barWidth: 6,
           },
           {
             name: 'Messages',
             type: 'bar',
-            stack: 'activity',
+            yAxisIndex: 0,
             data: labels.map((_, i) => hourMap[i]?.messages || 0),
             itemStyle: { color: '#4ade80' },
+            barWidth: 6,
           },
           {
             name: 'Tool Calls',
             type: 'bar',
-            stack: 'activity',
+            yAxisIndex: 0,
             data: labels.map((_, i) => hourMap[i]?.tool_calls || 0),
             itemStyle: { color: '#f59e0b' },
+            barWidth: 6,
           },
           {
             name: 'Tokens (K)',
-            type: 'bar',
-            stack: 'activity',
+            type: 'line',
+            yAxisIndex: 1,
             data: labels.map((_, i) => Math.round((hourMap[i]?.tokens || 0) / 1000)),
             itemStyle: { color: '#a78bfa' },
+            smooth: true,
+            lineStyle: { width: 2 },
           },
         ],
       }, { notMerge: true, lazyUpdate: true });
@@ -1860,7 +2133,6 @@
           stats_extended: false,
           runs: false,
           transcript: false,
-          reflect: false,
           searching: false,
         },
       });
@@ -1881,6 +2153,7 @@
           avg_session_duration_ms: 0,
           avg_messages_per_session: 0,
           error_rate: 0,
+          duration_data_available: false,
         },
         by_agent: {},
         model_usage: {},
@@ -1901,6 +2174,7 @@
         selectedRun: null,
         selectedIndex: -1,
         transcript: [],
+        viewerOpen: false,
         search: {
           query: '',
           repo: '',
@@ -1928,6 +2202,12 @@
           state: '',
           project: '',
         },
+        filterOptions: {
+          types: [],
+          kinds: [],
+          projects: [],
+          tags: [],
+        },
       });
 
       Alpine.store('refine', {
@@ -1948,12 +2228,16 @@
         status: '',
         model_options: [],
         sources: [],
+        user_config_path: '~/.lerim/config.toml',
         form: {
-          agent_provider: 'anthropic',
-          agent_model: '',
-          agent_timeout: 120,
-          llm_provider: 'zai',
-          llm_model: '',
+          server: { host: '127.0.0.1', port: 8765, poll_interval_minutes: 30, sync_window_days: 7, sync_max_sessions: 50 },
+          roles: {
+            lead: { provider: 'openrouter', model: '', timeout_seconds: 300, max_iterations: 24 },
+            explorer: { provider: 'openrouter', model: '', timeout_seconds: 180, max_iterations: 16 },
+            extract: { provider: 'openrouter', model: '', sub_model: '', timeout_seconds: 180, max_iterations: 8, max_llm_calls: 12 },
+            summarize: { provider: 'openrouter', model: '', sub_model: '', timeout_seconds: 180, max_iterations: 8, max_llm_calls: 12 },
+          },
+          tracing: { enabled: false, include_httpx: false, include_content: true },
         },
       });
 
@@ -1976,16 +2260,17 @@
           { id: 'overview', label: 'Overview' },
           { id: 'runs', label: 'Runs' },
           { id: 'memories', label: 'Memories' },
-          { id: 'refine', label: 'Session Intelligence' },
+          { id: 'refine', label: 'Pipeline' },
           { id: 'settings', label: 'Settings' },
         ],
-        runsLimit: 30,
+        runsLimit: 50,
         sortField: 'started_at',
         sortDir: 'desc',
-        reflectInput: '',
-        reflectOutput: '',
         memoryExplorerApp: null,
         init() {
+          if (!DASHBOARD_GRAPH_EXPLORER_ENABLED) {
+            this.$store.memories.view = 'library';
+          }
           this.loadStats();
           this.loadRefineStatus();
 
@@ -2043,9 +2328,7 @@
 
         onFilterChange() {
           this.loadStats();
-          if (this.$store.app.activeTab === 'runs') {
-            this.loadRuns(0);
-          }
+          this.loadRuns(0);
         },
 
         refresh() {
@@ -2067,6 +2350,10 @@
 
         async setMemoryView(view) {
           const nextView = view === 'graph' ? 'graph' : 'library';
+          if (nextView === 'graph' && !DASHBOARD_GRAPH_EXPLORER_ENABLED) {
+            this.$store.memories.view = 'library';
+            return;
+          }
           this.$store.memories.view = nextView;
           if (nextView !== 'graph') return;
           await this.$nextTick();
@@ -2326,15 +2613,27 @@
             const resp = await fetch('/api/config');
             if (!resp.ok) throw new Error('Failed to load settings');
             const data = await resp.json();
-            const effective = data.effective || {};
+            const eff = data.effective || {};
             this.$store.settings.sources = data.sources || [];
-            this.$store.settings.form.agent_provider = effective.provider || 'anthropic';
-            this.$store.settings.form.agent_model = effective.agent_model || '';
-            this.$store.settings.form.agent_timeout = effective.agent_timeout || 120;
-            this.$store.settings.form.llm_provider = effective.llm_provider || 'zai';
-            this.$store.settings.form.llm_model = effective.llm_model || '';
+            this.$store.settings.user_config_path = data.user_config_path || '~/.lerim/config.toml';
+            // Populate server settings
+            if (eff.server) {
+              Object.assign(this.$store.settings.form.server, eff.server);
+            }
+            // Populate roles
+            if (eff.roles) {
+              for (const [name, role] of Object.entries(eff.roles)) {
+                if (this.$store.settings.form.roles[name]) {
+                  Object.assign(this.$store.settings.form.roles[name], role);
+                }
+              }
+            }
+            // Populate tracing
+            if (eff.tracing) {
+              Object.assign(this.$store.settings.form.tracing, eff.tracing);
+            }
             this.$store.settings.status = `Loaded from ${data.user_config_path || '~/.lerim/config.toml'}`;
-            await this.loadModelOptions(this.$store.settings.form.agent_provider);
+            await this.loadModelOptions(this.$store.settings.form.roles.lead.provider);
           } catch (e) {
             console.error('Failed to load settings:', e);
             this.$store.settings.status = 'Failed to load settings.';
@@ -2346,7 +2645,7 @@
 
         async loadModelOptions(provider) {
           try {
-            const selected = provider || this.$store.settings.form.agent_provider;
+            const selected = provider || this.$store.settings.form.roles.lead.provider || 'openrouter';
             const resp = await fetch(`/api/config/models?provider=${encodeURIComponent(selected)}`);
             if (!resp.ok) throw new Error('Failed to load model options');
             const data = await resp.json();
@@ -2357,35 +2656,41 @@
         },
 
         async saveSettings() {
-          if (DASHBOARD_READ_ONLY) {
-            this.$store.settings.status = 'Read-only dashboard. Update settings via CLI config.';
-            Alpine.store('toasts').add('Read-only dashboard. Use `lerim config set` instead.', 'info');
-            return;
-          }
           this.$store.settings.saving = true;
           this.$store.settings.status = 'Saving...';
           try {
+            const form = this.$store.settings.form;
             const patch = {
-              agent: {
-                provider: this.$store.settings.form.agent_provider,
-                model: this.$store.settings.form.agent_model,
-                timeout: Number(this.$store.settings.form.agent_timeout || 120),
+              server: {
+                host: form.server.host,
+                port: Number(form.server.port),
+                poll_interval_minutes: Number(form.server.poll_interval_minutes),
+                sync_window_days: Number(form.server.sync_window_days),
+                sync_max_sessions: Number(form.server.sync_max_sessions),
               },
-              llm: {
-                provider: this.$store.settings.form.llm_provider,
-                model: this.$store.settings.form.llm_model,
+              roles: {},
+              tracing: {
+                enabled: form.tracing.enabled,
+                include_httpx: form.tracing.include_httpx,
+                include_content: form.tracing.include_content,
               },
             };
+            for (const [name, role] of Object.entries(form.roles)) {
+              const r = { provider: role.provider, model: role.model, timeout_seconds: Number(role.timeout_seconds), max_iterations: Number(role.max_iterations) };
+              if (role.sub_model !== undefined) r.sub_model = role.sub_model;
+              if (role.max_llm_calls !== undefined) r.max_llm_calls = Number(role.max_llm_calls);
+              patch.roles[name] = r;
+            }
             const resp = await fetch('/api/config', {
-              method: 'PATCH',
+              method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ patch }),
             });
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error || 'Failed to save settings');
-            this.$store.settings.status = 'Saved to ~/.lerim/config.toml';
+            this.$store.settings.status = 'Saved successfully.';
             this.$store.settings.sources = data.sources || this.$store.settings.sources;
-            Alpine.store('toasts').add('Settings saved', 'info');
+            Alpine.store('toasts').add('Settings saved', 'success');
           } catch (e) {
             console.error('Failed to save settings:', e);
             this.$store.settings.status = `Save failed: ${e.message || e}`;
@@ -2435,11 +2740,12 @@
             this.$store.runs.items = data.runs || [];
             this.$store.runs.pagination = data.pagination || { offset: 0, total: 0, has_more: false };
           }
-          this.$store.runs.selectedRun = null;
-          this.$store.runs.selectedIndex = -1;
-          this.$store.runs.transcript = [];
-          setAgenticScope(null);
-        } catch (e) {
+            this.$store.runs.selectedRun = null;
+            this.$store.runs.selectedIndex = -1;
+            this.$store.runs.transcript = [];
+            this.$store.runs.viewerOpen = false;
+            setAgenticScope(null);
+          } catch (e) {
             console.error('Failed to load runs:', e);
             Alpine.store('toasts').add('Failed to load runs', 'error');
           } finally {
@@ -2457,6 +2763,9 @@
             if (!resp.ok) throw new Error('Transcript not available');
             const data = await resp.json();
             this.$store.runs.transcript = data.messages || [];
+            if (this.$store.runs.viewerOpen) {
+              this.$nextTick(() => this.scrollTranscriptToBottom());
+            }
           } catch (e) {
             console.error('Failed to load transcript:', e);
             Alpine.store('toasts').add('Failed to load transcript', 'error');
@@ -2475,6 +2784,59 @@
           this.loadTranscript(run);
         },
 
+        openRunViewer(index) {
+          if (!Number.isInteger(index) || index < 0) return;
+          this.selectRun(index);
+          this.$store.runs.viewerOpen = true;
+          if (!this.$store.app.loading.transcript) {
+            this.$nextTick(() => this.scrollTranscriptToBottom());
+          }
+        },
+
+        closeRunViewer() {
+          this.$store.runs.viewerOpen = false;
+        },
+
+        scrollTranscriptToBottom() {
+          const scroller = this.$refs.runViewerScroll;
+          if (!scroller) return;
+          scroller.scrollTop = scroller.scrollHeight;
+        },
+
+        formatTranscriptContent(value) {
+          if (value === undefined || value === null) return '';
+          if (typeof value === 'string') return value;
+          try {
+            return JSON.stringify(value, null, 2);
+          } catch {
+            return String(value);
+          }
+        },
+
+        hasTranscriptContent(value) {
+          return this.formatTranscriptContent(value).trim().length > 0;
+        },
+
+        renderTranscriptMarkdown(value) {
+          return markdownToSafeHtml(this.formatTranscriptContent(value));
+        },
+
+        getTranscriptRoleClass(msg) {
+          const role = (msg?.role || 'assistant').toLowerCase();
+          if (role === 'user') return 'user';
+          if (role === 'tool') return 'tool';
+          if (role === 'system') return 'system';
+          return 'assistant';
+        },
+
+        getTranscriptRoleLabel(msg) {
+          const role = (msg?.role || 'assistant').toLowerCase();
+          if (role === 'tool') return msg?.tool_name ? `Tool · ${msg.tool_name}` : 'Tool';
+          if (role === 'user') return 'User';
+          if (role === 'system') return 'System';
+          return 'Assistant';
+        },
+
         searchRuns() {
           this.$store.runs.search.active = true;
           this.loadRuns(0);
@@ -2491,7 +2853,7 @@
         },
 
         getAgentLetter(type) {
-          const map = { claude: 'C', codex: 'X', opencode: 'O' };
+          const map = { claude: 'C', codex: 'X', opencode: 'O', cursor: 'U', cline: 'L' };
           return map[type] || '?';
         },
 
@@ -2527,9 +2889,27 @@
           return `Page ${currentPage} of ${totalPages} (${p.total} sessions)`;
         },
 
+        async loadMemoryFilterOptions() {
+          try {
+            const resp = await fetch('/api/memory-graph/options');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            this.$store.memories.filterOptions.types = data.types || [];
+            this.$store.memories.filterOptions.kinds = data.kinds || [];
+            this.$store.memories.filterOptions.projects = data.projects || [];
+            this.$store.memories.filterOptions.tags = data.tags || [];
+          } catch (e) {
+            console.warn('Failed to load memory filter options:', e);
+          }
+        },
+
         async loadMemories() {
           this.$store.memories.loading = true;
           const filters = this.$store.memories.filters;
+          // Load filter options in background on first call
+          if (!this.$store.memories.filterOptions.types.length) {
+            this.loadMemoryFilterOptions();
+          }
           try {
             const params = new URLSearchParams();
             if (filters.query) params.set('query', filters.query);
@@ -2676,43 +3056,6 @@
             Alpine.store('toasts').add('Failed to delete memory', 'error');
           } finally {
             this.$store.memories.deleting = false;
-          }
-        },
-
-        async runReflect(preset, customPrompt) {
-          if (DASHBOARD_READ_ONLY) {
-            this.reflectOutput = 'Dashboard is read-only. Use `lerim chat` from CLI.';
-            return;
-          }
-          const run = this.$store.runs.selectedRun;
-          if (!run) {
-            this.reflectOutput = 'Select a run first.';
-            return;
-          }
-
-          this.reflectOutput = 'Reflecting...';
-          this.$store.app.loading.reflect = true;
-
-          try {
-            const resp = await fetch('/api/reflect', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                agent: run.agent_type,
-                session_id: run.run_id,
-                preset: preset || 'custom',
-                custom_prompt: customPrompt || '',
-                all_projects: true,
-              })
-            });
-
-            if (!resp.ok) throw new Error('Reflection failed');
-            const data = await resp.json();
-            this.reflectOutput = data.result || data.error || 'No results';
-          } catch (e) {
-            this.reflectOutput = 'Reflection failed: ' + e.message;
-          } finally {
-            this.$store.app.loading.reflect = false;
           }
         },
 

@@ -11,7 +11,8 @@ Rules:
 - Keep memory operations deterministic and explicit.
 - Use tools for filesystem actions; do not fabricate file content.
 - Keep writes inside memory/workspace boundaries.
-- For candidate evidence gathering, delegate the read-only explorer subagent.
+- For candidate evidence gathering, delegate the read-only explorer subagent via explore(query).
+- You can call up to 4 explore() calls in the SAME tool-call turn for parallel execution when you have independent queries.
 - Prefer concise, structured outputs."""
 
 

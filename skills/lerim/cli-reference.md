@@ -61,15 +61,15 @@ Hot-path: discover new agent sessions from connected platforms, enqueue them,
 and run DSPy extraction to create memory primitives.
 
 **Time window** controls which sessions to scan:
-- `--window <duration>` -- relative window like `7d`, `24h`, `30m` (default: `30d`)
+- `--window <duration>` -- relative window like `7d`, `24h`, `30m` (default: from config, `7d`)
 - `--window all` -- scan all sessions ever recorded
 - `--since` / `--until` -- absolute ISO-8601 bounds (overrides `--window`)
 
 Duration format: `<number><unit>` where unit is `s` (seconds), `m` (minutes), `h` (hours), `d` (days).
 
 ```bash
-lerim sync                          # sync last 30 days (default)
-lerim sync --window 7d              # sync last 7 days only
+lerim sync                          # sync using configured window (default: 7d)
+lerim sync --window 30d             # sync last 30 days
 lerim sync --window all             # sync everything
 lerim sync --agent claude,codex     # only sync these platforms
 lerim sync --run-id abc123 --force  # re-extract a specific session
@@ -84,10 +84,10 @@ lerim sync --ignore-lock            # skip writer lock (debugging only)
 |------|---------|-------------|
 | `--run-id` | -- | Target a single session by run ID (bypasses index scan) |
 | `--agent` | all | Comma-separated platform filter (e.g. `claude,codex`) |
-| `--window` | `30d` | Relative time window (`30s`, `2m`, `1h`, `7d`, or `all`) |
+| `--window` | config `sync_window_days` (`7d`) | Relative time window (`30s`, `2m`, `1h`, `7d`, or `all`) |
 | `--since` | -- | ISO-8601 start bound (overrides `--window`) |
 | `--until` | now | ISO-8601 end bound (only with `--since`) |
-| `--max-sessions` | `50` | Max sessions to extract per run |
+| `--max-sessions` | config `sync_max_sessions` (`50`) | Max sessions to extract per run |
 | `--no-extract` | off | Index/enqueue only, skip extraction |
 | `--force` | off | Re-extract already-processed sessions |
 | `--dry-run` | off | Preview mode, no writes |
@@ -117,22 +117,24 @@ lerim maintain --dry-run      # preview only, no writes
 ### `lerim daemon`
 
 Runs a continuous loop: sync (index + extract) then maintain (refine),
-repeating at a configurable interval.
+repeating at a configurable interval. Sessions are processed in parallel
+using a thread pool (configurable via `sync_max_workers`, default 4).
 
 ```bash
-lerim daemon                  # run forever with default poll interval
-lerim daemon --once           # run one sync+maintain cycle and exit
+lerim daemon                     # run forever with default poll interval (30 min)
+lerim daemon --once              # run one sync+maintain cycle and exit
 lerim daemon --poll-seconds 120  # poll every 2 minutes
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--once` | off | Run one cycle and exit |
-| `--poll-seconds` | config | Seconds between cycles (minimum 30s) |
+| `--poll-seconds` | config `poll_interval_minutes` (`30` min) | Seconds between cycles (minimum 30s) |
 
 ### `lerim dashboard`
 
-Launch a local read-only HTTP dashboard to browse memories, sessions, and status.
+Launch a local HTTP dashboard to browse sessions/memories, view pipeline status,
+and update settings (writes to `~/.lerim/config.toml`).
 
 ```bash
 lerim dashboard                          # start on default host/port

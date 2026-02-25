@@ -7,7 +7,6 @@ import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import pytest
 
 from lerim.adapters.cursor import (
     count_sessions,
@@ -227,3 +226,76 @@ def test_validate_connection_warns_on_empty_conversations():
         assert result["ok"] is True
         assert result["messages"] == 0
         assert result["sessions"] == 0
+
+
+def test_iter_sessions_returns_content_hash():
+    """iter_sessions populates content_hash on returned records."""
+    with TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "state.vscdb"
+        cache_dir = Path(tmp) / "cache"
+        _make_cursor_db(
+            db_path,
+            composers={"hh": {"composerId": "hh", "createdAt": 1700000000000}},
+            bubbles=[("hh", "1", {"type": 1, "text": "hello"})],
+        )
+        records = iter_sessions(traces_dir=Path(tmp), cache_dir=cache_dir)
+        assert len(records) == 1
+        assert records[0].content_hash is not None
+        assert len(records[0].content_hash) == 64
+
+
+def test_iter_sessions_skips_unchanged_hash():
+    """iter_sessions skips sessions whose content hash has not changed."""
+    with TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "state.vscdb"
+        cache_dir = Path(tmp) / "cache"
+        _make_cursor_db(
+            db_path,
+            composers={"cc": {"composerId": "cc", "createdAt": 1700000000000}},
+            bubbles=[("cc", "1", {"type": 1, "text": "hi"})],
+        )
+        first = iter_sessions(traces_dir=Path(tmp), cache_dir=cache_dir)
+        assert len(first) == 1
+        old_hash = first[0].content_hash
+
+        # Same DB content → same hash → should be skipped
+        records = iter_sessions(
+            traces_dir=Path(tmp),
+            cache_dir=cache_dir,
+            known_run_hashes={"cc": old_hash},
+        )
+        assert len(records) == 0
+
+
+def test_iter_sessions_returns_changed_cursor_session():
+    """iter_sessions returns a session when its DB content changed."""
+    with TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "state.vscdb"
+        cache_dir = Path(tmp) / "cache"
+        _make_cursor_db(
+            db_path,
+            composers={"chg": {"composerId": "chg", "createdAt": 1700000000000}},
+            bubbles=[("chg", "1", {"type": 1, "text": "original"})],
+        )
+        first = iter_sessions(traces_dir=Path(tmp), cache_dir=cache_dir)
+        old_hash = first[0].content_hash
+
+        # Add a new bubble (simulates resumed chat)
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO cursorDiskKV VALUES (?, ?)",
+            (
+                "bubbleId:chg:2",
+                json.dumps({"type": 2, "text": "new assistant reply"}),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        records = iter_sessions(
+            traces_dir=Path(tmp),
+            cache_dir=cache_dir,
+            known_run_hashes={"chg": old_hash},
+        )
+        assert len(records) == 1
+        assert records[0].content_hash != old_hash

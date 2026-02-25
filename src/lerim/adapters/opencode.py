@@ -21,7 +21,12 @@ from pathlib import Path
 from typing import Any
 
 from lerim.adapters.base import SessionRecord, ViewerMessage, ViewerSession
-from lerim.adapters.common import in_window, load_jsonl_dict_lines, parse_timestamp
+from lerim.adapters.common import (
+    compute_file_hash,
+    in_window,
+    load_jsonl_dict_lines,
+    parse_timestamp,
+)
 
 
 def default_path() -> Path | None:
@@ -321,14 +326,14 @@ def iter_sessions(
     traces_dir: Path | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
-    known_run_ids: set[str] | None = None,
+    known_run_hashes: dict[str, str] | None = None,
     cache_dir: Path | None = None,
 ) -> list[SessionRecord]:
     """Enumerate OpenCode sessions, export as JSONL, and build session records.
 
     Reads sessions from the SQLite database, exports each as a JSONL cache
-    file in *cache_dir*, and returns :class:`SessionRecord` objects pointing
-    to those files so the downstream sync pipeline can read them as plain text.
+    file in *cache_dir*, computes a content hash, and skips sessions whose
+    hash is unchanged since the last sync.
     """
     root = traces_dir or default_path()
     if root is None or not root.exists():
@@ -353,8 +358,6 @@ ORDER BY time_created"""
         return []
 
     for sess_id, directory, title, time_created in rows:
-        if known_run_ids and sess_id in known_run_ids:
-            continue
         start_dt = parse_timestamp(time_created)
         if not in_window(start_dt, start, end):
             continue
@@ -363,8 +366,12 @@ ORDER BY time_created"""
         if session is None:
             continue
 
-        # Export to JSONL cache file
+        # Export to JSONL cache file and compute hash
         jsonl_path = _export_session_jsonl(session, out_dir)
+        file_hash = compute_file_hash(jsonl_path)
+        if known_run_hashes and sess_id in known_run_hashes:
+            if known_run_hashes[sess_id] == file_hash:
+                continue
 
         summaries: list[str] = []
         for msg in session.messages:
@@ -388,6 +395,7 @@ ORDER BY time_created"""
                 tool_call_count=tool_calls,
                 total_tokens=session.total_input_tokens + session.total_output_tokens,
                 summaries=summaries,
+                content_hash=file_hash,
             )
         )
 

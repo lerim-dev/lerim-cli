@@ -2,7 +2,7 @@
   <img src="assets/lerim.png" alt="Lerim Logo" width="160">
 </p>
 
-<p align="center"><strong>Continual learning layer for coding agents.</strong></p>
+<p align="center"><strong>Continual learning layer for coding agents</strong></p>
 <p align="center"><a href="https://lerim.dev/">lerim.dev</a></p>
 
 Lerim is a continual learning layer that gives coding agents persistent memory across sessions. It watches your agent conversations (Claude Code, Codex, Cursor, OpenCode, ...), extracts decisions and learnings, and stores them as plain markdown files that both humans and agents can read. Memories are refined offline over time through merging, deduplication, archiving, and decay-based forgetting. You can query stored memories anytime to bring relevant past context into your current session.
@@ -16,7 +16,7 @@ Lerim is file-first and primitive-first.
 - Global fallback memory: `~/.lerim/`
 - Search default: `files` (no index required)
 - Orchestration runtime: `pydantic-ai` lead agent + read-only explorer subagent
-- Extraction/summarization: `dspy.RLM` role-configured models (default Ollama `qwen3:8b`)
+- Extraction/summarization: `dspy.RLM` role-configured models (default OpenRouter `x-ai/grok-4.1-fast`)
 - Graph source of truth: explicit id/slug references (and `related` when present)
 
 This keeps memory readable by humans and easy for agents to traverse.
@@ -28,6 +28,22 @@ Lead flow:
 3. Lead runs deterministic decision policy for `add|update|no-op`.
 4. Lead writes memory only through boundary-enforced runtime write/edit tools.
 5. `sync` stays lightweight; `maintain` runs offline memory refinement (merge duplicates, archive low-value entries, consolidate related memories, apply time-based decay).
+
+### Sync path
+
+<p align="center">
+  <img src="assets/sync.png" alt="Sync path" width="700">
+</p>
+
+The sync path processes new agent sessions: reads transcript archives, extracts decision and learning candidates via DSPy, deduplicates against existing memories, and writes new primitives to the memory folder.
+
+### Maintain path
+
+<p align="center">
+  <img src="assets/maintain.png" alt="Maintain path" width="700">
+</p>
+
+The maintain path runs offline refinement over stored memories: merges duplicates, archives low-value entries, consolidates related memories, and applies time-based decay to keep the memory store clean and relevant.
 
 ## Quick start
 
@@ -70,6 +86,39 @@ At the start of a session, tell your agent:
 
 Your agent will run `lerim chat` or `lerim memory search` to pull in past decisions and learnings before it starts working.
 
+## Dashboard
+
+The dashboard gives you a local UI for session analytics, memory browsing, and runtime status.
+
+<p align="center">
+  <img src="assets/dashboard.png" alt="Lerim dashboard" width="1100">
+</p>
+
+### Run it locally
+
+```bash
+# simple
+lerim dashboard
+
+# explicit host/port
+python -m lerim dashboard --host 127.0.0.1 --port 8765
+```
+
+Then open `http://127.0.0.1:8765`.
+
+### Tabs
+
+- **Overview**: high-level metrics and charts (sessions, messages, tools, errors, tokens, activity by day/hour, model usage).
+- **Runs**: searchable session list (50/page) with status and metadata; open any run in a full-screen chat viewer.
+- **Memories**: library + editor for memory records (filter, inspect, edit title/body/kind/confidence/tags).
+- **Pipeline**: sync/maintain status, extraction queue state, and latest extraction report.
+- **Settings**: dashboard-editable config for server, model roles, and tracing; saves to `~/.lerim/config.toml`.
+
+### Notes
+
+- Top bar filters (`Agent`, `Scope`) update dashboard metrics and run listings.
+- Graph Explorer code is kept in the project but currently hidden in the UI.
+
 ## CLI reference
 
 Full command reference: [`skills/lerim/cli-reference.md`](skills/lerim/cli-reference.md)
@@ -93,8 +142,8 @@ lerim status                                # runtime state
 ```bash
 uv venv && source .venv/bin/activate
 uv pip install -e .
-scripts/run_tests.sh unit
-scripts/run_tests.sh all
+tests/run_tests.sh unit
+tests/run_tests.sh all
 ```
 
 ### Configuration
@@ -107,6 +156,13 @@ TOML-layered config (low to high priority):
 4. `LERIM_CONFIG` env var path (explicit override, for CI/tests)
 
 API keys come from environment variables only (`ZAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, optional `ANTHROPIC_API_KEY`).
+
+Default role model config (from `src/lerim/config/default.toml`):
+
+- `lead`: `provider=openrouter`, `model=x-ai/grok-4.1-fast`
+- `explorer`: `provider=openrouter`, `model=x-ai/grok-4.1-fast`
+- `extract`: `provider=openrouter`, `model=x-ai/grok-4.1-fast`, `sub_model=x-ai/grok-4.1-fast`
+- `summarize`: `provider=openrouter`, `model=x-ai/grok-4.1-fast`, `sub_model=x-ai/grok-4.1-fast`
 
 ### Tracing (OpenTelemetry)
 
@@ -144,12 +200,58 @@ Config options (`[tracing]` in TOML):
 | `include_httpx` | `false` | Capture raw HTTP request/response bodies |
 | `include_content` | `true` | Include prompt/completion text in spans |
 
-### Supported platforms
+### Connecting coding agents
 
-- `claude` — reads from `~/.claude/projects/` (JSONL files)
-- `codex` — reads from `~/.codex/sessions/` (JSONL files)
-- `cursor` — reads from Cursor's `state.vscdb` SQLite DB, exports sessions as JSONL to `~/.lerim/cache/cursor/`
-- `opencode` — reads from `~/.local/share/opencode/`
+Lerim ingests session transcripts from your coding agents to extract decisions and learnings. The `lerim connect` command registers an agent platform so Lerim knows where to find its sessions.
+
+#### Supported agents
+
+| Platform | Session store | Format |
+|----------|--------------|--------|
+| `claude` | `~/.claude/projects/` | JSONL files |
+| `codex` | `~/.codex/sessions/` | JSONL files |
+| `cursor` | `~/Library/Application Support/Cursor/User/globalStorage/` (macOS) | SQLite `state.vscdb`, exported to JSONL cache |
+| `opencode` | `~/.local/share/opencode/` | SQLite `opencode.db`, exported to JSONL cache |
+
+#### How to connect
+
+Auto-detect and connect all supported platforms at once:
+
+```bash
+lerim connect auto
+```
+
+Or connect a specific platform:
+
+```bash
+lerim connect claude
+lerim connect codex
+lerim connect cursor
+lerim connect opencode
+```
+
+List currently connected platforms:
+
+```bash
+lerim connect list
+```
+
+Disconnect a platform:
+
+```bash
+lerim connect remove claude
+```
+
+#### Custom session path
+
+If your agent stores sessions in a non-default location, use `--path` to point Lerim to the correct folder:
+
+```bash
+lerim connect claude --path /custom/path/to/claude/sessions
+lerim connect cursor --path ~/my-cursor-data/globalStorage
+```
+
+The path is expanded (`~` is resolved) and must exist on disk. This overrides the auto-detected default for that platform.
 
 ### Search
 
@@ -216,10 +318,6 @@ Fresh start:
 lerim memory reset --yes        # wipe everything
 lerim sync --max-sessions 5     # re-sync newest conversations
 ```
-
-## Migration from Acreta
-
-If you previously used Acreta, the data directories have moved from `~/.acreta/` to `~/.lerim/` and from `<repo>/.acreta/` to `<repo>/.lerim/`. Existing data is not migrated automatically. Run `lerim memory reset --yes && lerim sync` to start fresh.
 
 ## Docs
 

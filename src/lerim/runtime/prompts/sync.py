@@ -6,7 +6,6 @@ import json
 import shlex
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
 
 from lerim.memory.memory_record import memory_write_schema_prompt
 
@@ -49,8 +48,8 @@ Inputs:
 
 Checklist:
 - validate_inputs
-- extract_pipeline
-- summarize_pipeline
+- PARALLEL: call extract_pipeline AND summarize_pipeline together in the SAME tool-call turn (they are independent — both read the raw trace)
+- optionally compose short guidance from trace metadata/context and pass it to both pipeline calls
 - explore for matching
 - decide_add_update_no_op
 - write memory files
@@ -60,13 +59,15 @@ Checklist:
 
 Execution rules:
 - Do not inline or normalize trace content. Use only trace_path file access.
-- Use runtime pipeline tools:
-  1) extract_pipeline(trace_path, output_path, metadata, metrics)
-  2) summarize_pipeline(trace_path, output_path, metadata, metrics)
+- Use runtime pipeline tools — call BOTH in the SAME response turn so they run in parallel:
+  1) extract_pipeline(trace_path, output_path, metadata, metrics, guidance)
+  2) summarize_pipeline(trace_path, output_path, metadata, metrics, guidance)
   (Equivalent reference commands: {extract_cmd} and {summary_cmd})
+- guidance is optional. If used, keep it concise and specific (trace shape, likely focus areas, and dedupe hints).
 - Read extract.json from artifact paths.
 - The summary pipeline writes the summary directly to memory_root/summaries/ via --memory-root. Do NOT write summary files yourself.
 - For candidate matching, use explore(query) to gather evidence.
+- You can call up to 4 explore() calls in the SAME tool-call turn for parallel execution when you have independent queries (e.g. one per extracted candidate).
 - Explorer subagent is read-only and returns evidence envelopes.
 - Lead agent is the only writer and final decider.
 - Deterministic decision policy for non-summary candidates:

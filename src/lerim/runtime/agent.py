@@ -180,6 +180,7 @@ class LerimAgent:
             fallback_models=lead_role.fallback_models,
             timeout_seconds=max(1, int(resolved_timeout)),
             max_iterations=lead_role.max_iterations,
+            openrouter_provider_order=lead_role.openrouter_provider_order,
         )
         self.config = config
         self.model = build_orchestration_model_from_role(role, config=config)
@@ -286,12 +287,16 @@ Always use tools to read/write files and produce concise completion output."""
         if "explore" in allowed_tools:
 
             @agent.tool
-            def explore(
+            async def explore(
                 ctx: RunContext[RuntimeToolContext],
                 query: str,
             ) -> dict[str, Any]:
-                """Delegate read-only evidence gathering to explorer subagent."""
-                result = get_explorer_agent().run_sync(
+                """Delegate read-only evidence gathering to explorer subagent.
+
+                Async so PydanticAI can run multiple explore calls in parallel
+                when the LLM emits them in the same tool-call turn (max 4).
+                """
+                result = await get_explorer_agent().run(
                     query, deps=ctx.deps, usage=ctx.usage
                 )
                 return result.output.model_dump()
@@ -339,10 +344,12 @@ Always use tools to read/write files and produce concise completion output."""
                 output_path: str,
                 metadata: Any | None = None,
                 metrics: Any | None = None,
+                guidance: str | None = None,
             ) -> dict[str, Any]:
                 """Run DSPy extraction pipeline and write JSON artifact.
 
                 metadata and metrics may be dicts or JSON strings.
+                guidance is optional natural language context from the lead agent.
                 """
                 return run_extract_pipeline_tool(
                     context=ctx.deps,
@@ -350,6 +357,7 @@ Always use tools to read/write files and produce concise completion output."""
                     output_path=output_path,
                     metadata=metadata,
                     metrics=metrics,
+                    guidance=guidance,
                 )
 
         if "summarize_pipeline" in allowed_tools:
@@ -361,10 +369,12 @@ Always use tools to read/write files and produce concise completion output."""
                 output_path: str,
                 metadata: Any | None = None,
                 metrics: Any | None = None,
+                guidance: str | None = None,
             ) -> dict[str, Any]:
                 """Run DSPy summarization pipeline and write summary pointer artifact.
 
                 metadata and metrics may be dicts or JSON strings.
+                guidance is optional natural language context from the lead agent.
                 """
                 return run_summarization_pipeline_tool(
                     context=ctx.deps,
@@ -372,6 +382,7 @@ Always use tools to read/write files and produce concise completion output."""
                     output_path=output_path,
                     metadata=metadata,
                     metrics=metrics,
+                    guidance=guidance,
                 )
 
         return agent
