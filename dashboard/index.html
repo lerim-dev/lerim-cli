@@ -475,11 +475,99 @@
     }
 
     .run-chat-content {
-      white-space: pre-wrap;
+      white-space: normal;
       word-break: break-word;
       font-size: 0.86rem;
       line-height: 1.45;
       color: #dde7f6;
+    }
+
+    .run-chat-markdown > *:first-child {
+      margin-top: 0;
+    }
+
+    .run-chat-markdown > *:last-child {
+      margin-bottom: 0;
+    }
+
+    .run-chat-markdown h1,
+    .run-chat-markdown h2,
+    .run-chat-markdown h3,
+    .run-chat-markdown h4 {
+      margin: 0.7rem 0 0.45rem;
+      font-size: 0.95rem;
+      line-height: 1.35;
+      color: #f1f6ff;
+      letter-spacing: 0.01em;
+    }
+
+    .run-chat-markdown h1 { font-size: 1.08rem; }
+    .run-chat-markdown h2 { font-size: 1rem; }
+    .run-chat-markdown h3 { font-size: 0.93rem; }
+
+    .run-chat-markdown p,
+    .run-chat-markdown ul,
+    .run-chat-markdown ol,
+    .run-chat-markdown blockquote,
+    .run-chat-markdown pre {
+      margin: 0.45rem 0;
+    }
+
+    .run-chat-markdown ul,
+    .run-chat-markdown ol {
+      padding-left: 1.2rem;
+    }
+
+    .run-chat-markdown li {
+      margin: 0.16rem 0;
+    }
+
+    .run-chat-markdown hr {
+      border: none;
+      border-top: 1px solid rgba(148, 163, 184, 0.3);
+      margin: 0.7rem 0;
+    }
+
+    .run-chat-markdown blockquote {
+      border-left: 3px solid rgba(56, 189, 248, 0.45);
+      padding-left: 0.7rem;
+      color: #bed1eb;
+      opacity: 0.95;
+    }
+
+    .run-chat-markdown code {
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.78rem;
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 6px;
+      padding: 0.08rem 0.32rem;
+      color: #d4e3fb;
+    }
+
+    .run-chat-markdown pre {
+      background: rgba(9, 16, 28, 0.78);
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 8px;
+      padding: 0.62rem;
+      overflow: auto;
+    }
+
+    .run-chat-markdown pre code {
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      padding: 0;
+      color: #dbe9ff;
+      display: block;
+      white-space: pre;
+      line-height: 1.4;
+    }
+
+    .run-chat-markdown a {
+      color: #67d7ff;
+      text-decoration: underline;
+      text-underline-offset: 2px;
     }
 
     .run-chat-tool-toggle {
@@ -633,7 +721,10 @@
                 <div class="card-body">
                   <div class="stat-label">Sessions</div>
                   <div class="stat-value" x-text="formatNumber($store.stats.totals.runs)"></div>
-                  <div class="stat-sub" x-text="'Avg ' + formatDuration($store.stats.derived.avg_session_duration_ms) + '/session'"></div>
+                  <div
+                    class="stat-sub"
+                    x-text="$store.stats.derived.duration_data_available ? ('Avg ' + formatDuration($store.stats.derived.avg_session_duration_ms) + '/session') : 'Avg n/a/session'"
+                  ></div>
                 </div>
               </div>
             </div>
@@ -642,7 +733,7 @@
                 <div class="card-body">
                   <div class="stat-label">Messages</div>
                   <div class="stat-value" style="color:#4ade80" x-text="formatNumber($store.stats.totals.messages)"></div>
-                  <div class="stat-sub" x-text="$store.stats.derived.avg_messages_per_session + '/session'"></div>
+                  <div class="stat-sub" x-text="formatNumber($store.stats.derived.avg_messages_per_session) + '/session'"></div>
                 </div>
               </div>
             </div>
@@ -660,7 +751,7 @@
                 <div class="card-body">
                   <div class="stat-label">Errors</div>
                   <div class="stat-value" style="color:#f87171" x-text="formatNumber($store.stats.totals.errors)"></div>
-                  <div class="stat-sub" x-text="$store.stats.derived.error_rate + '% error rate'"></div>
+                  <div class="stat-sub" x-text="formatPercent($store.stats.derived.error_rate) + '% error rate'"></div>
                 </div>
               </div>
             </div>
@@ -677,7 +768,11 @@
               <div class="card card-sm">
                 <div class="card-body">
                   <div class="stat-label">Total Time</div>
-                  <div class="stat-value" style="color:#38bdf8" x-text="formatDuration($store.stats.totals.duration_ms)"></div>
+                  <div
+                    class="stat-value"
+                    style="color:#38bdf8"
+                    x-text="$store.stats.derived.duration_data_available ? formatDuration($store.stats.totals.duration_ms) : 'n/a'"
+                  ></div>
                   <div class="stat-sub" x-text="'Across ' + $store.stats.totals.runs + ' sessions'"></div>
                 </div>
               </div>
@@ -1431,7 +1526,11 @@
                           <span x-text="getTranscriptRoleLabel(msg)"></span>
                           <span x-text="msg.timestamp ? formatDateTime(msg.timestamp) : ''"></span>
                         </div>
-                        <div class="run-chat-content" x-show="formatTranscriptContent(msg.content)" x-text="formatTranscriptContent(msg.content)"></div>
+                        <div
+                          class="run-chat-content run-chat-markdown"
+                          x-show="hasTranscriptContent(msg.content)"
+                          x-html="renderTranscriptMarkdown(msg.content)"
+                        ></div>
                         <details class="run-chat-tool-toggle" x-show="msg.tool_input !== undefined && msg.tool_input !== null && msg.tool_input !== ''">
                           <summary>Tool Input</summary>
                           <pre class="chat-block" x-text="formatTranscriptContent(msg.tool_input)"></pre>
@@ -1460,6 +1559,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <script src="/assets/graph-explorer/graph-explorer.js"></script>
   <script>
     function escapeHtml(str) {
@@ -1478,6 +1579,28 @@
       escaped = escaped.replace(/&lt;mark&gt;/g, '<mark>');
       escaped = escaped.replace(/&lt;\/mark&gt;/g, '</mark>');
       return escaped;
+    }
+
+    function markdownToSafeHtml(value) {
+      if (value === undefined || value === null) return '';
+      const text = typeof value === 'string' ? value : String(value);
+      if (!text.trim()) return '';
+      if (window.marked && window.DOMPurify) {
+        try {
+          const html = window.marked.parse(text, {
+            gfm: true,
+            breaks: true,
+            headerIds: false,
+            mangle: false,
+          });
+          return window.DOMPurify.sanitize(html, {
+            USE_PROFILES: { html: true },
+          });
+        } catch {
+          // fall through to plain-text rendering
+        }
+      }
+      return escapeHtml(text).replace(/\n/g, '<br>');
     }
 
     function parseCommaList(value) {
@@ -1505,6 +1628,12 @@
       if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
       if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
       return String(num);
+    }
+
+    function formatPercent(value) {
+      if (!Number.isFinite(value)) return '0';
+      const fixed = Number(value).toFixed(1);
+      return fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed;
     }
 
     function formatDuration(ms) {
@@ -2018,6 +2147,7 @@
           avg_session_duration_ms: 0,
           avg_messages_per_session: 0,
           error_rate: 0,
+          duration_data_available: false,
         },
         by_agent: {},
         model_usage: {},
@@ -2670,6 +2800,14 @@
           } catch {
             return String(value);
           }
+        },
+
+        hasTranscriptContent(value) {
+          return this.formatTranscriptContent(value).trim().length > 0;
+        },
+
+        renderTranscriptMarkdown(value) {
+          return markdownToSafeHtml(this.formatTranscriptContent(value));
         },
 
         getTranscriptRoleClass(msg) {
