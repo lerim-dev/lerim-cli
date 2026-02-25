@@ -1,0 +1,43 @@
+# Test-only config for smoke / integration / e2e tests.
+# Defaults to openrouter with qwen3-coder-30b for all roles.
+#
+# Override via env vars:
+#   LERIM_TEST_PROVIDER  — provider for all roles (default: openrouter)
+#   LERIM_TEST_MODEL     — model for all roles (default: qwen/qwen3-coder-30b-a3b-instruct)
+
+[memory]
+scope = "global_only"
+
+[roles.lead]
+provider = "openrouter"
+model = "qwen/qwen3-coder-30b-a3b-instruct"
+timeout_seconds = 300
+max_iterations = 24
+openrouter_provider_order = ["nebius"]
+
+[roles.explorer]
+provider = "openrouter"
+model = "qwen/qwen3-coder-30b-a3b-instruct"
+timeout_seconds = 180
+max_iterations = 16
+openrouter_provider_order = ["nebius"]
+
+[roles.extract]
+provider = "openrouter"
+model = "qwen/qwen3-coder-30b-a3b-instruct"
+sub_provider = "openrouter"
+sub_model = "qwen/qwen3-coder-30b-a3b-instruct"
+timeout_seconds = 180
+max_iterations = 24
+max_llm_calls = 24
+openrouter_provider_order = ["nebius"]
+
+[roles.summarize]
+provider = "openrouter"
+model = "qwen/qwen3-coder-30b-a3b-instruct"
+sub_provider = "openrouter"
+sub_model = "qwen/qwen3-coder-30b-a3b-instruct"
+timeout_seconds = 180
+max_iterations = 24
+max_llm_calls = 24
+openrouter_provider_order = ["nebius"]
