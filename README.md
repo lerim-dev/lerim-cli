@@ -93,8 +93,8 @@ lerim status                                # runtime state
 ```bash
 uv venv && source .venv/bin/activate
 uv pip install -e .
-scripts/run_tests.sh unit
-scripts/run_tests.sh all
+tests/run_tests.sh unit
+tests/run_tests.sh all
 ```
 
 ### Configuration
