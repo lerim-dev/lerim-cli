@@ -454,7 +454,7 @@ def load_config() -> Config:
         if isinstance(toml_data.get("roles", {}), dict)
         else {}
     )
-    runtime = (
+    _runtime = (  # noqa: F841 — reserved for future use
         toml_data.get("runtime", {})
         if isinstance(toml_data.get("runtime", {}), dict)
         else {}

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tempfile import TemporaryDirectory
 
 from pydantic_ai.models.test import TestModel
 

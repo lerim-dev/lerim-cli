@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 
 from lerim.adapters.registry import (
     auto_seed,

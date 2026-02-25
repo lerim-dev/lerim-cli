@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-import pytest
 
 from lerim.config.settings import (
     Config,
@@ -19,8 +17,6 @@ from lerim.config.settings import (
     _to_non_empty_string,
     ensure_user_config_exists,
     get_config,
-    load_config,
-    load_toml_file,
     reload_config,
 )
 from tests.helpers import make_config, write_test_config

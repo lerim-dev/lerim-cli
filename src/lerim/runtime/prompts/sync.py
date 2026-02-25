@@ -6,7 +6,6 @@ import json
 import shlex
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
 
 from lerim.memory.memory_record import memory_write_schema_prompt
 
