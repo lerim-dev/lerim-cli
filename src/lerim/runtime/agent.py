@@ -180,6 +180,7 @@ class LerimAgent:
             fallback_models=lead_role.fallback_models,
             timeout_seconds=max(1, int(resolved_timeout)),
             max_iterations=lead_role.max_iterations,
+            openrouter_provider_order=lead_role.openrouter_provider_order,
         )
         self.config = config
         self.model = build_orchestration_model_from_role(role, config=config)

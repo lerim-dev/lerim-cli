@@ -49,8 +49,7 @@ Inputs:
 
 Checklist:
 - validate_inputs
-- extract_pipeline
-- summarize_pipeline
+- PARALLEL: call extract_pipeline AND summarize_pipeline together in the SAME tool-call turn (they are independent — both read the raw trace)
 - explore for matching
 - decide_add_update_no_op
 - write memory files
@@ -60,7 +59,7 @@ Checklist:
 
 Execution rules:
 - Do not inline or normalize trace content. Use only trace_path file access.
-- Use runtime pipeline tools:
+- Use runtime pipeline tools — call BOTH in the SAME response turn so they run in parallel:
   1) extract_pipeline(trace_path, output_path, metadata, metrics)
   2) summarize_pipeline(trace_path, output_path, metadata, metrics)
   (Equivalent reference commands: {extract_cmd} and {summary_cmd})
