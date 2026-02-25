@@ -287,12 +287,16 @@ Always use tools to read/write files and produce concise completion output."""
         if "explore" in allowed_tools:
 
             @agent.tool
-            def explore(
+            async def explore(
                 ctx: RunContext[RuntimeToolContext],
                 query: str,
             ) -> dict[str, Any]:
-                """Delegate read-only evidence gathering to explorer subagent."""
-                result = get_explorer_agent().run_sync(
+                """Delegate read-only evidence gathering to explorer subagent.
+
+                Async so PydanticAI can run multiple explore calls in parallel
+                when the LLM emits them in the same tool-call turn (max 4).
+                """
+                result = await get_explorer_agent().run(
                     query, deps=ctx.deps, usage=ctx.usage
                 )
                 return result.output.model_dump()
