@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from lerim.runtime.providers import (
-    FallbackSpec,
     build_dspy_lm,
     list_provider_models,
     parse_fallback_spec,

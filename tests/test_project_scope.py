@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from lerim.config.project_scope import git_root_for, resolve_data_dirs
 

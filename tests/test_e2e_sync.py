@@ -56,9 +56,7 @@ def test_sync_idempotent(tmp_path):
     workspace.mkdir()
 
     agent = LerimAgent()
-    result1 = agent.sync(
-        trace_path=trace, memory_root=tmp_path, workspace_root=workspace
-    )
+    agent.sync(trace_path=trace, memory_root=tmp_path, workspace_root=workspace)
     result2 = agent.sync(
         trace_path=trace, memory_root=tmp_path, workspace_root=workspace
     )

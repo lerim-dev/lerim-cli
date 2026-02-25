@@ -5,7 +5,6 @@ from __future__ import annotations
 import frontmatter
 
 from lerim.memory.memory_record import (
-    MEMORY_FRONTMATTER_SCHEMA,
     MEMORY_TYPE_FOLDERS,
     MemoryRecord,
     MemoryType,
