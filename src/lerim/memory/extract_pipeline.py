@@ -69,6 +69,9 @@ class MemoryExtractSignature(dspy.Signature):
     )
     metadata: dict[str, Any] = dspy.InputField(desc="Session metadata")
     metrics: dict[str, Any] = dspy.InputField(desc="Deterministic metrics")
+    guidance: str = dspy.InputField(
+        desc="Optional lead-agent natural language guidance about focus areas, trace context, and dedupe hints"
+    )
     primitives: list[MemoryCandidate] = dspy.OutputField(
         desc="Extracted memory candidate list"
     )
@@ -79,6 +82,7 @@ def _extract_candidates_with_rlm(
     *,
     metadata: dict[str, Any] | None = None,
     metrics: dict[str, Any] | None = None,
+    guidance: str = "",
 ) -> list[dict[str, Any]]:
     """Run DSPy RLM on transcript text and return normalized candidates."""
     if not transcript.strip():
@@ -101,6 +105,7 @@ def _extract_candidates_with_rlm(
                 transcript=transcript,
                 metadata=metadata or {},
                 metrics=metrics or {},
+                guidance=guidance.strip(),
             )
         except Exception:
             result = None
@@ -111,6 +116,7 @@ def _extract_candidates_with_rlm(
                 transcript=transcript,
                 metadata=metadata or {},
                 metrics=metrics or {},
+                guidance=guidance.strip(),
             )
     primitives = getattr(result, "primitives", [])
     if not isinstance(primitives, list):
@@ -129,12 +135,18 @@ def extract_memories_from_session_file(
     *,
     metadata: dict[str, Any] | None = None,
     metrics: dict[str, Any] | None = None,
+    guidance: str = "",
 ) -> list[dict[str, Any]]:
     """Extract memory candidates from one on-disk session trace file."""
     if not session_file_path.exists() or not session_file_path.is_file():
         raise FileNotFoundError(f"session_file_missing:{session_file_path}")
     transcript = session_file_path.read_text(encoding="utf-8")
-    return _extract_candidates_with_rlm(transcript, metadata=metadata, metrics=metrics)
+    return _extract_candidates_with_rlm(
+        transcript,
+        metadata=metadata,
+        metrics=metrics,
+        guidance=guidance,
+    )
 
 
 def build_extract_report(
@@ -181,6 +193,7 @@ if __name__ == "__main__":
     parser.add_argument("--output")
     parser.add_argument("--metadata-json", default="{}")
     parser.add_argument("--metrics-json", default="{}")
+    parser.add_argument("--guidance", default="")
     args = parser.parse_args()
 
     if args.trace_path:
@@ -190,6 +203,7 @@ if __name__ == "__main__":
             Path(args.trace_path).expanduser(),
             metadata=metadata if isinstance(metadata, dict) else {},
             metrics=metrics if isinstance(metrics, dict) else {},
+            guidance=args.guidance,
         )
         encoded = json.dumps(payload, ensure_ascii=True, indent=2) + "\n"
         if args.output:

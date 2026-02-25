@@ -344,10 +344,12 @@ Always use tools to read/write files and produce concise completion output."""
                 output_path: str,
                 metadata: Any | None = None,
                 metrics: Any | None = None,
+                guidance: str | None = None,
             ) -> dict[str, Any]:
                 """Run DSPy extraction pipeline and write JSON artifact.
 
                 metadata and metrics may be dicts or JSON strings.
+                guidance is optional natural language context from the lead agent.
                 """
                 return run_extract_pipeline_tool(
                     context=ctx.deps,
@@ -355,6 +357,7 @@ Always use tools to read/write files and produce concise completion output."""
                     output_path=output_path,
                     metadata=metadata,
                     metrics=metrics,
+                    guidance=guidance,
                 )
 
         if "summarize_pipeline" in allowed_tools:
@@ -366,10 +369,12 @@ Always use tools to read/write files and produce concise completion output."""
                 output_path: str,
                 metadata: Any | None = None,
                 metrics: Any | None = None,
+                guidance: str | None = None,
             ) -> dict[str, Any]:
                 """Run DSPy summarization pipeline and write summary pointer artifact.
 
                 metadata and metrics may be dicts or JSON strings.
+                guidance is optional natural language context from the lead agent.
                 """
                 return run_summarization_pipeline_tool(
                     context=ctx.deps,
@@ -377,6 +382,7 @@ Always use tools to read/write files and produce concise completion output."""
                     output_path=output_path,
                     metadata=metadata,
                     metrics=metrics,
+                    guidance=guidance,
                 )
 
         return agent
