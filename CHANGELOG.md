@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-02-25
+
+### Added
+
+- Dashboard screenshot/docs section in README and expanded dashboard usage guidance.
+- CI workflow for lint + unit tests on pushes and pull requests.
+- Broad automated test coverage across adapters, runtime tools, dashboard API/UI contracts, and integration/e2e paths.
+- Hash-based session change detection in sync flow to avoid unnecessary reprocessing.
+- Async explore-tool execution support for parallelized runtime exploration tasks.
+
+### Changed
+
+- Dashboard redesigned across Overview/Runs/Memories/Pipeline/Settings with richer analytics and improved session browsing UX.
+- Runs tab now uses 50 sessions per page and opens a full-screen chat viewer with role-aware formatting, markdown rendering, and collapsible tool payloads.
+- Dashboard settings are now editable and persisted to `~/.lerim/config.toml`.
+- Default role models switched to OpenRouter `x-ai/grok-4.1-fast`.
+- Daemon and sync behavior updated with configurable window/session/worker controls and improved job handling.
+- Documentation refreshed for current defaults and CLI behavior.
+
 ## [0.1.0] - 2026-02-25
 
 ### Added
