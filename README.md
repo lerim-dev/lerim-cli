@@ -5,6 +5,10 @@
 <p align="center"><strong>Continual learning layer for coding agents</strong></p>
 <p align="center"><a href="https://lerim.dev/">lerim.dev</a></p>
 
+<p align="center">
+  <img src="assets/agent-network.gif" alt="Lerim network animation" width="900">
+</p>
+
 Lerim is a continual learning layer that gives coding agents persistent memory across sessions. It watches your agent conversations (Claude Code, Codex, Cursor, OpenCode, ...), extracts decisions and learnings, and stores them as plain markdown files that both humans and agents can read. Memories are refined offline over time through merging, deduplication, archiving, and decay-based forgetting. You can query stored memories anytime to bring relevant past context into your current session.
 
 ## Summary
