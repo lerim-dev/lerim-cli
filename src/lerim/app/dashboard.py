@@ -78,9 +78,9 @@ def _sqlite_rows(
     where: list[str] = []
     params: list[Any] = []
     if since is not None:
-        where.append("start_time >= ?")
+        where.append("(start_time >= ? OR start_time IS NULL)")
         params.append(since.isoformat())
-    where.append("start_time <= ?")
+    where.append("(start_time <= ? OR start_time IS NULL)")
     params.append(until.isoformat())
     if agent_type and agent_type != "all":
         where.append("agent_type = ?")
@@ -511,6 +511,14 @@ def _build_memory_graph_payload(
     if truncated:
         warnings.append("Result truncated to requested node/edge limits.")
 
+    return {
+        "nodes": node_values,
+        "edges": edge_values,
+        "total_memories": matched_memories,
+        "truncated": truncated,
+        "warnings": warnings,
+    }
+
 
 def _memory_graph_query(payload: dict[str, Any]) -> dict[str, Any]:
     """Execute memory graph query with filters and return bounded payload."""
@@ -623,7 +631,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _json(self, payload: dict | list, status: int = HTTPStatus.OK) -> None:
         """Write JSON response with status code."""
-        body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
+        body = json.dumps(payload, ensure_ascii=True, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -723,9 +731,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         where = []
         params: list[Any] = []
         if since is not None:
-            where.append("d.start_time >= ?")
+            where.append("(d.start_time >= ? OR d.start_time IS NULL)")
             params.append(since.isoformat())
-        where.append("d.start_time <= ?")
+        where.append("(d.start_time <= ? OR d.start_time IS NULL)")
         params.append(until.isoformat())
         if agent and agent != "all":
             where.append("d.agent_type = ?")
