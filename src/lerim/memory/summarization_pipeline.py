@@ -96,6 +96,9 @@ class TraceSummarySignature(dspy.Signature):
     )
     metadata: dict[str, Any] = dspy.InputField(desc="Session metadata")
     metrics: dict[str, Any] = dspy.InputField(desc="Deterministic metrics")
+    guidance: str = dspy.InputField(
+        desc="Optional lead-agent natural language guidance about focus areas and trace context"
+    )
     summary_payload: TraceSummaryCandidate = dspy.OutputField(
         desc="Structured summary payload with title/description/user_intent/session_narrative/date/time/agent/path/tags fields"
     )
@@ -106,6 +109,7 @@ def _summarize_trace_with_rlm(
     *,
     metadata: dict[str, Any] | None = None,
     metrics: dict[str, Any] | None = None,
+    guidance: str = "",
 ) -> dict[str, Any]:
     """Run DSPy RLM summarization and return schema-validated summary metadata payload."""
     if not transcript.strip():
@@ -128,6 +132,7 @@ def _summarize_trace_with_rlm(
                 transcript=transcript,
                 metadata=metadata or {},
                 metrics=metrics or {},
+                guidance=guidance.strip(),
             )
         except Exception:
             predictor = dspy.Predict(TraceSummarySignature)
@@ -135,6 +140,7 @@ def _summarize_trace_with_rlm(
                 transcript=transcript,
                 metadata=metadata or {},
                 metrics=metrics or {},
+                guidance=guidance.strip(),
             )
     payload = getattr(result, "summary_payload", None)
     if isinstance(payload, TraceSummaryCandidate):
@@ -196,6 +202,7 @@ def summarize_trace_from_session_file(
     *,
     metadata: dict[str, Any] | None = None,
     metrics: dict[str, Any] | None = None,
+    guidance: str = "",
 ) -> dict[str, Any]:
     """Summarize one session trace file into markdown-ready metadata + <=300 word summary."""
     if not session_file_path.exists() or not session_file_path.is_file():
@@ -206,6 +213,7 @@ def summarize_trace_from_session_file(
         transcript,
         metadata=session_metadata,
         metrics=metrics,
+        guidance=guidance,
     )
 
 
@@ -222,6 +230,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--metadata-json", default="{}")
     parser.add_argument("--metrics-json", default="{}")
+    parser.add_argument("--guidance", default="")
     args = parser.parse_args()
 
     if args.trace_path:
@@ -232,6 +241,7 @@ if __name__ == "__main__":
             session_file,
             metadata=metadata if isinstance(metadata, dict) else {},
             metrics=metrics if isinstance(metrics, dict) else {},
+            guidance=args.guidance,
         )
 
         # Write summary markdown and output pointer

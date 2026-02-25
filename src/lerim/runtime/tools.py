@@ -577,6 +577,7 @@ def run_extract_pipeline_tool(
     output_path: str,
     metadata: dict[str, Any] | str | None = None,
     metrics: dict[str, Any] | str | None = None,
+    guidance: str | None = None,
 ) -> dict[str, Any]:
     """Run extraction pipeline directly and write JSON artifact output."""
     trace_file = _resolve_path(trace_path, _default_cwd(context))
@@ -588,11 +589,13 @@ def run_extract_pipeline_tool(
     _assert_write_boundary(output_file, context)
     normalized_metadata = _normalize_mapping_arg(metadata, "metadata")
     normalized_metrics = _normalize_mapping_arg(metrics, "metrics")
+    normalized_guidance = "" if guidance is None else str(guidance).strip()
     candidates = _run_with_retry(
         lambda: extract_memories_from_session_file(
             trace_file,
             metadata=normalized_metadata,
             metrics=normalized_metrics,
+            guidance=normalized_guidance,
         )
     )
     _write_json_output(output_file, candidates)
@@ -609,6 +612,7 @@ def run_summarization_pipeline_tool(
     output_path: str,
     metadata: dict[str, Any] | str | None = None,
     metrics: dict[str, Any] | str | None = None,
+    guidance: str | None = None,
 ) -> dict[str, Any]:
     """Run summarization pipeline and write summary pointer artifact."""
     if not context.memory_root:
@@ -622,12 +626,14 @@ def run_summarization_pipeline_tool(
     _assert_write_boundary(output_file, context)
     normalized_metadata = _normalize_mapping_arg(metadata, "metadata")
     normalized_metrics = _normalize_mapping_arg(metrics, "metrics")
+    normalized_guidance = "" if guidance is None else str(guidance).strip()
 
     payload = _run_with_retry(
         lambda: summarize_trace_from_session_file(
             trace_file,
             metadata=normalized_metadata,
             metrics=normalized_metrics,
+            guidance=normalized_guidance,
         )
     )
     run_id = str(normalized_metadata.get("run_id") or context.run_id)

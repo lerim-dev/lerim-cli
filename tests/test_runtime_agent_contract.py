@@ -171,3 +171,11 @@ def test_sync_prompt_uses_trace_path_not_trace_content(tmp_path: Path) -> None:
 
     assert str(trace_path.resolve()) in prompt
     assert "NEVER_INLINE_THIS_TRACE_CONTENT" not in prompt
+    assert (
+        "extract_pipeline(trace_path, output_path, metadata, metrics, guidance)"
+        in prompt
+    )
+    assert (
+        "summarize_pipeline(trace_path, output_path, metadata, metrics, guidance)"
+        in prompt
+    )

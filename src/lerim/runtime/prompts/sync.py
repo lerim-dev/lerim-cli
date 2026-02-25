@@ -49,6 +49,7 @@ Inputs:
 Checklist:
 - validate_inputs
 - PARALLEL: call extract_pipeline AND summarize_pipeline together in the SAME tool-call turn (they are independent — both read the raw trace)
+- optionally compose short guidance from trace metadata/context and pass it to both pipeline calls
 - explore for matching
 - decide_add_update_no_op
 - write memory files
@@ -59,9 +60,10 @@ Checklist:
 Execution rules:
 - Do not inline or normalize trace content. Use only trace_path file access.
 - Use runtime pipeline tools — call BOTH in the SAME response turn so they run in parallel:
-  1) extract_pipeline(trace_path, output_path, metadata, metrics)
-  2) summarize_pipeline(trace_path, output_path, metadata, metrics)
+  1) extract_pipeline(trace_path, output_path, metadata, metrics, guidance)
+  2) summarize_pipeline(trace_path, output_path, metadata, metrics, guidance)
   (Equivalent reference commands: {extract_cmd} and {summary_cmd})
+- guidance is optional. If used, keep it concise and specific (trace shape, likely focus areas, and dedupe hints).
 - Read extract.json from artifact paths.
 - The summary pipeline writes the summary directly to memory_root/summaries/ via --memory-root. Do NOT write summary files yourself.
 - For candidate matching, use explore(query) to gather evidence.
