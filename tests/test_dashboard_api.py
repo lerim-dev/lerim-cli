@@ -18,6 +18,7 @@ def _fake_row(**kwargs) -> dict:
     defaults = {
         "agent_type": "claude",
         "start_time": "2026-02-20T10:00:00Z",
+        "status": "completed",
         "message_count": 5,
         "tool_call_count": 2,
         "error_count": 0,
@@ -55,12 +56,18 @@ def test_compute_stats_aggregation():
     """_compute_stats on sample rows returns correct totals."""
     rows = [
         _fake_row(message_count=10, total_tokens=500),
-        _fake_row(message_count=5, total_tokens=300),
+        _fake_row(message_count=5, total_tokens=300, error_count=1),
     ]
     stats = _compute_stats(rows)
     assert stats["totals"]["runs"] == 2
     assert stats["totals"]["messages"] == 15
     assert stats["totals"]["tokens"] == 800
+    assert stats["totals"]["runs_with_errors"] == 1
+    assert stats["totals"]["unique_tools"] >= 0
+    assert stats["totals"]["input_tokens"] + stats["totals"]["output_tokens"] == 800
+    assert stats["derived"]["avg_messages_per_session"] == 7.5
+    assert stats["derived"]["error_rate"] == 50.0
+    assert stats["derived"]["duration_data_available"] is True
     assert "derived" in stats
     assert "by_agent" in stats
 

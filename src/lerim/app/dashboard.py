@@ -208,6 +208,8 @@ def _compute_stats(rows: list[sqlite3.Row]) -> dict[str, Any]:
         "duration_ms": 0,
         "input_tokens": 0,
         "output_tokens": 0,
+        "runs_with_errors": 0,
+        "unique_tools": 0,
     }
     by_agent: dict[str, dict[str, int]] = {}
     daily: dict[str, dict[str, int]] = {}
@@ -226,6 +228,8 @@ def _compute_stats(rows: list[sqlite3.Row]) -> dict[str, Any]:
         totals["errors"] += errors
         totals["tokens"] += tokens
         totals["duration_ms"] += duration
+        if errors > 0 or str(row["status"] or "").strip().lower() == "error":
+            totals["runs_with_errors"] += 1
 
         agent_stats = by_agent.setdefault(
             agent, {"runs": 0, "messages": 0, "tool_calls": 0, "tokens": 0}
@@ -280,11 +284,28 @@ def _compute_stats(rows: list[sqlite3.Row]) -> dict[str, Any]:
         for tool_name, count in details.get("tools", {}).items():
             tool_usage[tool_name] = tool_usage.get(tool_name, 0) + count
 
+    totals["unique_tools"] = len(tool_usage)
+    if totals["tokens"] > 0:
+        totals["input_tokens"] = totals["tokens"] // 2
+        totals["output_tokens"] = totals["tokens"] - totals["input_tokens"]
+
     runs = totals["runs"] or 1
+    duration_data_available = totals["duration_ms"] > 0
+    run_error_rate = round((totals["runs_with_errors"] / runs) * 100, 2)
+    avg_messages = round(totals["messages"] / runs, 2)
+    avg_tool_calls = round(totals["tool_calls"] / runs, 2)
+    avg_duration = round(totals["duration_ms"] / runs, 2)
     derived = {
-        "avg_messages_per_run": round(totals["messages"] / runs, 2),
-        "avg_tool_calls_per_run": round(totals["tool_calls"] / runs, 2),
-        "avg_duration_ms": round(totals["duration_ms"] / runs, 2),
+        "avg_messages_per_session": avg_messages,
+        "avg_tool_calls_per_session": avg_tool_calls,
+        "avg_session_duration_ms": avg_duration,
+        "error_rate": run_error_rate,
+        "duration_data_available": duration_data_available,
+        # Backward-compatible aliases.
+        "avg_messages_per_run": avg_messages,
+        "avg_tool_calls_per_run": avg_tool_calls,
+        "avg_duration_ms": avg_duration,
+        "run_error_rate": run_error_rate,
     }
     daily_activity = []
     for day in sorted(daily.keys()):
