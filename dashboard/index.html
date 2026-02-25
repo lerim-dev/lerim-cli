@@ -876,7 +876,7 @@
                   </div>
                 </div>
                 <div class="card-body">
-                  <div class="chart-shell" data-chart="hourly">
+                  <div class="chart-shell tall" data-chart="hourly">
                     <div id="chart-hourly" class="chart-canvas"></div>
                     <div class="chart-empty">No hourly data</div>
                   </div>
@@ -1004,6 +1004,7 @@
               </button>
               <button
                 class="btn"
+                x-show="DASHBOARD_GRAPH_EXPLORER_ENABLED"
                 :class="$store.memories.view === 'graph' ? 'btn-primary' : 'btn-outline-secondary'"
                 @click="setMemoryView('graph')"
                 type="button"
@@ -1011,7 +1012,10 @@
                 Graph Explorer
               </button>
             </div>
-            <div class="text-muted small" x-text="$store.memories.view === 'graph' ? 'Graph mode: query, filter, inspect, expand.' : 'Library mode: browse and edit memories.'"></div>
+            <div
+              class="text-muted small"
+              x-text="DASHBOARD_GRAPH_EXPLORER_ENABLED && $store.memories.view === 'graph' ? 'Graph mode: query, filter, inspect, expand.' : 'Library mode: browse and edit memories.'"
+            ></div>
           </div>
 
           <div class="memory-grid" x-show="$store.memories.view === 'library'">
@@ -1177,7 +1181,7 @@
             </div>
           </div>
 
-          <div class="card" x-cloak x-show="$store.memories.view === 'graph'" x-transition.opacity.duration.180ms>
+          <div class="card" x-cloak x-show="DASHBOARD_GRAPH_EXPLORER_ENABLED && $store.memories.view === 'graph'" x-transition.opacity.duration.180ms>
             <div class="card-header d-flex align-items-center justify-content-between gap-2 flex-wrap">
               <div>
                 <div class="card-title">Memory Graph Explorer</div>
@@ -1670,6 +1674,7 @@
     }
 
     const DASHBOARD_READ_ONLY = false;
+    const DASHBOARD_GRAPH_EXPLORER_ENABLED = false;
 
     function setAgenticScope(run) {
       if (!run) {
@@ -2263,6 +2268,9 @@
         sortDir: 'desc',
         memoryExplorerApp: null,
         init() {
+          if (!DASHBOARD_GRAPH_EXPLORER_ENABLED) {
+            this.$store.memories.view = 'library';
+          }
           this.loadStats();
           this.loadRefineStatus();
 
@@ -2342,6 +2350,10 @@
 
         async setMemoryView(view) {
           const nextView = view === 'graph' ? 'graph' : 'library';
+          if (nextView === 'graph' && !DASHBOARD_GRAPH_EXPLORER_ENABLED) {
+            this.$store.memories.view = 'library';
+            return;
+          }
           this.$store.memories.view = nextView;
           if (nextView !== 'graph') return;
           await this.$nextTick();
