@@ -264,6 +264,8 @@
     .agent-badge.claude { background: #f59e0b; }
     .agent-badge.codex { background: #22d3ee; }
     .agent-badge.opencode { background: #34d399; }
+    .agent-badge.cursor { background: #e879f9; }
+    .agent-badge.cline { background: #fb923c; }
 
     .status-pill {
       padding: 0.25rem 0.6rem;
@@ -436,6 +438,7 @@
               <option value="claude">Claude</option>
               <option value="codex">Codex</option>
               <option value="opencode">OpenCode</option>
+              <option value="cursor">Cursor</option>
             </select>
           </div>
           <div class="lerim-filter">
@@ -707,12 +710,12 @@
                         <th @click="sortBy('status')">Status</th>
                         <th @click="sortBy('started_at')">Started</th>
                         <th @click="sortBy('duration_ms')">Duration</th>
-                        <th @click="sortBy('message_count')">Messages</th>
+                        <th @click="sortBy('message_count')">Msgs</th>
                         <th @click="sortBy('tool_call_count')">Tools</th>
-                        <th @click="sortBy('error_count')">Errors</th>
+                        <th @click="sortBy('error_count')">Errs</th>
                         <th @click="sortBy('total_tokens')">Tokens</th>
-                        <th @click="sortBy('repo_name')">Branch</th>
-                        <th>Open</th>
+                        <th @click="sortBy('branch_display')">Project / Branch</th>
+                        <th>ID</th>
                       </tr>
                     </thead>
                     <template x-for="(run, idx) in $store.runs.items" :key="run.run_id">
@@ -726,10 +729,8 @@
                           <td x-text="run.tool_call_count"></td>
                           <td x-text="run.error_count"></td>
                           <td x-text="formatNumber(run.total_tokens)"></td>
-                          <td x-text="run.repo_name || '-'" class="text-muted"></td>
-                          <td>
-                            <a class="btn btn-outline-primary btn-sm" :href="'/session/' + run.agent_type + '/' + run.run_id + '?back=runs'" @click.stop>Open</a>
-                          </td>
+                          <td class="text-muted" x-text="run.branch_display || run.project || '-'" :title="run.repo_name || ''"></td>
+                          <td class="text-muted small" x-text="run.short_id || run.run_id?.slice(0,8) || '-'" :title="run.run_id"></td>
                         </tr>
                         <tr x-show="$store.runs.previewOpen[run.run_id]">
                           <td colspan="10">
@@ -845,34 +846,57 @@
                   <div class="col-12">
                     <input class="form-control" type="text" placeholder="Search memories..." x-model="$store.memories.filters.query" @keydown.enter="loadMemories()" />
                   </div>
-                  <div class="col-6">
-                    <select class="form-select" x-model="$store.memories.filters.type" @change="loadMemories()">
-                      <option value="">All types</option>
-                      <option value="pattern">Pattern</option>
-                      <option value="convention">Convention</option>
-                      <option value="pitfall">Pitfall</option>
-                      <option value="preference">Preference</option>
-                      <option value="technique">Technique</option>
-                      <option value="context">Context</option>
-                      <option value="friction">Friction</option>
-                      <option value="delight">Delight</option>
-                    </select>
+                  <div class="col-12">
+                    <label class="form-label small text-muted">Type</label>
+                    <div class="d-flex flex-wrap gap-1">
+                      <template x-for="t in $store.memories.filterOptions.types" :key="t">
+                        <button
+                          class="btn btn-sm"
+                          :class="$store.memories.filters.type === t ? 'btn-primary' : 'btn-outline-secondary'"
+                          @click="$store.memories.filters.type = ($store.memories.filters.type === t ? '' : t); loadMemories()"
+                          x-text="t"
+                          style="font-size:0.75rem; padding:0.15rem 0.5rem"
+                        ></button>
+                      </template>
+                      <button
+                        class="btn btn-sm btn-ghost-secondary"
+                        x-show="$store.memories.filters.type"
+                        @click="$store.memories.filters.type = ''; loadMemories()"
+                        style="font-size:0.7rem"
+                      >Clear</button>
+                    </div>
                   </div>
-                  <div class="col-6">
-                    <select class="form-select" x-model="$store.memories.filters.state" @change="loadMemories()">
-                      <option value="">All states</option>
-                      <option value="candidate">Candidate</option>
-                      <option value="validated">Validated</option>
-                      <option value="established">Established</option>
-                      <option value="stale">Stale</option>
-                      <option value="archived">Archived</option>
-                    </select>
+                  <div class="col-12">
+                    <label class="form-label small text-muted">Kind</label>
+                    <div class="d-flex flex-wrap gap-1">
+                      <template x-for="k in $store.memories.filterOptions.kinds" :key="k">
+                        <button
+                          class="btn btn-sm"
+                          :class="$store.memories.filters.state === k ? 'btn-primary' : 'btn-outline-secondary'"
+                          @click="$store.memories.filters.state = ($store.memories.filters.state === k ? '' : k); loadMemories()"
+                          x-text="k"
+                          style="font-size:0.75rem; padding:0.15rem 0.5rem"
+                        ></button>
+                      </template>
+                      <button
+                        class="btn btn-sm btn-ghost-secondary"
+                        x-show="$store.memories.filters.state"
+                        @click="$store.memories.filters.state = ''; loadMemories()"
+                        style="font-size:0.7rem"
+                      >Clear</button>
+                    </div>
                   </div>
                   <div class="col-8">
-                    <input class="form-control" type="text" placeholder="Filter by project..." x-model="$store.memories.filters.project" @keydown.enter="loadMemories()" />
+                    <label class="form-label small text-muted">Project</label>
+                    <input class="form-control form-control-sm" type="text" placeholder="Filter by project..." x-model="$store.memories.filters.project" @keydown.enter="loadMemories()" list="project-options" />
+                    <datalist id="project-options">
+                      <template x-for="p in $store.memories.filterOptions.projects" :key="p">
+                        <option :value="p"></option>
+                      </template>
+                    </datalist>
                   </div>
-                  <div class="col-4">
-                    <button class="btn btn-outline-primary w-100" @click="loadMemories()" :disabled="$store.memories.loading">
+                  <div class="col-4 d-flex align-items-end">
+                    <button class="btn btn-outline-primary btn-sm w-100" @click="loadMemories()" :disabled="$store.memories.loading">
                       <span x-show="!$store.memories.loading">Refresh</span>
                       <span x-show="$store.memories.loading">Loading...</span>
                     </button>
@@ -925,17 +949,13 @@
                     </div>
                     <div class="row g-2">
                       <div class="col-12 col-md-6">
-                        <label class="form-label">Type</label>
-                        <select class="form-select" x-model="$store.memories.draft.kind" @change="markMemoryDirty()">
-                          <option value="pattern">Pattern</option>
-                          <option value="convention">Convention</option>
-                          <option value="pitfall">Pitfall</option>
-                          <option value="preference">Preference</option>
-                          <option value="technique">Technique</option>
-                          <option value="context">Context</option>
-                          <option value="friction">Friction</option>
-                          <option value="delight">Delight</option>
-                        </select>
+                        <label class="form-label">Kind</label>
+                        <input class="form-control" type="text" x-model="$store.memories.draft.kind" @input="markMemoryDirty()" list="kind-options" />
+                        <datalist id="kind-options">
+                          <template x-for="k in $store.memories.filterOptions.kinds" :key="k">
+                            <option :value="k"></option>
+                          </template>
+                        </datalist>
                       </div>
                       <div class="col-12 col-md-6">
                         <label class="form-label">Confidence</label>
@@ -992,112 +1012,122 @@
           </div>
         </section>
 
-        <!-- Session Intelligence -->
+        <!-- Pipeline (Sync & Maintain) -->
         <section class="pt-4" x-show="$store.app.activeTab === 'refine'">
-          <div class="card mb-3">
-            <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-              <div>
-                <div class="card-title">Session Intelligence</div>
-                <div class="text-muted small">Powered by <span class="text-info">lerim refine</span></div>
-              </div>
-              <div class="btn-list">
-                <button
-                  class="btn btn-primary"
-                  @click="runRefineNow()"
-                  :disabled="DASHBOARD_READ_ONLY || $store.refine.loading.run || ($store.refine.form.mode === 'session' && !$store.refine.form.run_id.trim())"
-                >
-                  <span x-show="!$store.refine.loading.run">Run Refine</span>
-                  <span x-show="$store.refine.loading.run">Running...</span>
-                </button>
-                <button class="btn btn-outline-secondary" @click="resetRefineOptions()" :disabled="$store.refine.loading.run">
-                  Reset Options
-                </button>
-                <button class="btn btn-outline-secondary" @click="loadRefineReport()">Refresh</button>
+          <!-- Pipeline Status -->
+          <div class="row row-cards mb-3">
+            <div class="col-12 col-lg-6">
+              <div class="card">
+                <div class="card-header">
+                  <div>
+                    <div class="card-title">Sync Pipeline</div>
+                    <div class="text-muted small">Discovers sessions, extracts memories</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="row g-3">
+                    <div class="col-4">
+                      <div class="stat-label">Status</div>
+                      <div class="stat-value small" :style="'color:' + ($store.refine.status.sync?.status === 'completed' ? '#4ade80' : ($store.refine.status.sync?.status === 'failed' ? '#f87171' : '#94a3b8'))" x-text="$store.refine.status.sync?.status || 'never run'"></div>
+                    </div>
+                    <div class="col-4">
+                      <div class="stat-label">Last Run</div>
+                      <div class="stat-value small" x-text="$store.refine.status.sync?.started_at ? relativeTime($store.refine.status.sync.started_at) : 'n/a'"></div>
+                    </div>
+                    <div class="col-4">
+                      <div class="stat-label">Trigger</div>
+                      <div class="stat-value small text-muted" x-text="$store.refine.status.sync?.trigger || 'n/a'"></div>
+                    </div>
+                  </div>
+                  <div class="text-muted small mt-3" x-show="$store.refine.status.sync?.details_json" x-text="typeof $store.refine.status.sync?.details_json === 'string' ? $store.refine.status.sync.details_json : JSON.stringify($store.refine.status.sync?.details_json || '')"></div>
+                  <div class="mt-3">
+                    <code class="text-muted small">Run: <span class="text-info">lerim sync</span> or <span class="text-info">lerim daemon --once</span></code>
+                  </div>
+                </div>
               </div>
             </div>
+            <div class="col-12 col-lg-6">
+              <div class="card">
+                <div class="card-header">
+                  <div>
+                    <div class="card-title">Maintain Pipeline</div>
+                    <div class="text-muted small">Merges, archives, consolidates memories</div>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="row g-3">
+                    <div class="col-4">
+                      <div class="stat-label">Status</div>
+                      <div class="stat-value small" :style="'color:' + ($store.refine.status.maintain?.status === 'completed' ? '#4ade80' : ($store.refine.status.maintain?.status === 'failed' ? '#f87171' : '#94a3b8'))" x-text="$store.refine.status.maintain?.status || 'never run'"></div>
+                    </div>
+                    <div class="col-4">
+                      <div class="stat-label">Last Run</div>
+                      <div class="stat-value small" x-text="$store.refine.status.maintain?.started_at ? relativeTime($store.refine.status.maintain.started_at) : 'n/a'"></div>
+                    </div>
+                    <div class="col-4">
+                      <div class="stat-label">Trigger</div>
+                      <div class="stat-value small text-muted" x-text="$store.refine.status.maintain?.trigger || 'n/a'"></div>
+                    </div>
+                  </div>
+                  <div class="text-muted small mt-3" x-show="$store.refine.status.maintain?.details_json" x-text="typeof $store.refine.status.maintain?.details_json === 'string' ? $store.refine.status.maintain.details_json : JSON.stringify($store.refine.status.maintain?.details_json || '')"></div>
+                  <div class="mt-3">
+                    <code class="text-muted small">Run: <span class="text-info">lerim maintain</span></code>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Queue Status -->
+          <div class="card mb-3">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <div>
+                <div class="card-title">Extraction Queue</div>
+                <div class="text-muted small">Session processing jobs</div>
+              </div>
+              <button class="btn btn-outline-secondary btn-sm" @click="loadRefineStatus()">Refresh</button>
+            </div>
             <div class="card-body">
-              <div class="row g-3 mb-3">
-                <div class="col-12 col-lg-3">
-                  <label class="form-label">Mode</label>
-                  <select class="form-select" x-model="$store.refine.form.mode" @change="setRefineMode($store.refine.form.mode)">
-                    <option value="window">Window</option>
-                    <option value="session">Single Session</option>
-                    <option value="backfill">Backfill</option>
-                  </select>
+              <div class="row row-cards">
+                <div class="col-4 col-lg-2">
+                  <div class="stat-label">Pending</div>
+                  <div class="stat-value" style="color:#fbbf24" x-text="formatNumber($store.refine.status.queue?.pending || 0)"></div>
                 </div>
-                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode !== 'session'">
-                  <label class="form-label">Window</label>
-                  <select class="form-select" x-model="$store.refine.form.window">
-                    <option value="">Use top Scope filter</option>
-                    <option value="1d">1d</option>
-                    <option value="7d">7d</option>
-                    <option value="30d">30d</option>
-                    <option value="all">all</option>
-                  </select>
+                <div class="col-4 col-lg-2">
+                  <div class="stat-label">Running</div>
+                  <div class="stat-value" style="color:#38bdf8" x-text="formatNumber($store.refine.status.queue?.running || 0)"></div>
                 </div>
-                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode === 'session'">
-                  <label class="form-label">Session run_id</label>
-                  <input class="form-control" type="text" placeholder="019c..." x-model="$store.refine.form.run_id" />
+                <div class="col-4 col-lg-2">
+                  <div class="stat-label">Done</div>
+                  <div class="stat-value" style="color:#4ade80" x-text="formatNumber($store.refine.status.queue?.done || 0)"></div>
                 </div>
-                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode !== 'session'">
-                  <label class="form-label">Agents</label>
-                  <input class="form-control" type="text" placeholder="Use top Agent filter" x-model="$store.refine.form.agents" />
+                <div class="col-4 col-lg-2">
+                  <div class="stat-label">Failed</div>
+                  <div class="stat-value" style="color:#f87171" x-text="formatNumber($store.refine.status.queue?.failed || 0)"></div>
                 </div>
-                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode !== 'session'">
-                  <label class="form-label">Max Sessions</label>
-                  <input class="form-control" type="number" min="1" step="1" x-model.number="$store.refine.form.max_sessions" />
-                </div>
-                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode === 'window'">
-                  <label class="form-label">Since (ISO/local)</label>
-                  <input class="form-control" type="text" placeholder="2026-02-07T12:00:00+00:00" x-model="$store.refine.form.since" />
-                </div>
-                <div class="col-12 col-lg-3" x-show="$store.refine.form.mode === 'window'">
-                  <label class="form-label">Until (ISO/local)</label>
-                  <input class="form-control" type="text" placeholder="2026-02-07T15:00:00+00:00" x-model="$store.refine.form.until" />
-                </div>
-                <div class="col-12">
-                  <label class="form-label">Steps (comma-separated)</label>
-                  <input class="form-control" type="text" x-model="$store.refine.form.steps" />
-                </div>
-                <div class="col-12 d-flex gap-4 flex-wrap">
-                  <label class="form-check">
-                    <input class="form-check-input" type="checkbox" x-model="$store.refine.form.force" />
-                    <span class="form-check-label">Force rerun</span>
-                  </label>
-                </div>
-                <div class="col-12 text-muted small">
-                  CLI parity: <code>window/since/until/agents/max-sessions/steps/force</code> plus modes for <code>session</code> and <code>backfill</code>.
-                </div>
-              </div>
-
-              <div class="row row-cards mb-3">
-                <div class="col-6 col-lg-2">
-                  <div class="stat-label">Queue Pending</div>
-                  <div class="stat-value" x-text="formatNumber($store.refine.status.queue?.pending || 0)"></div>
-                </div>
-                <div class="col-6 col-lg-2">
-                  <div class="stat-label">Queue Running</div>
-                  <div class="stat-value" x-text="formatNumber($store.refine.status.queue?.running || 0)"></div>
-                </div>
-                <div class="col-6 col-lg-2">
+                <div class="col-4 col-lg-2">
                   <div class="stat-label">Dead Letter</div>
-                  <div class="stat-value" x-text="formatNumber($store.refine.status.queue?.dead_letter || 0)"></div>
-                </div>
-                <div class="col-6 col-lg-3">
-                  <div class="stat-label">Latest Sync</div>
-                  <div class="stat-value small text-wrap" x-text="$store.refine.status.sync?.status || 'n/a'"></div>
-                </div>
-                <div class="col-6 col-lg-3">
-                  <div class="stat-label">Latest Maintain</div>
-                  <div class="stat-value small text-wrap" x-text="$store.refine.status.maintain?.status || 'n/a'"></div>
+                  <div class="stat-value" style="color:#94a3b8" x-text="formatNumber($store.refine.status.queue?.dead_letter || 0)"></div>
                 </div>
               </div>
+            </div>
+          </div>
 
-              <div class="text-muted mb-3" x-show="$store.refine.loading.report">Loading report...</div>
-              <div class="text-muted mb-3" x-show="!$store.refine.loading.report && !$store.refine.report.aggregates">
-                No report yet. Run refine to generate the first report.
+          <!-- Extraction Report -->
+          <div class="card mb-3">
+            <div class="card-header d-flex align-items-center justify-content-between">
+              <div>
+                <div class="card-title">Latest Extraction Report</div>
+                <div class="text-muted small">Aggregated insights from sync pipeline</div>
               </div>
-              <div x-show="$store.refine.report.aggregates">
+              <button class="btn btn-outline-secondary btn-sm" @click="loadRefineReport()">Refresh</button>
+            </div>
+            <div class="card-body">
+              <div class="text-muted mb-3" x-show="$store.refine.loading.report">Loading report...</div>
+              <div class="text-muted mb-3" x-show="!$store.refine.loading.report && !$store.refine.report.aggregates?.totals?.messages">
+                No report data yet. Run <code>lerim sync</code> to generate.
+              </div>
+              <div x-show="$store.refine.report.aggregates?.totals?.messages">
                 <div class="row row-cards mb-3">
                   <div class="col-6 col-lg-2">
                     <div class="stat-label">Messages</div>
@@ -1120,121 +1150,14 @@
                     <div class="stat-value" x-text="formatNumber($store.refine.report.aggregates.derived?.messages_per_day || 0)"></div>
                   </div>
                 </div>
-
-                <div class="refine-glance mb-3" x-show="$store.refine.report.narratives?.at_a_glance">
+                <div class="refine-glance" x-show="$store.refine.report.narratives?.at_a_glance?.working">
                   <div class="refine-section-title">At a Glance</div>
-                  <div class="text-muted small mb-2" x-text="$store.refine.report.narratives.at_a_glance?.working || ''"></div>
-                  <div class="text-muted small mb-2" x-text="$store.refine.report.narratives.at_a_glance?.hindering || ''"></div>
-                  <div class="text-muted small mb-2" x-text="$store.refine.report.narratives.at_a_glance?.quick_wins || ''"></div>
-                  <div class="text-muted small" x-text="$store.refine.report.narratives.at_a_glance?.horizon || ''"></div>
+                  <div class="text-muted small mb-2" x-show="$store.refine.report.narratives.at_a_glance?.working" x-text="$store.refine.report.narratives.at_a_glance.working"></div>
+                  <div class="text-muted small mb-2" x-show="$store.refine.report.narratives.at_a_glance?.hindering" x-text="$store.refine.report.narratives.at_a_glance.hindering"></div>
+                  <div class="text-muted small mb-2" x-show="$store.refine.report.narratives.at_a_glance?.quick_wins" x-text="$store.refine.report.narratives.at_a_glance.quick_wins"></div>
+                  <div class="text-muted small" x-show="$store.refine.report.narratives.at_a_glance?.horizon" x-text="$store.refine.report.narratives.at_a_glance.horizon"></div>
                 </div>
               </div>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.project_areas?.length">
-            <div class="card-header">
-              <div class="card-title">What You Work On</div>
-            </div>
-            <div class="card-body">
-              <ul class="refine-list">
-                <template x-for="area in $store.refine.report.narratives.project_areas" :key="area.name">
-                  <li>
-                    <div class="fw-semibold" x-text="area.name"></div>
-                    <div class="text-muted small" x-text="area.description"></div>
-                  </li>
-                </template>
-              </ul>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.wins?.length">
-            <div class="card-header">
-              <div class="card-title">Impressive Things</div>
-            </div>
-            <div class="card-body">
-              <ul class="refine-list">
-                <template x-for="item in $store.refine.report.narratives.wins" :key="item">
-                  <li x-text="item"></li>
-                </template>
-              </ul>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.friction?.length">
-            <div class="card-header">
-              <div class="card-title">Where Things Go Wrong</div>
-            </div>
-            <div class="card-body">
-              <ul class="refine-list">
-                <template x-for="item in $store.refine.report.narratives.friction" :key="item.title">
-                  <li>
-                    <div class="fw-semibold" x-text="item.title"></div>
-                    <div class="text-muted small" x-text="item.description"></div>
-                    <div class="text-muted small" x-text="(item.examples || []).join(' · ')"></div>
-                  </li>
-                </template>
-              </ul>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.features?.length">
-            <div class="card-header">
-              <div class="card-title">Features to Try</div>
-            </div>
-            <div class="card-body">
-              <ul class="refine-list">
-                <template x-for="item in $store.refine.report.narratives.features" :key="item.title">
-                  <li>
-                    <div class="fw-semibold" x-text="item.title"></div>
-                    <div class="text-muted small" x-text="item.oneliner"></div>
-                    <div class="text-muted small" x-text="item.why"></div>
-                  </li>
-                </template>
-              </ul>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.patterns?.length">
-            <div class="card-header">
-              <div class="card-title">New Usage Patterns</div>
-            </div>
-            <div class="card-body">
-              <ul class="refine-list">
-                <template x-for="item in $store.refine.report.narratives.patterns" :key="item.title">
-                  <li>
-                    <div class="fw-semibold" x-text="item.title"></div>
-                    <div class="text-muted small" x-text="item.summary"></div>
-                  </li>
-                </template>
-              </ul>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.horizon?.length">
-            <div class="card-header">
-              <div class="card-title">On the Horizon</div>
-            </div>
-            <div class="card-body">
-              <ul class="refine-list">
-                <template x-for="item in $store.refine.report.narratives.horizon" :key="item.title">
-                  <li>
-                    <div class="fw-semibold" x-text="item.title"></div>
-                    <div class="text-muted small" x-text="item.possible"></div>
-                    <div class="text-muted small" x-text="item.tip"></div>
-                  </li>
-                </template>
-              </ul>
-            </div>
-          </div>
-
-          <div class="card mb-3" x-show="$store.refine.report.narratives?.feedback">
-            <div class="card-header">
-              <div class="card-title">Team Feedback</div>
-            </div>
-            <div class="card-body">
-              <div class="text-muted small mb-2" x-text="($store.refine.report.narratives.feedback?.team || []).join(' · ')"></div>
-              <div class="text-muted small" x-text="($store.refine.report.narratives.feedback?.model || []).join(' · ')"></div>
             </div>
           </div>
         </section>
@@ -1245,54 +1168,109 @@
             <div class="card-header d-flex justify-content-between align-items-center">
               <div>
                 <div class="card-title">Runtime Settings</div>
-                <div class="text-muted small">Changes are saved to ~/.lerim/config.toml.</div>
+                <div class="text-muted small">Changes are saved to <span x-text="$store.settings.user_config_path || '~/.lerim/config.toml'"></span></div>
               </div>
               <div class="d-flex gap-2">
-                <button class="btn btn-outline-primary btn-sm" @click="loadSettings()" :disabled="$store.settings.loading">
-                  Reload
-                </button>
-                <button class="btn btn-primary btn-sm" @click="saveSettings()" :disabled="DASHBOARD_READ_ONLY || $store.settings.saving">
+                <button class="btn btn-outline-primary btn-sm" @click="loadSettings()" :disabled="$store.settings.loading">Reload</button>
+                <button class="btn btn-primary btn-sm" @click="saveSettings()" :disabled="$store.settings.saving">
                   <span x-show="!$store.settings.saving">Save</span>
                   <span x-show="$store.settings.saving">Saving...</span>
                 </button>
               </div>
             </div>
             <div class="card-body">
-              <div class="row g-3">
-                <div class="col-12 col-md-4">
-                  <label class="form-label">Agent Provider</label>
-                  <select class="form-select" x-model="$store.settings.form.agent_provider" @change="loadModelOptions($store.settings.form.agent_provider)">
-                    <option value="anthropic">anthropic</option>
-                    <option value="zai">zai</option>
-                    <option value="openrouter">openrouter</option>
-                  </select>
+              <!-- Server section -->
+              <h4 class="mb-3" style="font-size:0.85rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--lerim-muted)">Server</h4>
+              <div class="row g-3 mb-4">
+                <div class="col-6 col-md-3">
+                  <label class="form-label">Host</label>
+                  <input class="form-control" type="text" x-model="$store.settings.form.server.host" />
                 </div>
-                <div class="col-12 col-md-8">
-                  <label class="form-label">Agent Model</label>
-                  <input class="form-control" list="agent-model-options" x-model="$store.settings.form.agent_model" />
-                  <datalist id="agent-model-options">
-                    <template x-for="model in $store.settings.model_options" :key="model">
-                      <option :value="model"></option>
-                    </template>
-                  </datalist>
+                <div class="col-6 col-md-3">
+                  <label class="form-label">Port</label>
+                  <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.server.port" />
                 </div>
-                <div class="col-12">
-                  <label class="form-label">Agent Timeout (sec)</label>
-                  <input class="form-control" type="number" min="1" step="1" x-model.number="$store.settings.form.agent_timeout" />
+                <div class="col-6 col-md-2">
+                  <label class="form-label">Poll (min)</label>
+                  <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.server.poll_interval_minutes" />
                 </div>
-                <div class="col-12 col-md-6">
-                  <label class="form-label">LLM Provider</label>
-                  <select class="form-select" x-model="$store.settings.form.llm_provider">
-                    <option value="anthropic">anthropic</option>
-                    <option value="zai">zai</option>
-                    <option value="openrouter">openrouter</option>
-                  </select>
+                <div class="col-6 col-md-2">
+                  <label class="form-label">Sync Window (days)</label>
+                  <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.server.sync_window_days" />
                 </div>
-                <div class="col-12 col-md-6">
-                  <label class="form-label">LLM Model</label>
-                  <input class="form-control" x-model="$store.settings.form.llm_model" />
+                <div class="col-6 col-md-2">
+                  <label class="form-label">Max Sessions</label>
+                  <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.server.sync_max_sessions" />
                 </div>
               </div>
+
+              <!-- Roles section -->
+              <template x-for="roleName in ['lead', 'explorer', 'extract', 'summarize']" :key="roleName">
+                <div class="mb-4">
+                  <h4 class="mb-3" style="font-size:0.85rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--lerim-muted)" x-text="'Role: ' + roleName"></h4>
+                  <div class="row g-3">
+                    <div class="col-6 col-md-3">
+                      <label class="form-label">Provider</label>
+                      <select class="form-select" x-model="$store.settings.form.roles[roleName].provider">
+                        <option value="openrouter">openrouter</option>
+                        <option value="zai">zai</option>
+                        <option value="anthropic">anthropic</option>
+                        <option value="openai">openai</option>
+                        <option value="ollama">ollama</option>
+                      </select>
+                    </div>
+                    <div class="col-6 col-md-5">
+                      <label class="form-label">Model</label>
+                      <input class="form-control" type="text" x-model="$store.settings.form.roles[roleName].model" list="agent-model-options" />
+                    </div>
+                    <div class="col-6 col-md-2">
+                      <label class="form-label">Timeout (s)</label>
+                      <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.roles[roleName].timeout_seconds" />
+                    </div>
+                    <div class="col-6 col-md-2">
+                      <label class="form-label">Max Iters</label>
+                      <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.roles[roleName].max_iterations" />
+                    </div>
+                    <div class="col-12 col-md-5" x-show="$store.settings.form.roles[roleName].sub_model !== undefined">
+                      <label class="form-label">Sub Model (DSPy)</label>
+                      <input class="form-control" type="text" x-model="$store.settings.form.roles[roleName].sub_model" />
+                    </div>
+                    <div class="col-6 col-md-2" x-show="$store.settings.form.roles[roleName].max_llm_calls !== undefined">
+                      <label class="form-label">Max LLM Calls</label>
+                      <input class="form-control" type="number" min="1" x-model.number="$store.settings.form.roles[roleName].max_llm_calls" />
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Tracing section -->
+              <h4 class="mb-3" style="font-size:0.85rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--lerim-muted)">Tracing</h4>
+              <div class="row g-3 mb-3">
+                <div class="col-6 col-md-3">
+                  <label class="form-check">
+                    <input class="form-check-input" type="checkbox" x-model="$store.settings.form.tracing.enabled" />
+                    <span class="form-check-label">Enabled</span>
+                  </label>
+                </div>
+                <div class="col-6 col-md-3">
+                  <label class="form-check">
+                    <input class="form-check-input" type="checkbox" x-model="$store.settings.form.tracing.include_httpx" />
+                    <span class="form-check-label">Include HTTPX</span>
+                  </label>
+                </div>
+                <div class="col-6 col-md-3">
+                  <label class="form-check">
+                    <input class="form-check-input" type="checkbox" x-model="$store.settings.form.tracing.include_content" />
+                    <span class="form-check-label">Include Content</span>
+                  </label>
+                </div>
+              </div>
+
+              <datalist id="agent-model-options">
+                <template x-for="model in $store.settings.model_options" :key="model">
+                  <option :value="model"></option>
+                </template>
+              </datalist>
               <div class="text-muted small mt-3" x-text="$store.settings.status"></div>
             </div>
           </div>
@@ -1415,7 +1393,7 @@
       return `${diffDays}d ago`;
     }
 
-    const DASHBOARD_READ_ONLY = true;
+    const DASHBOARD_READ_ONLY = false;
 
     function setAgenticScope(run) {
       if (!run) {
@@ -1433,6 +1411,8 @@
       claude: '#f59e0b',
       codex: '#22d3ee',
       opencode: '#34d399',
+      cursor: '#e879f9',
+      cline: '#fb923c',
       muted: '#94a3b8',
       accent: '#22d3ee',
       accent2: '#f59e0b',
@@ -1623,6 +1603,28 @@
       }
       toggleChartEmpty('daily', false);
       const labels = dailyActivity.map(item => item.date);
+      // Only show agents that have at least one session
+      const agentDefs = [
+        { key: 'claude', name: 'Claude', color: chartPalette.claude },
+        { key: 'codex', name: 'Codex', color: chartPalette.codex },
+        { key: 'opencode', name: 'OpenCode', color: chartPalette.opencode },
+        { key: 'cursor', name: 'Cursor', color: '#e879f9' },
+        { key: 'cline', name: 'Cline', color: '#fb923c' },
+      ];
+      const series = agentDefs
+        .filter(def => dailyActivity.some(item => (item[def.key] || 0) > 0))
+        .map(def => ({
+          name: def.name,
+          type: 'line',
+          data: dailyActivity.map(item => item[def.key] || 0),
+          areaStyle: { opacity: 0.2 },
+          smooth: true,
+          itemStyle: { color: def.color },
+        }));
+      if (!series.length) {
+        toggleChartEmpty('daily', true);
+        return;
+      }
       const chart = chartRegistry.get('daily');
       if (!chart) return;
       chart.setOption({
@@ -1637,32 +1639,7 @@
           boundaryGap: false,
         },
         yAxis: chartAxisDefaults({ type: 'value' }),
-        series: [
-          {
-            name: 'Claude',
-            type: 'line',
-            data: dailyActivity.map(item => item.claude || 0),
-            areaStyle: { opacity: 0.2 },
-            smooth: true,
-            itemStyle: { color: chartPalette.claude },
-          },
-          {
-            name: 'Codex',
-            type: 'line',
-            data: dailyActivity.map(item => item.codex || 0),
-            areaStyle: { opacity: 0.2 },
-            smooth: true,
-            itemStyle: { color: chartPalette.codex },
-          },
-          {
-            name: 'OpenCode',
-            type: 'line',
-            data: dailyActivity.map(item => item.opencode || 0),
-            areaStyle: { opacity: 0.2 },
-            smooth: true,
-            itemStyle: { color: chartPalette.opencode },
-          },
-        ],
+        series,
       }, { notMerge: true, lazyUpdate: true });
     }
 
@@ -1679,35 +1656,42 @@
         animation: false,
         tooltip: { trigger: 'axis' },
         legend: { textStyle: { color: chartPalette.muted } },
-        grid: { left: 16, right: 30, top: 24, bottom: 24, containLabel: true },
+        grid: { left: 16, right: 16, top: 30, bottom: 24, containLabel: true },
         xAxis: {
           ...chartAxisDefaults(),
           type: 'category',
           data: labels,
           boundaryGap: false,
         },
-        yAxis: chartAxisDefaults({ type: 'value' }),
+        yAxis: [
+          { ...chartAxisDefaults({ type: 'value' }), name: 'Count', nameTextStyle: { color: chartPalette.muted, fontSize: 10 } },
+          { ...chartAxisDefaults({ type: 'value' }), name: 'Tokens (K)', nameTextStyle: { color: chartPalette.muted, fontSize: 10 } },
+        ],
         series: [
           {
             name: 'Messages',
-            type: 'line',
+            type: 'bar',
+            yAxisIndex: 0,
             data: dailyActivity.map(item => item.messages || 0),
-            smooth: true,
             itemStyle: { color: '#4ade80' },
+            barWidth: 8,
           },
           {
             name: 'Tool Calls',
-            type: 'line',
+            type: 'bar',
+            yAxisIndex: 0,
             data: dailyActivity.map(item => item.tool_calls || 0),
-            smooth: true,
             itemStyle: { color: '#fbbf24' },
+            barWidth: 8,
           },
           {
             name: 'Tokens (K)',
             type: 'line',
+            yAxisIndex: 1,
             data: dailyActivity.map(item => Math.round((item.tokens || 0) / 1000)),
             smooth: true,
             itemStyle: { color: chartPalette.accent3 },
+            lineStyle: { width: 2 },
           },
         ],
       }, { notMerge: true, lazyUpdate: true });
@@ -1728,41 +1712,49 @@
         animation: false,
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
         legend: { textStyle: { color: chartPalette.muted } },
-        grid: { left: 16, right: 16, top: 24, bottom: 24, containLabel: true },
+        grid: { left: 16, right: 16, top: 30, bottom: 24, containLabel: true },
         xAxis: {
           ...chartAxisDefaults(),
           type: 'category',
           data: labels,
         },
-        yAxis: chartAxisDefaults({ type: 'value' }),
+        yAxis: [
+          { ...chartAxisDefaults({ type: 'value' }), name: 'Count', nameTextStyle: { color: chartPalette.muted, fontSize: 10 } },
+          { ...chartAxisDefaults({ type: 'value' }), name: 'Tokens (K)', nameTextStyle: { color: chartPalette.muted, fontSize: 10 } },
+        ],
         series: [
           {
             name: 'Sessions',
             type: 'bar',
-            stack: 'activity',
+            yAxisIndex: 0,
             data: labels.map((_, i) => hourMap[i]?.sessions || 0),
             itemStyle: { color: '#60a5fa' },
+            barWidth: 6,
           },
           {
             name: 'Messages',
             type: 'bar',
-            stack: 'activity',
+            yAxisIndex: 0,
             data: labels.map((_, i) => hourMap[i]?.messages || 0),
             itemStyle: { color: '#4ade80' },
+            barWidth: 6,
           },
           {
             name: 'Tool Calls',
             type: 'bar',
-            stack: 'activity',
+            yAxisIndex: 0,
             data: labels.map((_, i) => hourMap[i]?.tool_calls || 0),
             itemStyle: { color: '#f59e0b' },
+            barWidth: 6,
           },
           {
             name: 'Tokens (K)',
-            type: 'bar',
-            stack: 'activity',
+            type: 'line',
+            yAxisIndex: 1,
             data: labels.map((_, i) => Math.round((hourMap[i]?.tokens || 0) / 1000)),
             itemStyle: { color: '#a78bfa' },
+            smooth: true,
+            lineStyle: { width: 2 },
           },
         ],
       }, { notMerge: true, lazyUpdate: true });
@@ -1928,6 +1920,12 @@
           state: '',
           project: '',
         },
+        filterOptions: {
+          types: [],
+          kinds: [],
+          projects: [],
+          tags: [],
+        },
       });
 
       Alpine.store('refine', {
@@ -1948,12 +1946,16 @@
         status: '',
         model_options: [],
         sources: [],
+        user_config_path: '~/.lerim/config.toml',
         form: {
-          agent_provider: 'anthropic',
-          agent_model: '',
-          agent_timeout: 120,
-          llm_provider: 'zai',
-          llm_model: '',
+          server: { host: '127.0.0.1', port: 8765, poll_interval_minutes: 30, sync_window_days: 7, sync_max_sessions: 50 },
+          roles: {
+            lead: { provider: 'openrouter', model: '', timeout_seconds: 300, max_iterations: 24 },
+            explorer: { provider: 'openrouter', model: '', timeout_seconds: 180, max_iterations: 16 },
+            extract: { provider: 'openrouter', model: '', sub_model: '', timeout_seconds: 180, max_iterations: 8, max_llm_calls: 12 },
+            summarize: { provider: 'openrouter', model: '', sub_model: '', timeout_seconds: 180, max_iterations: 8, max_llm_calls: 12 },
+          },
+          tracing: { enabled: false, include_httpx: false, include_content: true },
         },
       });
 
@@ -1976,7 +1978,7 @@
           { id: 'overview', label: 'Overview' },
           { id: 'runs', label: 'Runs' },
           { id: 'memories', label: 'Memories' },
-          { id: 'refine', label: 'Session Intelligence' },
+          { id: 'refine', label: 'Pipeline' },
           { id: 'settings', label: 'Settings' },
         ],
         runsLimit: 30,
@@ -2326,15 +2328,27 @@
             const resp = await fetch('/api/config');
             if (!resp.ok) throw new Error('Failed to load settings');
             const data = await resp.json();
-            const effective = data.effective || {};
+            const eff = data.effective || {};
             this.$store.settings.sources = data.sources || [];
-            this.$store.settings.form.agent_provider = effective.provider || 'anthropic';
-            this.$store.settings.form.agent_model = effective.agent_model || '';
-            this.$store.settings.form.agent_timeout = effective.agent_timeout || 120;
-            this.$store.settings.form.llm_provider = effective.llm_provider || 'zai';
-            this.$store.settings.form.llm_model = effective.llm_model || '';
+            this.$store.settings.user_config_path = data.user_config_path || '~/.lerim/config.toml';
+            // Populate server settings
+            if (eff.server) {
+              Object.assign(this.$store.settings.form.server, eff.server);
+            }
+            // Populate roles
+            if (eff.roles) {
+              for (const [name, role] of Object.entries(eff.roles)) {
+                if (this.$store.settings.form.roles[name]) {
+                  Object.assign(this.$store.settings.form.roles[name], role);
+                }
+              }
+            }
+            // Populate tracing
+            if (eff.tracing) {
+              Object.assign(this.$store.settings.form.tracing, eff.tracing);
+            }
             this.$store.settings.status = `Loaded from ${data.user_config_path || '~/.lerim/config.toml'}`;
-            await this.loadModelOptions(this.$store.settings.form.agent_provider);
+            await this.loadModelOptions(this.$store.settings.form.roles.lead.provider);
           } catch (e) {
             console.error('Failed to load settings:', e);
             this.$store.settings.status = 'Failed to load settings.';
@@ -2346,7 +2360,7 @@
 
         async loadModelOptions(provider) {
           try {
-            const selected = provider || this.$store.settings.form.agent_provider;
+            const selected = provider || this.$store.settings.form.roles.lead.provider || 'openrouter';
             const resp = await fetch(`/api/config/models?provider=${encodeURIComponent(selected)}`);
             if (!resp.ok) throw new Error('Failed to load model options');
             const data = await resp.json();
@@ -2357,35 +2371,41 @@
         },
 
         async saveSettings() {
-          if (DASHBOARD_READ_ONLY) {
-            this.$store.settings.status = 'Read-only dashboard. Update settings via CLI config.';
-            Alpine.store('toasts').add('Read-only dashboard. Use `lerim config set` instead.', 'info');
-            return;
-          }
           this.$store.settings.saving = true;
           this.$store.settings.status = 'Saving...';
           try {
+            const form = this.$store.settings.form;
             const patch = {
-              agent: {
-                provider: this.$store.settings.form.agent_provider,
-                model: this.$store.settings.form.agent_model,
-                timeout: Number(this.$store.settings.form.agent_timeout || 120),
+              server: {
+                host: form.server.host,
+                port: Number(form.server.port),
+                poll_interval_minutes: Number(form.server.poll_interval_minutes),
+                sync_window_days: Number(form.server.sync_window_days),
+                sync_max_sessions: Number(form.server.sync_max_sessions),
               },
-              llm: {
-                provider: this.$store.settings.form.llm_provider,
-                model: this.$store.settings.form.llm_model,
+              roles: {},
+              tracing: {
+                enabled: form.tracing.enabled,
+                include_httpx: form.tracing.include_httpx,
+                include_content: form.tracing.include_content,
               },
             };
+            for (const [name, role] of Object.entries(form.roles)) {
+              const r = { provider: role.provider, model: role.model, timeout_seconds: Number(role.timeout_seconds), max_iterations: Number(role.max_iterations) };
+              if (role.sub_model !== undefined) r.sub_model = role.sub_model;
+              if (role.max_llm_calls !== undefined) r.max_llm_calls = Number(role.max_llm_calls);
+              patch.roles[name] = r;
+            }
             const resp = await fetch('/api/config', {
-              method: 'PATCH',
+              method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ patch }),
             });
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error || 'Failed to save settings');
-            this.$store.settings.status = 'Saved to ~/.lerim/config.toml';
+            this.$store.settings.status = 'Saved successfully.';
             this.$store.settings.sources = data.sources || this.$store.settings.sources;
-            Alpine.store('toasts').add('Settings saved', 'info');
+            Alpine.store('toasts').add('Settings saved', 'success');
           } catch (e) {
             console.error('Failed to save settings:', e);
             this.$store.settings.status = `Save failed: ${e.message || e}`;
@@ -2491,7 +2511,7 @@
         },
 
         getAgentLetter(type) {
-          const map = { claude: 'C', codex: 'X', opencode: 'O' };
+          const map = { claude: 'C', codex: 'X', opencode: 'O', cursor: 'U', cline: 'L' };
           return map[type] || '?';
         },
 
@@ -2527,9 +2547,27 @@
           return `Page ${currentPage} of ${totalPages} (${p.total} sessions)`;
         },
 
+        async loadMemoryFilterOptions() {
+          try {
+            const resp = await fetch('/api/memory-graph/options');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            this.$store.memories.filterOptions.types = data.types || [];
+            this.$store.memories.filterOptions.kinds = data.kinds || [];
+            this.$store.memories.filterOptions.projects = data.projects || [];
+            this.$store.memories.filterOptions.tags = data.tags || [];
+          } catch (e) {
+            console.warn('Failed to load memory filter options:', e);
+          }
+        },
+
         async loadMemories() {
           this.$store.memories.loading = true;
           const filters = this.$store.memories.filters;
+          // Load filter options in background on first call
+          if (!this.$store.memories.filterOptions.types.length) {
+            this.loadMemoryFilterOptions();
+          }
           try {
             const params = new URLSearchParams();
             if (filters.query) params.set('query', filters.query);

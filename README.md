@@ -160,12 +160,58 @@ Config options (`[tracing]` in TOML):
 | `include_httpx` | `false` | Capture raw HTTP request/response bodies |
 | `include_content` | `true` | Include prompt/completion text in spans |
 
-### Supported platforms
+### Connecting coding agents
 
-- `claude` — reads from `~/.claude/projects/` (JSONL files)
-- `codex` — reads from `~/.codex/sessions/` (JSONL files)
-- `cursor` — reads from Cursor's `state.vscdb` SQLite DB, exports sessions as JSONL to `~/.lerim/cache/cursor/`
-- `opencode` — reads from `~/.local/share/opencode/`
+Lerim ingests session transcripts from your coding agents to extract decisions and learnings. The `lerim connect` command registers an agent platform so Lerim knows where to find its sessions.
+
+#### Supported agents
+
+| Platform | Session store | Format |
+|----------|--------------|--------|
+| `claude` | `~/.claude/projects/` | JSONL files |
+| `codex` | `~/.codex/sessions/` | JSONL files |
+| `cursor` | `~/Library/Application Support/Cursor/User/globalStorage/` (macOS) | SQLite `state.vscdb`, exported to JSONL cache |
+| `opencode` | `~/.local/share/opencode/` | SQLite `opencode.db`, exported to JSONL cache |
+
+#### How to connect
+
+Auto-detect and connect all supported platforms at once:
+
+```bash
+lerim connect auto
+```
+
+Or connect a specific platform:
+
+```bash
+lerim connect claude
+lerim connect codex
+lerim connect cursor
+lerim connect opencode
+```
+
+List currently connected platforms:
+
+```bash
+lerim connect list
+```
+
+Disconnect a platform:
+
+```bash
+lerim connect remove claude
+```
+
+#### Custom session path
+
+If your agent stores sessions in a non-default location, use `--path` to point Lerim to the correct folder:
+
+```bash
+lerim connect claude --path /custom/path/to/claude/sessions
+lerim connect cursor --path ~/my-cursor-data/globalStorage
+```
+
+The path is expanded (`~` is resolved) and must exist on disk. This overrides the auto-detected default for that platform.
 
 ### Search
 
