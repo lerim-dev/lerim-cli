@@ -23,45 +23,43 @@ poll_interval_minutes = 5
 
 [roles.lead]
 provider = "openrouter"               # zai | openrouter | openai
-model = "z-ai/glm-4.7-flash"
+model = "qwen/qwen3-coder-30b-a3b-instruct"
 api_base = ""
-fallback_models = [
-  "zai:glm-4.7-flash",
-]
+fallback_models = []
 timeout_seconds = 300
 max_iterations = 24
+openrouter_provider_order = ["nebius"]  # route OpenRouter requests to Nebius first
 
 [roles.explorer]
 provider = "openrouter"
-model = "z-ai/glm-4.7-flash"
+model = "qwen/qwen3-coder-30b-a3b-instruct"
 api_base = ""
-fallback_models = [
-  "zai:glm-4.7-flash",
-]
+fallback_models = []
 timeout_seconds = 180
 max_iterations = 16
+openrouter_provider_order = ["nebius"]
 
 [roles.extract]
 provider = "openrouter"
-model = "z-ai/glm-4.7-flash"
+model = "qwen/qwen3-coder-30b-a3b-instruct"
+sub_model = "qwen/qwen3-coder-30b-a3b-instruct"   # cheaper model for RLM sub-LLM calls
 api_base = ""
-fallback_models = [
-  "zai:glm-4.7-flash",
-]
+fallback_models = []
 timeout_seconds = 180
 max_iterations = 24
 max_llm_calls = 24
+openrouter_provider_order = ["nebius"]
 
 [roles.summarize]
 provider = "openrouter"
-model = "z-ai/glm-4.7-flash"
+model = "qwen/qwen3-coder-30b-a3b-instruct"
+sub_model = "qwen/qwen3-coder-30b-a3b-instruct"   # cheaper model for RLM sub-LLM calls
 api_base = ""
-fallback_models = [
-  "zai:glm-4.7-flash",
-]
+fallback_models = []
 timeout_seconds = 180
 max_iterations = 24
 max_llm_calls = 24
+openrouter_provider_order = ["nebius"]
 
 [tracing]
 enabled = false                          # set true or LERIM_TRACING=1 to enable
