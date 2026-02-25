@@ -25,7 +25,7 @@ Install lint deps:
 `uv pip install -e ".[lint]"`
 
 Run lint:
-`scripts/run_tests.sh lint`
+`tests/run_tests.sh lint`
 
 Notes.
 This is baseline only. Keep changes small.

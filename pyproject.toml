@@ -44,11 +44,12 @@ lerim = ["config/default.toml"]
 
 [tool.pytest.ini_options]
 markers = [
-    "integration: marks tests that hit real external services",
-    "e2e: marks end-to-end tests that exercise full flows",
-    "agent: agent SDK or CLI integration tests",
-    "llm: non-agentic LLM integration tests",
-    "embeddings: embedding integration tests",
+    "integration: Tests that hit real external services",
+    "e2e: End-to-end tests that exercise full flows",
+    "smoke: Quick LLM sanity checks (requires ollama)",
+    "agent: Agent SDK or CLI integration tests",
+    "llm: Non-agentic LLM integration tests",
+    "embeddings: Embedding integration tests",
     "openrouter: OpenRouter provider tests",
     "openai: OpenAI provider tests",
     "zai: ZAI provider tests",
