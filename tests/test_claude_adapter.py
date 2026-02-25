@@ -166,8 +166,8 @@ def test_iter_sessions_window_filtering(tmp_path):
     assert len(records) == 0  # both outside Feb range
 
 
-def test_iter_sessions_skips_known_run_ids(tmp_path):
-    """iter_sessions with known_run_ids skips already-indexed sessions."""
+def test_iter_sessions_skips_unchanged_hashes(tmp_path):
+    """iter_sessions skips sessions whose content hash has not changed."""
     _write_claude_jsonl(
         tmp_path / "known.jsonl",
         [
@@ -188,9 +188,53 @@ def test_iter_sessions_skips_known_run_ids(tmp_path):
             },
         ],
     )
-    records = iter_sessions(traces_dir=tmp_path, known_run_ids={"known"})
+    # First pass: get all sessions to capture the hash of "known"
+    all_records = iter_sessions(traces_dir=tmp_path)
+    known_rec = [r for r in all_records if r.run_id == "known"][0]
+    # Second pass: skip "known" by providing its hash
+    records = iter_sessions(
+        traces_dir=tmp_path,
+        known_run_hashes={"known": known_rec.content_hash},
+    )
     assert len(records) == 1
     assert records[0].run_id == "new"
+
+
+def test_iter_sessions_returns_changed_when_hash_differs(tmp_path):
+    """iter_sessions returns a session when its stored hash no longer matches."""
+    _write_claude_jsonl(
+        tmp_path / "sess.jsonl",
+        [
+            {
+                "type": "user",
+                "message": {"content": "original"},
+                "timestamp": "2026-02-20T10:00:00Z",
+            },
+        ],
+    )
+    first = iter_sessions(traces_dir=tmp_path)
+    assert len(first) == 1
+    old_hash = first[0].content_hash
+
+    # Simulate resumed chat: append new content
+    with (tmp_path / "sess.jsonl").open("a", encoding="utf-8") as fh:
+        import json
+
+        fh.write(
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {"content": "resumed"},
+                    "timestamp": "2026-02-25T10:00:00Z",
+                }
+            )
+            + "\n"
+        )
+
+    # Providing old hash → session IS returned (hash changed)
+    records = iter_sessions(traces_dir=tmp_path, known_run_hashes={"sess": old_hash})
+    assert len(records) == 1
+    assert records[0].content_hash != old_hash
 
 
 def test_read_session_empty_file(tmp_path):

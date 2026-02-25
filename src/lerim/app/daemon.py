@@ -367,6 +367,7 @@ def run_sync_once(
                         session_path=item.session_path,
                         start_time=item.start_time,
                         trigger=trigger,
+                        force=item.changed,
                     )
                     if queued:
                         queued_sessions += 1
