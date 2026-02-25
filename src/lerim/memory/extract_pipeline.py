@@ -19,31 +19,29 @@ import dspy
 
 from lerim.config.settings import get_config
 from lerim.memory.schemas import MemoryCandidate
-from lerim.memory.utils import configure_dspy_lm
+from lerim.memory.utils import configure_dspy_lm, configure_dspy_sub_lm
 from lerim.sessions import catalog as session_db
 
 
 class MemoryExtractSignature(dspy.Signature):
-    """Extract reusable memory candidates from transcript text.
+    """Extract reusable memory candidates from a raw coding-agent session transcript.
 
-    Transcript format: JSONL (one JSON object per line, newline-separated).
-    Parse by splitting on newlines and parsing each line as JSON.
-
-    Example formats from different coding agents (actual keys may vary):
-    1) Simple: {"role": "user", "content": "I decided to use X instead of Y", "timestamp": "2026-02-23T10:00:00Z"}
-    2) Claude: {"type": "user", "message": {"content": "We will use Docker..."}, "timestamp": "..."}
-    3) Codex: {"type": "event_msg", "payload": {"type": "user_message", "message": "Lesson:..."}}
-
-    Note: Different agents use different key names. Look for common patterns like
-    user/assistant role indicators, content/text/message fields, and timestamp info.
-
-    Primitive type rules (must be consistent):
-    - decision: an explicit choice, preference, or configuration that should stay stable.
-      Trigger words: "decision", "we will", "use X not Y", "always do", "never do", "set X to Y".
-    - learning: a lesson, fix, pattern, or friction signal learned from experience.
-      Trigger words: "lesson", "fix", "found that", "struggled with", "wasted time on".
-    - When in doubt, prefer learning. Only use decision when the transcript contains
-      a clear deliberate choice or a stated configuration value.
+    IMPORTANT -- Extraction strategy (you are running inside an RLM REPL):
+    1) Do NOT normalize or pre-parse the transcript schema. Treat it as raw text.
+       Different agents (Claude Code, Codex, Cursor, Windsurf) use different JSON shapes.
+    2) First EXPLORE: sample a few spans from beginning, middle, and end to understand
+       the structure and length. Print samples, check types. Do not try to solve in one step.
+    3) Build overlapping windows of ~20,000 characters with ~2,000 overlap.
+    4) For each window, use llm_query() to extract only durable, high-value items:
+       - decision: explicit stable choice / configuration / policy.
+         Trigger words: "decision", "we will", "use X not Y", "always do", "never do", "set X to Y".
+       - learning: reusable lesson / fix / pitfall / friction signal.
+         Trigger words: "lesson", "fix", "found that", "struggled with", "wasted time on".
+       - When in doubt, prefer learning.
+    5) For every extracted item, keep one short verbatim evidence quote (<=200 chars).
+    6) After processing all windows, MERGE near-duplicates across windows.
+    7) Prefer precision over recall. If evidence is weak, drop it.
+    8) SUBMIT only the final deduplicated primitives list.
 
     Kind (for learnings only):
     - insight: a reusable observation or pattern.
@@ -62,7 +60,7 @@ class MemoryExtractSignature(dspy.Signature):
     """
 
     transcript: str = dspy.InputField(
-        desc="Raw transcript in JSONL format - one JSON object per line"
+        desc="Raw session transcript text (JSONL or JSON, schema varies by agent)"
     )
     metadata: dict[str, Any] = dspy.InputField(desc="Session metadata")
     metrics: dict[str, Any] = dspy.InputField(desc="Deterministic metrics")
@@ -83,26 +81,29 @@ def _extract_candidates_with_rlm(
     config = get_config()
     max_iterations = config.dspy_rlm_max_iterations
     max_llm_calls = config.dspy_rlm_max_llm_calls
-    configure_dspy_lm("extract")
+    lm = configure_dspy_lm("extract")
+    sub_lm = configure_dspy_sub_lm("extract")
     rlm = dspy.RLM(
         MemoryExtractSignature,
         max_iterations=max_iterations,
         max_llm_calls=max_llm_calls,
+        sub_lm=sub_lm,
         verbose=False,
     )
-    try:
-        result = rlm(
-            transcript=transcript,
-            metadata=metadata or {},
-            metrics=metrics or {},
-        )
-    except Exception:
-        predictor = dspy.Predict(MemoryExtractSignature)
-        result = predictor(
-            transcript=transcript,
-            metadata=metadata or {},
-            metrics=metrics or {},
-        )
+    with dspy.context(lm=lm):
+        try:
+            result = rlm(
+                transcript=transcript,
+                metadata=metadata or {},
+                metrics=metrics or {},
+            )
+        except Exception:
+            predictor = dspy.Predict(MemoryExtractSignature)
+            result = predictor(
+                transcript=transcript,
+                metadata=metadata or {},
+                metrics=metrics or {},
+            )
     primitives = getattr(result, "primitives", [])
     if not isinstance(primitives, list):
         return []

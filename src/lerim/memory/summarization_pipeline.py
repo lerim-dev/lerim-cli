@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from lerim.memory.memory_record import slugify
 from lerim.config.settings import get_config, reload_config
-from lerim.memory.utils import configure_dspy_lm
+from lerim.memory.utils import configure_dspy_lm, configure_dspy_sub_lm
 from lerim.sessions import catalog as session_db
 
 
@@ -66,20 +66,34 @@ At most 200 words.""",
 
 
 class TraceSummarySignature(dspy.Signature):
-    """Summarize a raw session trace into structured metadata plus a two-part summary.
+    """Summarize a raw coding-agent session trace into structured metadata plus a two-part summary.
 
-    Rules:
-    - user_intent: Describe the user's overall goal and intention for the session.
-      Not the literal first query, but the broader purpose the user was trying to
-      accomplish across the whole chat. At most 150 words.
-    - session_narrative: Describe what actually happened during the chat -- actions
-      taken, problems hit, solutions applied, and final outcome. At most 200 words.
-    - Keep both sections factual and grounded in trace evidence.
-    - Keep title and description concise and specific.
-    - Assign descriptive tags (group/cluster labels) for categorization. No limit on tag count.
+    IMPORTANT -- Summarization strategy (you are running inside an RLM REPL):
+    1) Do NOT normalize or pre-parse the transcript schema. Treat it as raw text.
+       Different agents (Claude Code, Codex, Cursor, Windsurf) use different JSON shapes.
+    2) First EXPLORE: sample spans from beginning, middle, and end to understand
+       the structure, length, and agent format. Print samples, check types.
+    3) Read the transcript in overlapping windows (~25,000 chars, ~2,000 overlap).
+    4) For each window, use llm_query() to extract a running buffer of:
+       - user goals and intentions
+       - key actions taken
+       - key failures, frictions, and blockers
+       - fixes applied and outcomes achieved
+    5) After all windows, MERGE the per-window buffers into a coherent narrative.
+    6) Produce the final summary:
+       - user_intent: the user's overall goal across the whole chat (at most 150 words).
+         Not the literal first query, but the broader purpose.
+       - session_narrative: what actually happened chronologically -- actions taken,
+         problems hit, solutions applied, and final outcome (at most 200 words).
+    7) Ground all claims in transcript evidence. Avoid invented details.
+    8) Keep title and description concise and specific.
+    9) Assign descriptive tags (group/cluster labels) for categorization. No limit on tag count.
+    10) Extract date, time, coding_agent from transcript or metadata when available.
     """
 
-    transcript: str = dspy.InputField(desc="Raw transcript text")
+    transcript: str = dspy.InputField(
+        desc="Raw session transcript text (JSONL or JSON, schema varies by agent)"
+    )
     metadata: dict[str, Any] = dspy.InputField(desc="Session metadata")
     metrics: dict[str, Any] = dspy.InputField(desc="Deterministic metrics")
     summary_payload: TraceSummaryCandidate = dspy.OutputField(
@@ -97,28 +111,31 @@ def _summarize_trace_with_rlm(
     if not transcript.strip():
         raise RuntimeError("session_trace_empty")
     config = get_config()
-    max_iterations = config.dspy_rlm_max_iterations
-    max_llm_calls = config.dspy_rlm_max_llm_calls
-    configure_dspy_lm("summarize")
+    max_iterations = config.summarize_role.max_iterations
+    max_llm_calls = config.summarize_role.max_llm_calls
+    lm = configure_dspy_lm("summarize")
+    sub_lm = configure_dspy_sub_lm("summarize")
     rlm = dspy.RLM(
         TraceSummarySignature,
         max_iterations=max_iterations,
         max_llm_calls=max_llm_calls,
+        sub_lm=sub_lm,
         verbose=False,
     )
-    try:
-        result = rlm(
-            transcript=transcript,
-            metadata=metadata or {},
-            metrics=metrics or {},
-        )
-    except Exception:
-        predictor = dspy.Predict(TraceSummarySignature)
-        result = predictor(
-            transcript=transcript,
-            metadata=metadata or {},
-            metrics=metrics or {},
-        )
+    with dspy.context(lm=lm):
+        try:
+            result = rlm(
+                transcript=transcript,
+                metadata=metadata or {},
+                metrics=metrics or {},
+            )
+        except Exception:
+            predictor = dspy.Predict(TraceSummarySignature)
+            result = predictor(
+                transcript=transcript,
+                metadata=metadata or {},
+                metrics=metrics or {},
+            )
     payload = getattr(result, "summary_payload", None)
     if isinstance(payload, TraceSummaryCandidate):
         candidate = payload
