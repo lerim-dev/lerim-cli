@@ -86,6 +86,39 @@ At the start of a session, tell your agent:
 
 Your agent will run `lerim chat` or `lerim memory search` to pull in past decisions and learnings before it starts working.
 
+## Dashboard
+
+The dashboard gives you a local UI for session analytics, memory browsing, and runtime status.
+
+<p align="center">
+  <img src="assets/dashboard.png" alt="Lerim dashboard" width="1100">
+</p>
+
+### Run it locally
+
+```bash
+# simple
+lerim dashboard
+
+# explicit host/port
+python -m lerim dashboard --host 127.0.0.1 --port 8765
+```
+
+Then open `http://127.0.0.1:8765`.
+
+### Tabs
+
+- **Overview**: high-level metrics and charts (sessions, messages, tools, errors, tokens, activity by day/hour, model usage).
+- **Runs**: searchable session list (50/page) with status and metadata; open any run in a full-screen chat viewer.
+- **Memories**: library + editor for memory records (filter, inspect, edit title/body/kind/confidence/tags).
+- **Pipeline**: sync/maintain status, extraction queue state, and latest extraction report.
+- **Settings**: dashboard-editable config for server, model roles, and tracing; saves to `~/.lerim/config.toml`.
+
+### Notes
+
+- Top bar filters (`Agent`, `Scope`) update dashboard metrics and run listings.
+- Graph Explorer code is kept in the project but currently hidden in the UI.
+
 ## CLI reference
 
 Full command reference: [`skills/lerim/cli-reference.md`](skills/lerim/cli-reference.md)
