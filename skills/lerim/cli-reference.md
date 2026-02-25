@@ -133,7 +133,8 @@ lerim daemon --poll-seconds 120  # poll every 2 minutes
 
 ### `lerim dashboard`
 
-Launch a local read-only HTTP dashboard to browse memories, sessions, and status.
+Launch a local HTTP dashboard to browse sessions/memories, view pipeline status,
+and update settings (writes to `~/.lerim/config.toml`).
 
 ```bash
 lerim dashboard                          # start on default host/port

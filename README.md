@@ -2,7 +2,7 @@
   <img src="assets/lerim.png" alt="Lerim Logo" width="160">
 </p>
 
-<p align="center"><strong>Continual learning layer for coding agents.</strong></p>
+<p align="center"><strong>Continual learning layer for coding agents</strong></p>
 <p align="center"><a href="https://lerim.dev/">lerim.dev</a></p>
 
 Lerim is a continual learning layer that gives coding agents persistent memory across sessions. It watches your agent conversations (Claude Code, Codex, Cursor, OpenCode, ...), extracts decisions and learnings, and stores them as plain markdown files that both humans and agents can read. Memories are refined offline over time through merging, deduplication, archiving, and decay-based forgetting. You can query stored memories anytime to bring relevant past context into your current session.
@@ -16,7 +16,7 @@ Lerim is file-first and primitive-first.
 - Global fallback memory: `~/.lerim/`
 - Search default: `files` (no index required)
 - Orchestration runtime: `pydantic-ai` lead agent + read-only explorer subagent
-- Extraction/summarization: `dspy.RLM` role-configured models (default Ollama `qwen3:8b`)
+- Extraction/summarization: `dspy.RLM` role-configured models (default OpenRouter `x-ai/grok-4.1-fast`)
 - Graph source of truth: explicit id/slug references (and `related` when present)
 
 This keeps memory readable by humans and easy for agents to traverse.
@@ -156,6 +156,13 @@ TOML-layered config (low to high priority):
 4. `LERIM_CONFIG` env var path (explicit override, for CI/tests)
 
 API keys come from environment variables only (`ZAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, optional `ANTHROPIC_API_KEY`).
+
+Default role model config (from `src/lerim/config/default.toml`):
+
+- `lead`: `provider=openrouter`, `model=x-ai/grok-4.1-fast`
+- `explorer`: `provider=openrouter`, `model=x-ai/grok-4.1-fast`
+- `extract`: `provider=openrouter`, `model=x-ai/grok-4.1-fast`, `sub_model=x-ai/grok-4.1-fast`
+- `summarize`: `provider=openrouter`, `model=x-ai/grok-4.1-fast`, `sub_model=x-ai/grok-4.1-fast`
 
 ### Tracing (OpenTelemetry)
 
