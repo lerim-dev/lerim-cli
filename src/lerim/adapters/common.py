@@ -1,7 +1,8 @@
-"""Shared adapter helpers for timestamps, JSONL loading, and window filtering."""
+"""Shared adapter helpers for timestamps, JSONL loading, window filtering, and hashing."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -82,6 +83,15 @@ def in_window(
     return True
 
 
+def compute_file_hash(path: Path) -> str:
+    """Compute SHA-256 hex digest of a file's raw bytes."""
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 if __name__ == "__main__":
     """Run a real-path smoke test for timestamp parsing and JSONL reading."""
     assert parse_timestamp("2026-02-19T10:00:00+00:00") is not None
@@ -94,6 +104,14 @@ if __name__ == "__main__":
         rows = load_jsonl_dict_lines(sample)
         assert rows == [{"a": 1}, {"b": 2}]
         assert count_non_empty_files(Path(tmp_dir), "*.jsonl") == 1
+
+        h1 = compute_file_hash(sample)
+        assert len(h1) == 64, "SHA-256 hex digest should be 64 chars"
+        h2 = compute_file_hash(sample)
+        assert h1 == h2, "Hash should be deterministic"
+        sample.write_text('{"c":3}\n', encoding="utf-8")
+        h3 = compute_file_hash(sample)
+        assert h3 != h1, "Changed file should produce different hash"
 
     now = datetime.now(timezone.utc)
     assert in_window(now, now, now)

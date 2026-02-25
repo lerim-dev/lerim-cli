@@ -121,3 +121,60 @@ def test_find_session_path_exact_and_partial(tmp_path):
     # Partial match
     found_partial = find_session_path("session-123", traces_dir=tmp_path)
     assert found_partial is not None
+
+
+def test_iter_sessions_returns_content_hash(tmp_path):
+    """iter_sessions populates content_hash on every returned record."""
+    _write_codex_jsonl(
+        tmp_path / "hashed.jsonl",
+        [{"type": "event_msg", "payload": {"type": "user_message", "message": "hi"}}],
+    )
+    records = iter_sessions(traces_dir=tmp_path)
+    assert len(records) == 1
+    assert records[0].content_hash is not None
+    assert len(records[0].content_hash) == 64  # SHA-256 hex
+
+
+def test_iter_sessions_skips_unchanged_hash(tmp_path):
+    """iter_sessions skips a session whose hash matches the stored hash."""
+    _write_codex_jsonl(
+        tmp_path / "stable.jsonl",
+        [{"type": "event_msg", "payload": {"type": "user_message", "message": "hi"}}],
+    )
+    first = iter_sessions(traces_dir=tmp_path)
+    assert len(first) == 1
+    # Pass the same hash back — should be skipped
+    records = iter_sessions(
+        traces_dir=tmp_path,
+        known_run_hashes={"stable": first[0].content_hash},
+    )
+    assert len(records) == 0
+
+
+def test_iter_sessions_returns_changed_session(tmp_path):
+    """iter_sessions returns a session when its file content changed."""
+    path = tmp_path / "grow.jsonl"
+    _write_codex_jsonl(
+        path,
+        [{"type": "event_msg", "payload": {"type": "user_message", "message": "hi"}}],
+    )
+    first = iter_sessions(traces_dir=tmp_path)
+    old_hash = first[0].content_hash
+
+    # Append new content (simulating resumed chat)
+    import json
+
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "type": "event_msg",
+                    "payload": {"type": "agent_message", "message": "reply"},
+                }
+            )
+            + "\n"
+        )
+
+    records = iter_sessions(traces_dir=tmp_path, known_run_hashes={"grow": old_hash})
+    assert len(records) == 1
+    assert records[0].content_hash != old_hash

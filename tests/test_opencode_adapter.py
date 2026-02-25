@@ -154,3 +154,80 @@ def test_validate_connection_missing(tmp_path):
     result = validate_connection(tmp_path)
     assert result["ok"] is False
     assert "error" in result
+
+
+def test_iter_sessions_returns_content_hash(tmp_path):
+    """iter_sessions populates content_hash on returned records."""
+    from lerim.adapters.opencode import iter_sessions
+
+    db_path = tmp_path / "opencode.db"
+    _make_opencode_db(db_path)
+    cache_dir = tmp_path / "cache"
+    records = iter_sessions(traces_dir=tmp_path, cache_dir=cache_dir)
+    assert len(records) == 1
+    assert records[0].content_hash is not None
+    assert len(records[0].content_hash) == 64
+
+
+def test_iter_sessions_skips_unchanged_hash(tmp_path):
+    """iter_sessions skips sessions whose exported content hash has not changed."""
+    from lerim.adapters.opencode import iter_sessions
+
+    db_path = tmp_path / "opencode.db"
+    _make_opencode_db(db_path)
+    cache_dir = tmp_path / "cache"
+
+    first = iter_sessions(traces_dir=tmp_path, cache_dir=cache_dir)
+    assert len(first) == 1
+    old_hash = first[0].content_hash
+
+    # Same DB → same export → same hash → skipped
+    records = iter_sessions(
+        traces_dir=tmp_path,
+        cache_dir=cache_dir,
+        known_run_hashes={"sess-1": old_hash},
+    )
+    assert len(records) == 0
+
+
+def test_iter_sessions_returns_changed_opencode_session(tmp_path):
+    """iter_sessions returns a session when its DB content changed."""
+    from lerim.adapters.opencode import iter_sessions
+
+    db_path = tmp_path / "opencode.db"
+    _make_opencode_db(db_path)
+    cache_dir = tmp_path / "cache"
+
+    first = iter_sessions(traces_dir=tmp_path, cache_dir=cache_dir)
+    old_hash = first[0].content_hash
+
+    # Add a new message (simulates resumed chat)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO message VALUES (?, ?, ?, ?)",
+        (
+            "msg-3",
+            "sess-1",
+            json.dumps({"role": "user", "tokens": {"input": 5, "output": 0}}),
+            1708000003000,
+        ),
+    )
+    conn.execute(
+        "INSERT INTO part VALUES (?, ?, ?, ?)",
+        (
+            "part-3",
+            "msg-3",
+            json.dumps({"type": "text", "text": "Follow-up question"}),
+            1708000003000,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    records = iter_sessions(
+        traces_dir=tmp_path,
+        cache_dir=cache_dir,
+        known_run_hashes={"sess-1": old_hash},
+    )
+    assert len(records) == 1
+    assert records[0].content_hash != old_hash

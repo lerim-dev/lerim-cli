@@ -10,6 +10,9 @@ import pytest
 from lerim.sessions.catalog import (
     claim_session_jobs,
     enqueue_session_job,
+    fetch_session_doc,
+    get_indexed_run_hashes,
+    get_indexed_run_ids,
     init_sessions_db,
     index_session_for_fts,
     latest_service_run,
@@ -135,3 +138,77 @@ def test_concurrent_init_safety(tmp_path, monkeypatch):
     for t in threads:
         t.join()
     assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# Hash-based change detection tests
+# ---------------------------------------------------------------------------
+
+
+def test_index_session_stores_content_hash():
+    """index_session_for_fts persists content_hash and fetch_session_doc returns it."""
+    index_session_for_fts(
+        run_id="hash-store",
+        agent_type="claude",
+        content="test",
+        content_hash="aabbcc",
+    )
+    doc = fetch_session_doc("hash-store")
+    assert doc is not None
+    assert doc["content_hash"] == "aabbcc"
+
+
+def test_get_indexed_run_hashes_returns_known_hashes():
+    """get_indexed_run_hashes returns {run_id: hash} for sessions with a hash."""
+    index_session_for_fts(
+        run_id="h1", agent_type="codex", content="a", content_hash="hash1"
+    )
+    index_session_for_fts(
+        run_id="h2", agent_type="codex", content="b", content_hash="hash2"
+    )
+    hashes = get_indexed_run_hashes()
+    assert hashes["h1"] == "hash1"
+    assert hashes["h2"] == "hash2"
+
+
+def test_get_indexed_run_hashes_excludes_null_hashes():
+    """Sessions indexed without a hash are not in get_indexed_run_hashes."""
+    index_session_for_fts(
+        run_id="no-hash", agent_type="codex", content="c", content_hash=None
+    )
+    hashes = get_indexed_run_hashes()
+    assert "no-hash" not in hashes
+    # But the run_id is still in get_indexed_run_ids
+    assert "no-hash" in get_indexed_run_ids()
+
+
+def test_reindex_updates_content_hash():
+    """Re-indexing a session with a new hash replaces the stored hash."""
+    index_session_for_fts(
+        run_id="reindex", agent_type="claude", content="v1", content_hash="old"
+    )
+    assert get_indexed_run_hashes()["reindex"] == "old"
+
+    index_session_for_fts(
+        run_id="reindex", agent_type="claude", content="v2", content_hash="new"
+    )
+    assert get_indexed_run_hashes()["reindex"] == "new"
+
+
+def test_changed_session_can_be_force_enqueued():
+    """A done job can be re-enqueued with force=True (simulating hash change)."""
+    _seed_session("force-test")
+    enqueue_session_job("force-test")
+    jobs = claim_session_jobs(limit=1, run_ids=["force-test"])
+    assert len(jobs) == 1
+    from lerim.sessions.catalog import complete_session_job
+
+    complete_session_job("force-test")
+
+    # Without force, enqueue is rejected (job already done)
+    assert enqueue_session_job("force-test", force=False) is False
+
+    # With force, enqueue succeeds (simulating hash-change re-enqueue)
+    assert enqueue_session_job("force-test", force=True) is True
+    jobs2 = claim_session_jobs(limit=1, run_ids=["force-test"])
+    assert len(jobs2) == 1

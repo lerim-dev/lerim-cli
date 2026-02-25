@@ -37,6 +37,7 @@ class IndexedSession:
     agent_type: str
     session_path: str
     start_time: str | None
+    changed: bool = False
 
 
 def _utc_now() -> datetime:
@@ -116,6 +117,7 @@ def init_sessions_db() -> None:
                 summary_text TEXT,
                 turns_json TEXT,
                 session_path TEXT,
+                content_hash TEXT,
                 tags TEXT,
                 outcome TEXT
             )
@@ -130,6 +132,14 @@ def init_sessions_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_session_docs_time ON session_docs (start_time)"
         )
+
+        # Additive migration: add content_hash column to existing DBs.
+        sd_columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(session_docs)").fetchall()
+        }
+        if "content_hash" not in sd_columns:
+            conn.execute("ALTER TABLE session_docs ADD COLUMN content_hash TEXT")
 
         conn.execute(
             """
@@ -296,6 +306,7 @@ def index_session_for_fts(
     summary_text: str | None = None,
     turns_json: str | None = None,
     session_path: str | None = None,
+    content_hash: str | None = None,
 ) -> bool:
     """Insert or replace one session document row and keep FTS index synced."""
     if not run_id or not agent_type:
@@ -318,9 +329,10 @@ def index_session_for_fts(
                 INSERT INTO session_docs (
                     run_id, agent_type, repo_path, repo_name, start_time, content,
                     indexed_at, status, duration_ms, message_count, tool_call_count,
-                    error_count, total_tokens, summaries, summary_text, turns_json, session_path
+                    error_count, total_tokens, summaries, summary_text, turns_json,
+                    session_path, content_hash
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -340,6 +352,7 @@ def index_session_for_fts(
                     summary_text,
                     turns_json,
                     session_path,
+                    content_hash,
                 ),
             )
             conn.commit()
@@ -411,6 +424,18 @@ def get_indexed_run_ids() -> set[str]:
     return {str(row.get("run_id")) for row in rows if row.get("run_id")}
 
 
+def get_indexed_run_hashes() -> dict[str, str]:
+    """Return ``{run_id: content_hash}`` for all indexed sessions with a hash."""
+    _ensure_sessions_db_initialized()
+    with _connect() as conn:
+        rows = conn.execute("SELECT run_id, content_hash FROM session_docs").fetchall()
+    return {
+        str(row["run_id"]): str(row["content_hash"])
+        for row in rows
+        if row.get("run_id") and row.get("content_hash")
+    }
+
+
 def list_sessions_window(
     *,
     limit: int = 100,
@@ -429,10 +454,10 @@ def list_sessions_window(
         where.append(f"agent_type IN ({placeholders})")
         params.extend(agent_types)
     if since is not None:
-        where.append("start_time >= ?")
+        where.append("(start_time >= ? OR start_time IS NULL)")
         params.append(_to_iso(since))
     if until is not None:
-        where.append("start_time <= ?")
+        where.append("(start_time <= ? OR start_time IS NULL)")
         params.append(_to_iso(until))
 
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
@@ -481,7 +506,13 @@ def index_new_sessions(
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> int | list[IndexedSession]:
-    """Discover and index new sessions from connected adapters."""
+    """Discover and index new or changed sessions from connected adapters.
+
+    Uses SHA-256 content hashing to detect both new sessions and sessions
+    whose trace files have grown (e.g. resumed chats).  Changed sessions
+    are re-indexed and returned with ``changed=True`` so the caller can
+    force-enqueue them for re-extraction.
+    """
     _ensure_sessions_db_initialized()
     config = get_config()
 
@@ -491,7 +522,7 @@ def index_new_sessions(
     selected_agents = agents or adapter_registry.get_connected_agents(
         config.platforms_path
     )
-    indexed_run_ids = get_indexed_run_ids()
+    known_hashes = get_indexed_run_hashes()
 
     new_sessions: list[IndexedSession] = []
 
@@ -506,7 +537,7 @@ def index_new_sessions(
                 traces_dir=traces_dir,
                 start=start,
                 end=end,
-                known_run_ids=indexed_run_ids,
+                known_run_hashes=known_hashes,
             )
         except Exception as exc:
             logger.warning(
@@ -515,8 +546,7 @@ def index_new_sessions(
             continue
 
         for session in sessions:
-            if session.run_id in indexed_run_ids:
-                continue
+            is_changed = session.run_id in known_hashes
 
             summaries_json = json.dumps(session.summaries, ensure_ascii=True)
             summary_text = "\n".join(item for item in session.summaries if item)
@@ -539,17 +569,20 @@ def index_new_sessions(
                 summaries=summaries_json,
                 summary_text=summary_text,
                 session_path=session.session_path,
+                content_hash=session.content_hash,
             )
             if not indexed:
                 continue
 
-            indexed_run_ids.add(session.run_id)
+            if session.content_hash:
+                known_hashes[session.run_id] = session.content_hash
             new_sessions.append(
                 IndexedSession(
                     run_id=session.run_id,
                     agent_type=session.agent_type,
                     session_path=session.session_path,
                     start_time=session.start_time,
+                    changed=is_changed,
                 )
             )
 
@@ -956,6 +989,28 @@ if __name__ == "__main__":
             assert complete_session_job(run_id)
             counts = count_session_jobs_by_status()
             assert counts.get(JOB_STATUS_DONE, 0) >= 1
+
+            # Verify content_hash round-trip via index_session_for_fts
+            ok = index_session_for_fts(
+                run_id="hash-test",
+                agent_type="codex",
+                content="test content",
+                content_hash="abc123",
+            )
+            assert ok
+            hashes = get_indexed_run_hashes()
+            assert hashes.get("hash-test") == "abc123"
+
+            # Re-index with new hash (simulates changed session)
+            ok2 = index_session_for_fts(
+                run_id="hash-test",
+                agent_type="codex",
+                content="updated content",
+                content_hash="def456",
+            )
+            assert ok2
+            hashes2 = get_indexed_run_hashes()
+            assert hashes2.get("hash-test") == "def456"
     finally:
         if prev_cfg is None:
             os.environ.pop("LERIM_CONFIG", None)
