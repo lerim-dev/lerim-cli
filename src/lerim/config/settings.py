@@ -253,6 +253,9 @@ class Config:
     server_host: str
     server_port: int
     poll_interval_minutes: int
+    sync_window_days: int
+    sync_max_sessions: int
+    sync_max_workers: int
 
     lead_role: LLMRoleConfig
     explorer_role: LLMRoleConfig
@@ -546,8 +549,11 @@ def load_config() -> Config:
         server_host=_to_non_empty_string(server.get("host")) or "127.0.0.1",
         server_port=port,
         poll_interval_minutes=_to_int(
-            server.get("poll_interval_minutes"), 5, minimum=1
+            server.get("poll_interval_minutes"), 30, minimum=1
         ),
+        sync_window_days=_to_int(server.get("sync_window_days"), 7, minimum=1),
+        sync_max_sessions=_to_int(server.get("sync_max_sessions"), 50, minimum=1),
+        sync_max_workers=_to_int(server.get("sync_max_workers"), 4, minimum=1),
         lead_role=lead_role,
         explorer_role=explorer_role,
         extract_role=extract_role,

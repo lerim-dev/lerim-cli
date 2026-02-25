@@ -163,6 +163,7 @@ def _cmd_connect(args: argparse.Namespace) -> int:
 
 def _cmd_sync(args: argparse.Namespace) -> int:
     """Run one sync command invocation and print summary output."""
+    config = get_config()
     try:
         window_start, window_end = resolve_window_bounds(
             window=args.window,
@@ -174,12 +175,15 @@ def _cmd_sync(args: argparse.Namespace) -> int:
         _emit(str(exc), file=sys.stderr)
         return 2
 
+    max_sessions = (
+        args.max_sessions if args.max_sessions is not None else config.sync_max_sessions
+    )
     code, summary = run_sync_once(
         run_id=args.run_id,
         agent_filter=parse_agent_filter(args.agent),
         no_extract=args.no_extract,
         force=args.force,
-        max_sessions=args.max_sessions,
+        max_sessions=max_sessions,
         dry_run=args.dry_run,
         ignore_lock=args.ignore_lock,
         trigger="manual",
@@ -511,12 +515,12 @@ def build_parser() -> argparse.ArgumentParser:
             "Hot-path: discover new agent sessions from connected platforms,\n"
             "enqueue them, and run DSPy extraction to create memory primitives.\n\n"
             "Time window controls which sessions to scan. You can use:\n"
-            "  --window <duration>   a relative window like 7d, 24h, 30m (default: 30d)\n"
+            "  --window <duration>   a relative window like 7d, 24h, 30m (default: from config)\n"
             "  --window all          scan all sessions ever recorded\n"
             "  --since / --until     absolute ISO-8601 bounds (overrides --window)\n\n"
             "Examples:\n"
-            "  lerim sync                          # sync last 30 days (default)\n"
-            "  lerim sync --window 7d              # sync last 7 days only\n"
+            "  lerim sync                          # sync using configured window (default: 7d)\n"
+            "  lerim sync --window 30d             # sync last 30 days\n"
             "  lerim sync --window all             # sync everything\n"
             "  lerim sync --agent claude,codex     # only sync these platforms\n"
             "  lerim sync --run-id abc123 --force  # re-extract a specific session\n"
@@ -538,9 +542,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sync.add_argument(
         "--window",
-        default="30d",
+        default=None,
         help="Time window for session discovery. Accepts durations like 30s, 2m, 1h, 7d, "
-        "or the literal 'all' to scan every session. Ignored when --since is set. (default: 30d)",
+        "or the literal 'all' to scan every session. Ignored when --since is set. "
+        "(default: sync_window_days from config, currently 7d)",
     )
     sync.add_argument(
         "--since",
@@ -553,8 +558,9 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument(
         "--max-sessions",
         type=int,
-        default=50,
-        help="Maximum number of sessions to extract in one run. (default: 50)",
+        default=None,
+        help="Maximum number of sessions to extract in one run. "
+        "(default: sync_max_sessions from config, currently 50)",
     )
     sync.add_argument(
         "--no-extract",

@@ -29,6 +29,22 @@ Lead flow:
 4. Lead writes memory only through boundary-enforced runtime write/edit tools.
 5. `sync` stays lightweight; `maintain` runs offline memory refinement (merge duplicates, archive low-value entries, consolidate related memories, apply time-based decay).
 
+### Sync path
+
+<p align="center">
+  <img src="assets/sync.png" alt="Sync path" width="700">
+</p>
+
+The sync path processes new agent sessions: reads transcript archives, extracts decision and learning candidates via DSPy, deduplicates against existing memories, and writes new primitives to the memory folder.
+
+### Maintain path
+
+<p align="center">
+  <img src="assets/maintain.png" alt="Maintain path" width="700">
+</p>
+
+The maintain path runs offline refinement over stored memories: merges duplicates, archives low-value entries, consolidates related memories, and applies time-based decay to keep the memory store clean and relevant.
+
 ## Quick start
 
 ### 1. Install
