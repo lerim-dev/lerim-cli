@@ -325,6 +325,10 @@ lerim sync --max-sessions 5     # re-sync newest conversations
 
 ## Docs
 
-- Runtime architecture: `docs/architecture.md`
-- CLI reference: `skills/lerim/cli-reference.md`
-- Agent skill: `skills/lerim/SKILL.md`
+Full documentation: [docs.lerim.dev](https://docs.lerim.dev)
+
+- [Getting Started](https://docs.lerim.dev/getting-started/)
+- [CLI Reference](https://docs.lerim.dev/cli-reference/)
+- [Configuration](https://docs.lerim.dev/configuration/)
+- [Architecture](https://docs.lerim.dev/architecture/)
+- [Contributing](https://docs.lerim.dev/contributing/)

@@ -1,6 +1,6 @@
-# Lerim Architecture
+# Architecture
 
-Last updated: 2026-02-23
+Last updated: 2026-02-26
 
 ## Summary
 
@@ -29,7 +29,7 @@ deno --version
 flowchart TD
     A["Adapters (claude/codex/cursor/opencode)"] --> B["Session Catalog + Queue"]
     B --> C["Lead Agent (LerimAgent / pydantic-ai) with trace_path"]
-    C --> D["Workspace Artifacts (.lerim/workspace/<run_id>)"]
+    C --> D["Workspace Artifacts (.lerim/workspace/run_id)"]
     D --> E["extract.json + summary.json + memory_actions.json"]
     C --> F["Project Memory .lerim/memory/*"]
     C --> O["Explorer subagent (read-only)"]
@@ -57,20 +57,10 @@ Trace archive:
 
 Run workspace artifacts:
 
-Sync runs:
-- `.lerim/workspace/sync-<YYYYMMDD-HHMMSS>-<shortid>/extract.json`
-- `.lerim/workspace/sync-<YYYYMMDD-HHMMSS>-<shortid>/summary.json`
-- `.lerim/workspace/sync-<YYYYMMDD-HHMMSS>-<shortid>/memory_actions.json`
-- `.lerim/workspace/sync-<YYYYMMDD-HHMMSS>-<shortid>/agent.log`
-- `.lerim/workspace/sync-<YYYYMMDD-HHMMSS>-<shortid>/subagents.log`
-- `.lerim/workspace/sync-<YYYYMMDD-HHMMSS>-<shortid>/session.log`
+- `.lerim/workspace/sync-<YYYYMMDD-HHMMSS>-<shortid>/` — extract.json, summary.json, memory_actions.json, agent.log, subagents.log, session.log
+- `.lerim/workspace/maintain-<YYYYMMDD-HHMMSS>-<shortid>/` — maintain_actions.json, agent.log, subagents.log
 
-Maintain runs:
-- `.lerim/workspace/maintain-<YYYYMMDD-HHMMSS>-<shortid>/maintain_actions.json`
-- `.lerim/workspace/maintain-<YYYYMMDD-HHMMSS>-<shortid>/agent.log`
-- `.lerim/workspace/maintain-<YYYYMMDD-HHMMSS>-<shortid>/subagents.log`
-
-Index folder:
+Index folder (reserved for future FTS/vector/graph):
 
 - `.lerim/index/fts.sqlite3`
 - `.lerim/index/graph.sqlite3`
@@ -93,38 +83,69 @@ Memory scope modes:
 - `project_only`
 - `global_only`
 
-## Related references
-
-Explicit ID/slug references are used for graph linking (`related` is optional when present).
-
-- No wikilink dependency in prompts or storage
-- No required parser layer for `[[...]]` syntax
-
 ## Runtime paths
 
-- `sync`: discover/index sessions, run lead by `trace_path`, write run artifacts to workspace folder, run lead decision (`add|update|no-op`), write memory + summaries.
-- `maintain`: agent-led offline memory refinement. Scans existing memories, merges duplicates, archives low-value entries, consolidates related memories. Soft-deletes to `archived/` via the `write` tool. Single agent run with comprehensive prompt.
-- Query path (`chat`, `memory search`) is read-only.
+### Sync path
+
+<p align="center">
+  <img src="assets/sync.png" alt="Sync path" width="700">
+</p>
+
+**sync**: discover/index sessions, run lead by `trace_path`, write run artifacts to workspace folder, run lead decision (`add|update|no-op`), write memory + summaries.
+
+### Maintain path
+
+<p align="center">
+  <img src="assets/maintain.png" alt="Maintain path" width="700">
+</p>
+
+**maintain**: agent-led offline memory refinement. Scans existing memories, merges duplicates, archives low-value entries, consolidates related memories. Soft-deletes to `archived/` via the `write` tool. Single agent run with comprehensive prompt.
+
+### Query path
+
+**query** (`chat`, `memory search`): read-only path.
+
+## Agent architecture
+
+### Lead agent
+
+The lead agent (PydanticAI) orchestrates all flows. It is the only component allowed to write memory files.
+
+- **Runtime tools**: `read`, `glob`, `grep`, `write`, `edit`, `extract_pipeline`, `summarize_pipeline`
+- **Write boundary**: runtime tools deny writes outside `memory_root` and workspace roots
+- **All file operations** use Python tools (no shell/subprocess)
+
+### Explorer subagent
+
+Read-only agent delegated from the lead for candidate gathering:
+
+- **Tools**: `read`, `glob`, `grep` only
+- **Cannot write** — no write or edit tools
+
+### DSPy pipelines
+
+Called as tools from the lead agent:
+
+- **Extraction** (`MemoryExtractSignature`): transcript -> structured memory candidates
+- **Summarization** (`TraceSummarySignature`): transcript -> structured summary with frontmatter
+
+Both run through `dspy.RLM` with role-configured models.
 
 ## Observability
 
-Stderr logging is minimal (short status lines via loguru). Detailed agent tracing
-uses OpenTelemetry through PydanticAI's built-in instrumentation (`logfire` SDK with
-`send_to_logfire=False`).
+Stderr logging is minimal (short status lines via loguru). Detailed agent tracing uses OpenTelemetry through PydanticAI's built-in instrumentation (`logfire` SDK).
 
 When tracing is enabled (`LERIM_TRACING=1` or `[tracing] enabled = true`):
 
-- Each `agent.run_sync()` emits a trace with spans for model requests, tool calls, and timing.
-- Token usage is recorded per span.
-- Optional `include_httpx = true` captures raw HTTP request/response bodies.
-- Traces are sent to Logfire cloud (free tier). View at https://logfire.pydantic.dev.
-- DSPy pipelines run with `verbose=False`; their LLM calls are visible via httpx spans when enabled.
+- Each `agent.run_sync()` emits a trace with spans for model requests, tool calls, and timing
+- Token usage is recorded per span
+- Optional `include_httpx = true` captures raw HTTP request/response bodies
+- Traces are sent to Logfire cloud (free tier) — view at [logfire.pydantic.dev](https://logfire.pydantic.dev)
+- DSPy pipelines run with `verbose=False`; their LLM calls are visible via httpx spans when enabled
 
-Implementation: `src/lerim/config/tracing.py` (called once at CLI startup before agent construction).
+## Security boundaries
 
-Security boundary for memory-write flow:
-
-- Runtime tools deny `write` and `edit` outside `memory_root` and workspace roots.
-- Memory writes are normalized to canonical markdown frontmatter and filename rules.
-- All file operations use Python tools (no shell/subprocess).
-- Explorer subagent is read-only (`read`, `glob`, `grep` only).
+- Runtime tools deny `write` and `edit` outside `memory_root` and workspace roots
+- Memory writes are normalized to canonical markdown frontmatter and filename rules
+- All file operations use Python tools (no shell/subprocess)
+- Explorer subagent is read-only (`read`, `glob`, `grep` only)
