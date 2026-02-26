@@ -500,18 +500,6 @@ def _memory_graph_options(items: list[dict[str, Any]]) -> dict[str, list[str]]:
     kinds = sorted({str(fm.get("kind", "")) for fm in items if fm.get("kind")})
     tags = sorted({str(t) for fm in items for t in fm.get("tags", []) if t})
     projects: set[str] = set()
-    ignore_parts = {
-        ".",
-        "..",
-        "Users",
-        "home",
-        "codes",
-        "personal",
-        "memory",
-        "decisions",
-        "learnings",
-        "summaries",
-    }
     for fm in items:
         # Try to extract project from file path
         path = str(fm.get("_path", ""))

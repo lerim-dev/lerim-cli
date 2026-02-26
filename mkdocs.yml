@@ -1,6 +1,6 @@
 site_name: Lerim
 site_url: https://docs.lerim.dev
-site_description: Continual learning layer for coding agents
+site_description: Continual learning layer for coding agents and software projects
 repo_url: https://github.com/lerim-dev/lerim-cli
 repo_name: lerim-dev/lerim-cli
 edit_uri: edit/main/docs/
