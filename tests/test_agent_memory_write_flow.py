@@ -1,26 +1,15 @@
 """Unit tests for the agent-led trace-path memory write flow.
 
 These tests monkeypatch ``_run_agent_once`` so no real LLM call is made.
-A dummy ``OPENROUTER_API_KEY`` is set via autouse fixture to satisfy the
-provider constructor that runs during ``LerimAgent.__init__``.
+A dummy ``OPENROUTER_API_KEY`` is set via conftest autouse fixture.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
-import pytest
-
 from lerim.runtime.agent import LerimAgent
-
-
-@pytest.fixture(autouse=True)
-def _dummy_api_key(monkeypatch):
-    """Ensure provider constructor doesn't fail when no real key is set."""
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-dummy-key")
 
 
 def _extract_artifacts_from_prompt(prompt: str) -> dict[str, str]:

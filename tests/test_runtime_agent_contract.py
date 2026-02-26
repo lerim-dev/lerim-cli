@@ -1,26 +1,17 @@
 """Runtime agent contract tests for the PydanticAI migration.
 
-A dummy ``OPENROUTER_API_KEY`` is set via autouse fixture to satisfy the
-provider constructor that runs during ``LerimAgent.__init__``.
+A dummy ``OPENROUTER_API_KEY`` is set via conftest autouse fixture.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
 
 from lerim.runtime.agent import LerimAgent
 from lerim.runtime.prompts.system import build_lead_system_prompt
-
-
-@pytest.fixture(autouse=True)
-def _dummy_api_key(monkeypatch):
-    """Ensure provider constructor doesn't fail when no real key is set."""
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-dummy-key")
 
 
 def test_system_prompt_enforces_lead_contract() -> None:
