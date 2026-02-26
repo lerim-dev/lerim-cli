@@ -3,7 +3,7 @@
 </p>
 
 <p align="center"><strong>Continual learning layer for coding agents</strong></p>
-<p align="center"><a href="https://lerim.dev/">lerim.dev</a></p>
+<p align="center"><a href="https://lerim.dev/">lerim.dev</a> · <a href="https://docs.lerim.dev/">docs</a> · <a href="https://pypi.org/project/lerim/">pypi</a></p>
 
 <p align="center">
   <img src="assets/agent-network.gif" alt="Lerim network animation" width="450">
