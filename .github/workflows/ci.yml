@@ -24,7 +24,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Create venv and install dependencies
-        run: uv venv && uv pip install -e '.[test]'
+        run: uv venv && uv pip install -e '.[test,lint]'
 
       - name: Lint with ruff
         run: uv run ruff check src/ tests/
