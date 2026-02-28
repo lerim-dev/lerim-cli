@@ -16,7 +16,7 @@ pip install lerim
 
 ## 2. Set up API keys
 
-Lerim needs an LLM provider for extraction and chat. Set at least one:
+Lerim needs an LLM provider for extraction and querying. Set at least one:
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-..."   # default provider
@@ -61,7 +61,7 @@ serves the dashboard + HTTP API on `http://localhost:8765`.
 ## 6. Query your memories
 
 ```bash
-lerim chat "What auth pattern do we use?"
+lerim ask "What auth pattern do we use?"
 lerim memory search "database migration"
 lerim memory list
 lerim status
@@ -104,7 +104,7 @@ lerim connect auto           # detect agent platforms
 lerim serve                  # start API server + dashboard + daemon loop
 ```
 
-Then use `lerim chat`, `lerim sync`, `lerim status`, etc. as usual — they
+Then use `lerim ask`, `lerim sync`, `lerim status`, etc. as usual — they
 connect to the running server.
 
 ## Next steps

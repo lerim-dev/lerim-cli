@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import glob as stdlib_glob
 import json
-import re
-import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,11 +20,9 @@ from lerim.memory.access_tracker import (
 )
 from lerim.memory.extract_pipeline import extract_memories_from_session_file
 from lerim.memory.memory_record import (
-    MEMORY_FRONTMATTER_SCHEMA,
     MEMORY_TYPE_FOLDERS,
     MemoryType,
     canonical_memory_filename,
-    slugify,
 )
 from lerim.memory.summarization_pipeline import (
     summarize_trace_from_session_file,
@@ -53,11 +48,6 @@ def _is_within(path: Path, root: Path) -> bool:
     resolved = path.resolve()
     root_resolved = root.resolve()
     return resolved == root_resolved or root_resolved in resolved.parents
-
-
-def _is_within_any(path: Path, roots: Sequence[Path]) -> bool:
-    """Return whether path is equal to or inside any root in roots."""
-    return any(_is_within(path, root) for root in roots)
 
 
 def _resolve_path(path: str, cwd: Path) -> Path:
@@ -96,16 +86,10 @@ def build_tool_context(
 
 
 def _default_cwd(context: RuntimeToolContext) -> Path:
-    """Return the default working directory for path resolution (memory_root required)."""
+    """Return memory_root as default working directory for path resolution."""
     if context.memory_root:
         return context.memory_root
-    if context.run_folder:
-        return context.run_folder
-    if context.workspace_root:
-        return context.workspace_root
-    raise RuntimeError(
-        "no_cwd_available:memory_root,run_folder,workspace_root all None"
-    )
+    raise RuntimeError("no_cwd_available: memory_root is None")
 
 
 def _global_cache_dir() -> Path:
@@ -127,18 +111,13 @@ def _read_allowed_roots(context: RuntimeToolContext) -> tuple[Path, ...]:
     return tuple(dict.fromkeys(roots))
 
 
-def _fmt_roots(roots: Sequence[Path]) -> str:
-    """Format root paths as a comma-separated list for LLM-friendly errors."""
-    return ", ".join(str(r) for r in roots) if roots else "(none)"
-
-
 def _assert_read_boundary(path: Path, context: RuntimeToolContext) -> None:
     """Raise when read target is outside approved read roots."""
     roots = _read_allowed_roots(context)
     if not roots or not any(_is_within(path, root) for root in roots):
         raise RuntimeError(
             f"Cannot read '{path}': outside allowed roots. "
-            f"Readable paths: {_fmt_roots(roots)}"
+            f"Readable paths: {', '.join(str(r) for r in roots)}"
         )
 
 
@@ -158,7 +137,7 @@ def _assert_write_boundary(path: Path, context: RuntimeToolContext) -> None:
     if not roots or not any(_is_within(path, root) for root in roots):
         raise RuntimeError(
             f"Cannot write '{path}': outside allowed roots. "
-            f"Writable paths: {_fmt_roots(roots)}"
+            f"Writable paths: {', '.join(str(r) for r in roots)}"
         )
 
 
@@ -173,15 +152,6 @@ def _memory_primitive_type(path: Path, memory_root: Path | None) -> MemoryType |
     return None
 
 
-def _allowed_extension_for_path(path: Path, context: RuntimeToolContext) -> bool:
-    """Return whether extension is allowed for this write destination."""
-    ext = path.suffix.lower()
-    primitive_type = _memory_primitive_type(path, context.memory_root)
-    if primitive_type is not None:
-        return ext == ".md"
-    return ext in {".md", ".json", ".jsonl", ".log", ".txt"}
-
-
 def _normalize_memory_write(
     *,
     path: Path,
@@ -189,13 +159,13 @@ def _normalize_memory_write(
     memory_root: Path,
     run_id: str,
 ) -> tuple[Path, str]:
-    """Normalize memory markdown frontmatter and canonical filename."""
+    """Validate memory frontmatter, set server-side timestamps, and build canonical filename."""
     if path.suffix.lower() != ".md":
         raise RuntimeError(f"Cannot write memory '{path}': must be .md files.")
 
     primitive = _memory_primitive_type(path, memory_root)
-    folders = ", ".join(f"memory/{f}" for f in MEMORY_TYPE_FOLDERS.values())
     if primitive is None:
+        folders = ", ".join(f"memory/{f}" for f in MEMORY_TYPE_FOLDERS.values())
         raise RuntimeError(
             f"Cannot write memory '{path}': not inside a primitive folder. "
             f"Write to: {folders}"
@@ -209,57 +179,28 @@ def _normalize_memory_write(
         post = frontmatter.loads(content)
     except Exception as exc:
         raise RuntimeError(
-            f"Cannot write memory '{path}': unparseable YAML frontmatter. "
-            "Content must start with '---\\n' followed by valid YAML and '---\\n'."
+            f"Cannot write memory '{path}': unparseable YAML frontmatter."
         ) from exc
 
     metadata = post.metadata if isinstance(post.metadata, dict) else {}
-    if not metadata:
+    title = str(metadata.get("title") or "").strip()
+    if not title:
         raise RuntimeError(
-            f"Cannot write memory '{path}': missing frontmatter. "
-            "Include at least: title, confidence, tags."
+            f"Cannot write memory '{path}': missing 'title' in frontmatter."
         )
 
-    title = str(metadata.get("title") or "").strip() or path.stem
-    metadata["title"] = title
-    metadata.setdefault("id", slugify(title))
+    # Server-side fields only — agent must provide the rest
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     metadata.setdefault("created", now_iso)
     metadata.setdefault("updated", now_iso)
     metadata.setdefault("source", run_id)
-    metadata.setdefault("confidence", 0.7)
-    metadata.setdefault("tags", [])
-    if primitive == MemoryType.learning:
-        metadata.setdefault("kind", "insight")
 
-    allowed_fields = MEMORY_FRONTMATTER_SCHEMA.get(primitive, [])
-    clean_metadata: dict[str, Any] = {
-        k: metadata[k] for k in allowed_fields if k in metadata
-    }
-    normalized_content = frontmatter.dumps(
-        frontmatter.Post(post.content, **clean_metadata)
-    )
-    if not normalized_content.endswith("\n"):
-        normalized_content = normalized_content + "\n"
+    normalized = frontmatter.dumps(frontmatter.Post(post.content, **metadata))
+    if not normalized.endswith("\n"):
+        normalized += "\n"
 
     canonical_name = canonical_memory_filename(title=title, run_id=run_id)
-    canonical_path = path.parent / canonical_name
-    return canonical_path, normalized_content
-
-
-def _record_memory_access_for_read(
-    *,
-    context: RuntimeToolContext,
-    file_path: Path,
-    limit: int | None,
-) -> None:
-    """Record memory read access when full body content is accessed."""
-    _record_memory_access(
-        context=context,
-        file_path=file_path,
-        limit=limit,
-        require_body_read=True,
-    )
+    return path.parent / canonical_name, normalized
 
 
 def _record_memory_access(
@@ -281,20 +222,6 @@ def _record_memory_access(
         return
     init_access_db(context.config.memories_db_path)
     record_access(context.config.memories_db_path, mem_id, str(context.memory_root))
-
-
-def _record_memory_access_for_write(
-    *,
-    context: RuntimeToolContext,
-    file_path: Path,
-) -> None:
-    """Record memory write/edit access updates."""
-    _record_memory_access(
-        context=context,
-        file_path=file_path,
-        limit=None,
-        require_body_read=False,
-    )
 
 
 def read_file_tool(
@@ -324,7 +251,9 @@ def read_file_tool(
         for idx, line in enumerate(lines, start=1)
         if start <= idx <= end
     ]
-    _record_memory_access_for_read(context=context, file_path=resolved, limit=limit)
+    _record_memory_access(
+        context=context, file_path=resolved, limit=limit, require_body_read=True
+    )
     return "\n".join(numbered)
 
 
@@ -334,40 +263,17 @@ def glob_files_tool(
     pattern: str,
     base_path: str | None = None,
 ) -> list[str]:
-    """Return sorted file matches for a glob pattern."""
+    """Return sorted file matches for a glob pattern relative to base_path."""
     cwd = _default_cwd(context)
     base = _resolve_path(base_path or str(cwd), cwd)
     _assert_read_boundary(base, context)
     if not base.exists() or not base.is_dir():
         return []
     read_roots = _read_allowed_roots(context)
-    pattern_text = str(pattern)
-    pattern_path = Path(pattern_text).expanduser()
-
-    if pattern_path.is_absolute():
-        prefix = _glob_prefix_path(pattern_text)
-        if prefix is not None:
-            probe = prefix if prefix.exists() else prefix.parent
-            _assert_read_boundary(probe.resolve(), context)
-        try:
-            candidates = [
-                Path(item).resolve()
-                for item in stdlib_glob.glob(pattern_text, recursive=True)
-            ]
-        except OSError as exc:
-            raise RuntimeError(f"glob_failed:{exc}") from exc
-    else:
-        try:
-            candidates = [path.resolve() for path in base.glob(pattern_text)]
-        except NotImplementedError as exc:
-            raise RuntimeError("glob_pattern_invalid") from exc
-
-    matches = sorted(
-        str(path)
-        for path in candidates
-        if any(_is_within(path, root) for root in read_roots)
+    candidates = [p.resolve() for p in base.glob(pattern)]
+    return sorted(
+        str(p) for p in candidates if any(_is_within(p, r) for r in read_roots)
     )
-    return matches
 
 
 def grep_files_tool(
@@ -378,31 +284,49 @@ def grep_files_tool(
     include: str = "*.md",
     max_hits: int = 200,
 ) -> list[str]:
-    """Search files by regex and return ``path:line:content`` hits."""
+    """Search files by regex via ripgrep and return ``path:line:content`` hits."""
+    import subprocess
+
     cwd = _default_cwd(context)
     base = _resolve_path(base_path or str(cwd), cwd)
     _assert_read_boundary(base, context)
     if not base.exists() or not base.is_dir():
         return []
-    regex = re.compile(pattern)
+
+    cmd = [
+        "rg",
+        "--no-heading",
+        "--line-number",
+        "--color=never",
+        f"--max-count={max_hits}",
+        f"--glob={include}",
+        pattern,
+        str(base),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    # rg exit 1 = no matches, exit 2 = error
+    if result.returncode == 2:
+        raise RuntimeError(f"grep_failed: {result.stderr.strip()}")
+    if not result.stdout:
+        return []
+
+    read_roots = _read_allowed_roots(context)
     hits: list[str] = []
-    for path in base.rglob(include):
-        if not path.is_file():
+    for line in result.stdout.splitlines():
+        # rg output: /path/to/file:line_number:content
+        colon1 = line.find(":")
+        if colon1 < 0:
             continue
-        resolved_path = path.resolve()
-        if not any(
-            _is_within(resolved_path, root) for root in _read_allowed_roots(context)
-        ):
-            continue
+        file_part = line[:colon1]
         try:
-            lines = resolved_path.read_text(encoding="utf-8").splitlines()
-        except Exception:
+            resolved = Path(file_part).resolve()
+        except (OSError, ValueError):
             continue
-        for index, line in enumerate(lines, start=1):
-            if regex.search(line):
-                hits.append(f"{resolved_path}:{index}:{line}")
-                if len(hits) >= max_hits:
-                    return hits
+        if not any(_is_within(resolved, root) for root in read_roots):
+            continue
+        hits.append(line)
+        if len(hits) >= max_hits:
+            break
     return hits
 
 
@@ -415,17 +339,6 @@ def write_file_tool(
     """Write file content under guarded roots with memory normalization."""
     resolved = _resolve_path(file_path, _default_cwd(context))
     _assert_write_boundary(resolved, context)
-    if not _allowed_extension_for_path(resolved, context):
-        allowed = (
-            ".md"
-            if _memory_primitive_type(resolved, context.memory_root)
-            else ".md, .json, .jsonl, .log, .txt"
-        )
-        raise RuntimeError(
-            f"Cannot write '{resolved}': extension '{resolved.suffix}' not allowed. "
-            f"Allowed extensions: {allowed}"
-        )
-
     write_target = resolved
     write_content = content
     primitive_type = _memory_primitive_type(resolved, context.memory_root)
@@ -439,7 +352,9 @@ def write_file_tool(
 
     write_target.parent.mkdir(parents=True, exist_ok=True)
     write_target.write_text(write_content, encoding="utf-8")
-    _record_memory_access_for_write(context=context, file_path=write_target)
+    _record_memory_access(
+        context=context, file_path=write_target, limit=None, require_body_read=False
+    )
     return {
         "file_path": str(write_target),
         "bytes": len(write_content.encode("utf-8")),
@@ -481,7 +396,9 @@ def edit_file_tool(
         replacements = 1
 
     resolved.write_text(updated, encoding="utf-8")
-    _record_memory_access_for_write(context=context, file_path=resolved)
+    _record_memory_access(
+        context=context, file_path=resolved, limit=None, require_body_read=False
+    )
     return {
         "file_path": str(resolved),
         "replacements": replacements,
@@ -489,116 +406,31 @@ def edit_file_tool(
     }
 
 
-def _glob_prefix_path(pattern: str) -> Path | None:
-    """Return non-wildcard path prefix for a glob pattern when available."""
-    text = str(pattern)
-    indices = [idx for ch in ("*", "?", "[") if (idx := text.find(ch)) != -1]
-    if indices:
-        text = text[: min(indices)]
-    text = text.strip()
-    if not text:
-        return None
-    return Path(text).expanduser()
-
-
-def _resolve_artifact_output_path(
-    *,
-    requested_output_path: str,
-    context: RuntimeToolContext,
-    default_name: str,
-) -> Path:
-    """Resolve artifact path and coerce to run folder when request is out-of-bounds."""
-    requested = _resolve_path(
-        requested_output_path, context.run_folder or _default_cwd(context)
-    )
-    if context.run_folder and not _is_within(requested, context.run_folder):
-        return (context.run_folder / default_name).resolve()
-    return requested
-
-
-def _normalize_mapping_arg(
-    value: dict[str, Any] | str | None, name: str
-) -> dict[str, Any]:
-    """Normalize tool mapping args from dict/JSON-string/None into dict."""
-    if value is None:
-        return {}
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"invalid_{name}_json") from exc
-        if not isinstance(parsed, dict):
-            raise RuntimeError(f"invalid_{name}_type")
-        return parsed
-    raise RuntimeError(f"invalid_{name}_type")
-
-
-def _run_with_retry(run_fn, *, attempts: int = 2, sleep_seconds: float = 0.8):
-    """Run function with lightweight retries for transient model parsing failures."""
-    last_error: Exception | None = None
-    for index in range(max(1, attempts)):
-        try:
-            return run_fn()
-        except Exception as exc:
-            last_error = exc
-            if index + 1 >= attempts:
-                break
-            transient = (
-                "AdapterParseError" in type(exc).__name__
-                or "LM response cannot be serialized" in str(exc)
-                or "RateLimitError" in type(exc).__name__
-                or "429" in str(exc)
-            )
-            if not transient:
-                break
-            time.sleep(max(0.0, sleep_seconds))
-    if last_error is not None:
-        raise last_error
-    raise RuntimeError("retry_runner_failed_without_error")
-
-
-def _write_json_output(path: Path, payload: Any) -> None:
-    """Write JSON artifact payload with pretty formatting."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8"
-    )
-
-
 def run_extract_pipeline_tool(
     *,
     context: RuntimeToolContext,
     trace_path: str,
     output_path: str,
-    metadata: dict[str, Any] | str | None = None,
-    metrics: dict[str, Any] | str | None = None,
+    metadata: dict[str, Any] | None = None,
+    metrics: dict[str, Any] | None = None,
     guidance: str | None = None,
 ) -> dict[str, Any]:
     """Run extraction pipeline directly and write JSON artifact output."""
     trace_file = _resolve_path(trace_path, _default_cwd(context))
-    output_file = _resolve_artifact_output_path(
-        requested_output_path=output_path,
-        context=context,
-        default_name="extract.json",
+    output_file = _resolve_path(
+        output_path, context.run_folder or _default_cwd(context)
     )
     _assert_write_boundary(output_file, context)
-    normalized_metadata = _normalize_mapping_arg(metadata, "metadata")
-    normalized_metrics = _normalize_mapping_arg(metrics, "metrics")
-    normalized_guidance = "" if guidance is None else str(guidance).strip()
-    candidates = _run_with_retry(
-        lambda: extract_memories_from_session_file(
-            trace_file,
-            metadata=normalized_metadata,
-            metrics=normalized_metrics,
-            guidance=normalized_guidance,
-        )
+    candidates = extract_memories_from_session_file(
+        trace_file,
+        metadata=metadata or {},
+        metrics=metrics or {},
+        guidance=str(guidance or "").strip(),
     )
-    _write_json_output(output_file, candidates)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(
+        json.dumps(candidates, ensure_ascii=True, indent=2) + "\n", encoding="utf-8"
+    )
     return {
         "output_path": str(output_file),
         "candidate_count": len(candidates),
@@ -610,36 +442,34 @@ def run_summarization_pipeline_tool(
     context: RuntimeToolContext,
     trace_path: str,
     output_path: str,
-    metadata: dict[str, Any] | str | None = None,
-    metrics: dict[str, Any] | str | None = None,
+    metadata: dict[str, Any] | None = None,
+    metrics: dict[str, Any] | None = None,
     guidance: str | None = None,
 ) -> dict[str, Any]:
     """Run summarization pipeline and write summary pointer artifact."""
     if not context.memory_root:
         raise RuntimeError("memory_root_required_for_summary_pipeline")
     trace_file = _resolve_path(trace_path, _default_cwd(context))
-    output_file = _resolve_artifact_output_path(
-        requested_output_path=output_path,
-        context=context,
-        default_name="summary.json",
+    output_file = _resolve_path(
+        output_path, context.run_folder or _default_cwd(context)
     )
     _assert_write_boundary(output_file, context)
-    normalized_metadata = _normalize_mapping_arg(metadata, "metadata")
-    normalized_metrics = _normalize_mapping_arg(metrics, "metrics")
-    normalized_guidance = "" if guidance is None else str(guidance).strip()
-
-    payload = _run_with_retry(
-        lambda: summarize_trace_from_session_file(
-            trace_file,
-            metadata=normalized_metadata,
-            metrics=normalized_metrics,
-            guidance=normalized_guidance,
-        )
+    meta = metadata or {}
+    payload = summarize_trace_from_session_file(
+        trace_file,
+        metadata=meta,
+        metrics=metrics or {},
+        guidance=str(guidance or "").strip(),
     )
-    run_id = str(normalized_metadata.get("run_id") or context.run_id)
+    run_id = str(meta.get("run_id") or context.run_id)
     summary_path = write_summary_markdown(payload, context.memory_root, run_id=run_id)
 
-    _write_json_output(output_file, {"summary_path": str(summary_path)})
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(
+        json.dumps({"summary_path": str(summary_path)}, ensure_ascii=True, indent=2)
+        + "\n",
+        encoding="utf-8",
+    )
     return {
         "output_path": str(output_file),
         "summary_path": str(summary_path),

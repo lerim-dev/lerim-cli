@@ -1,4 +1,4 @@
-"""Real-path end-to-end coverage for chat and extract pipeline flows."""
+"""Real-path end-to-end coverage for ask and extract pipeline flows."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ _HAS_OPENAI = bool(os.environ.get("OPENAI_API_KEY"))
     "Set LERIM_E2E=1 with ZAI_API_KEY and OPENAI_API_KEY to run E2E tests",
 )
 class TestE2EReal(unittest.TestCase):
-    def test_chat_end_to_end(self) -> None:
+    def test_ask_end_to_end(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             config_path = write_test_config(
@@ -40,7 +40,7 @@ class TestE2EReal(unittest.TestCase):
             )
             os.environ["LERIM_CONFIG"] = str(config_path)
             reload_config()
-            exit_code, output = run_cli(["chat", "Respond with exactly: OK"])
+            exit_code, output = run_cli(["ask", "Respond with exactly: OK"])
 
         self.assertEqual(exit_code, 0)
         self.assertIn("OK", output)

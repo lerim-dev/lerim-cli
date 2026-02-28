@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `lerim project add/list/remove` for incremental project registration.
 - `lerim up/down/logs` for Docker container lifecycle management.
 - `lerim serve` command — combined HTTP API + dashboard + daemon loop (Docker entrypoint, also usable directly without Docker).
-- Service commands (`chat`, `sync`, `maintain`, `status`) are thin HTTP clients that talk to the running server.
-- HTTP API: `/api/health`, `/api/chat`, `/api/sync`, `/api/maintain`, `/api/status`, `/api/connect`, `/api/project/*`.
+- Service commands (`ask`, `sync`, `maintain`, `status`) are thin HTTP clients that talk to the running server.
+- HTTP API: `/api/health`, `/api/ask`, `/api/sync`, `/api/maintain`, `/api/status`, `/api/connect`, `/api/project/*`.
 - `[agents]`, `[projects]`, and `[providers]` config sections in `config.toml`.
 - Provider API base URLs configurable via `[providers]` section (no more hardcoded URLs).
 - `Dockerfile` with Python 3.12 + Deno, health check, `lerim serve` entrypoint.
@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Memory extraction pipeline using DSPy RLM to extract decisions and learnings from coding session traces.
 - Trace summarization pipeline using DSPy RLM to produce structured summaries with YAML frontmatter.
 - PydanticAI lead agent with a read-only explorer subagent for memory operations.
-- Three CLI flows: `sync` (extract, summarize, write memories), `maintain` (merge, archive, decay), and `chat` (query memories).
+- Three CLI flows: `sync` (extract, summarize, write memories), `maintain` (merge, archive, decay), and `ask` (query memories).
 - Daemon mode for continuous sync and maintain loop.
 - Local read-only web dashboard with HTTP API.
 - Session catalog with SQLite FTS5 for session search.

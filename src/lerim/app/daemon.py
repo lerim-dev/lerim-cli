@@ -559,9 +559,10 @@ def run_maintain_once(
         writer.release()
 
 
-def run_daemon_once() -> dict:
-    """Run one daemon loop containing sync then maintain."""
+def run_daemon_once(max_sessions: int | None = None) -> dict:
+    """Run one bounded daemon cycle: sync then maintain."""
     config = get_config()
+    effective_max = max_sessions or config.sync_max_sessions
     window_start, window_end = resolve_window_bounds(
         window=f"{config.sync_window_days}d",
         since_raw=None,
@@ -574,7 +575,7 @@ def run_daemon_once() -> dict:
         agent_filter=None,
         no_extract=False,
         force=False,
-        max_sessions=config.sync_max_sessions,
+        max_sessions=effective_max,
         dry_run=False,
         ignore_lock=False,
         trigger="daemon",

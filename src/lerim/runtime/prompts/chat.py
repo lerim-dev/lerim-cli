@@ -37,31 +37,36 @@ def build_chat_prompt(
     memory_guidance = ""
     if memory_root:
         memory_guidance = f"""
-Memory location: {memory_root}
-Structure: decisions/*.md and learnings/*.md — YAML frontmatter + markdown body.
-Frontmatter fields: id, title, created, updated, confidence, tags, kind (learnings only).
-Use the memory-explorer subagent for efficient two-phase retrieval (frontmatter scan first, then full read for relevant memories only).
+Memory root: {memory_root}
+Layout:
+- decisions/*.md — architecture and design decisions
+- learnings/*.md — insights, procedures, facts
+- summaries/YYYYMMDD/HHMMSS/*.md — session summaries
+Each file: YAML frontmatter (id, title, confidence, tags, kind, created) + markdown body.
+
+Search strategy:
+1. Use grep to search memory files by keyword (e.g. grep pattern="sqlite" or grep pattern="billing").
+2. Use glob to list files in a directory (e.g. glob pattern="decisions/*.md").
+3. Use read to get full content of files found by grep/glob.
+4. Or use explore() to delegate search to the explorer subagent.
+You can also call up to 4 explore() calls in parallel for independent queries.
 """
 
     return f"""\
-Answer the user question using the memory evidence below.
-Retrieval contract:
-- Lead handles retrieval strategy.
-- Delegate the memory-explorer subagent for two-phase memory retrieval.
-- You can call up to 4 explore() calls in the SAME tool-call turn for parallel execution when you have independent queries.
+Answer the user question using your memory search tools.
+- Search the memory root with grep/glob/read or explore() to find relevant memories.
 - Search project-first, then global fallback.
-- Return evidence with file paths and line refs.
-- Use explicit ids/slugs only in related references (no wikilink syntax).
-If memory is missing or uncertain, say that clearly.
-Cite learning ids and context doc ids you used.
+- Return evidence with file paths.
+- If no relevant memories exist, say that clearly.
+- Cite memory ids you used.
 {memory_guidance}
 Question:
 {question}
 
-Memory evidence:
+Pre-fetched hints (may be incomplete — always search with tools):
 {context_block}
 
-Context docs (loaded only if needed):
+Context docs:
 {context_doc_block}
 """
 
@@ -94,18 +99,16 @@ if __name__ == "__main__":
     assert "how to deploy" in prompt
     assert "mem-1" in prompt
     assert "doc-1" in prompt
-    assert "memory-explorer" in prompt
-    assert "Context docs (loaded only if needed)" in prompt
 
-    # With memory_root — should include guidance
+    # With memory_root — should include search guidance
     prompt_mr = build_chat_prompt("test", [], [], memory_root="/tmp/test/memory")
-    assert "Memory location: /tmp/test/memory" in prompt_mr
-    assert "two-phase retrieval" in prompt_mr
-    assert "frontmatter" in prompt_mr
+    assert "Memory root: /tmp/test/memory" in prompt_mr
+    assert "grep" in prompt_mr
+    assert "decisions/*.md" in prompt_mr
 
     # Without memory_root — no guidance block
     prompt_no = build_chat_prompt("test", [], [])
-    assert "Memory location" not in prompt_no
+    assert "Memory root" not in prompt_no
 
     assert looks_like_auth_error("Failed to authenticate with provider")
     assert looks_like_auth_error("authentication_error: invalid key")

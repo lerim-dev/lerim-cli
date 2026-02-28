@@ -447,10 +447,13 @@ def _build_dspy_role(
 
 
 def _parse_string_table(raw: dict[str, Any]) -> dict[str, str]:
-    """Parse a TOML table of ``name = "path"`` entries into a string dict."""
+    """Parse a TOML table of ``name = "path"`` or ``name = {path = "..."}`` entries."""
     result: dict[str, str] = {}
     for key, value in raw.items():
-        text = str(value).strip() if value is not None else ""
+        if isinstance(value, dict):
+            text = str(value.get("path", "")).strip()
+        else:
+            text = str(value).strip() if value is not None else ""
         if text:
             result[key] = text
     return result
@@ -686,10 +689,16 @@ def save_config_patch(patch: dict[str, Any]) -> Config:
         existing = load_toml_file(user_path)
 
     merged = _deep_merge(existing, patch)
-    lines = ["# Lerim user config\n"]
-    _toml_write_dict(lines, merged, prefix="")
-    user_path.write_text("".join(lines), encoding="utf-8")
+    return _write_config_full(merged)
 
+
+def _write_config_full(data: dict[str, Any]) -> Config:
+    """Write complete config dict to user TOML and return reloaded Config."""
+    user_path = USER_CONFIG_PATH
+    user_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# Lerim user config\n"]
+    _toml_write_dict(lines, data, prefix="")
+    user_path.write_text("".join(lines), encoding="utf-8")
     return reload_config()
 
 

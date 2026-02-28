@@ -6,7 +6,7 @@ Canonical parser source:
 Canonical command:
 - `lerim`
 
-Service commands (`chat`, `sync`, `maintain`, `status`) are thin HTTP clients that
+Service commands (`ask`, `sync`, `maintain`, `status`) are thin HTTP clients that
 require a running server (`lerim up` or `lerim serve`). Commands marked **(host-only)**
 always run on the host.
 
@@ -36,8 +36,8 @@ always run on the host.
 - `maintain`
 - `daemon`
 - `dashboard`
-- `memory` (`search`, `list`, `add`, `export`, `reset`)
-- `chat`
+- `memory` (`search`, `list`, `add`, `reset`)
+- `ask`
 - `status`
 
 ## Commands
@@ -247,22 +247,6 @@ lerim memory add --title "Slow test" --body "Integration suite 5min" --kind fric
 | `--confidence` | `0.7` | Score from 0.0 to 1.0 |
 | `--tags` | -- | Comma-separated tags (e.g. `python,testing,ci`) |
 
-#### `lerim memory export`
-
-Export every memory record as JSON or markdown.
-
-```bash
-lerim memory export                          # markdown to stdout
-lerim memory export --format json            # JSON to stdout
-lerim memory export --format json --output memories.json
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--project` | -- | Filter to project (not yet implemented) |
-| `--format` | `markdown` | `json` or `markdown` |
-| `--output` | stdout | File path (creates parent dirs) |
-
 #### `lerim memory reset`
 
 Irreversibly delete `memory/`, `workspace/`, and `index/` under selected scope.
@@ -285,14 +269,14 @@ lerim memory reset --yes && lerim sync --max-sessions 5  # fresh start
 | `--scope` | `both` | `project`, `global`, or `both` |
 | `--yes` | off | Required safety flag (refuses to run without it) |
 
-### `lerim chat`
+### `lerim ask`
 
 One-shot query: ask Lerim a question with memory-informed context.
 Requires a running server (`lerim up` or `lerim serve`).
 
 ```bash
-lerim chat 'What auth pattern do we use?'
-lerim chat "How is the database configured?" --limit 5
+lerim ask 'What auth pattern do we use?'
+lerim ask "How is the database configured?" --limit 5
 ```
 
 | Flag | Default | Description |
@@ -302,7 +286,7 @@ lerim chat "How is the database configured?" --limit 5
 | `--limit` | `12` | Max memory items as context |
 
 Notes:
-- Chat uses memory retrieval evidence.
+- Ask uses memory retrieval evidence.
 - If provider auth fails, CLI returns exit code 1.
 
 ### `lerim status`

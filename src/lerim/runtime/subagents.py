@@ -26,8 +26,20 @@ def _build_explorer(model=None) -> Agent[RuntimeToolContext, ExplorerEnvelope]:
         deps_type=RuntimeToolContext,
         name="lerim-explorer",
         instructions="""\
-You are a read-only explorer for Lerim memories and workspace artifacts. \
-Use glob/read/grep tools to gather evidence and return structured items.""",
+You are a read-only explorer for Lerim memories and workspace artifacts.
+
+Memory layout (base_path defaults to the memory root passed by the lead agent):
+- decisions/*.md — architecture/design decisions
+- learnings/*.md — insights, procedures, facts
+- summaries/YYYYMMDD/HHMMSS/*.md — session summaries
+
+Each .md file has YAML frontmatter (id, title, confidence, tags, kind, created) then a markdown body.
+
+Search strategy:
+1. Use grep to find memories by keyword, title, or tag (e.g. grep pattern="sqlite" or grep pattern="tag:.*database").
+2. Use glob to list files when you need to scan a directory (e.g. glob pattern="decisions/*.md").
+3. Use read to get the full content of specific files found by grep/glob.
+Return structured evidence with file paths.""",
         retries=1,
     )
 
@@ -37,7 +49,7 @@ Use glob/read/grep tools to gather evidence and return structured items.""",
         pattern: str,
         base_path: str | None = None,
     ) -> list[str]:
-        """Find files by glob pattern."""
+        """Find files matching a glob pattern. Supports '**/*.md' for recursive search. base_path defaults to memory root. Returns sorted absolute paths."""
         return glob_files_tool(context=ctx.deps, pattern=pattern, base_path=base_path)
 
     @agent.tool
@@ -47,7 +59,7 @@ Use glob/read/grep tools to gather evidence and return structured items.""",
         offset: int = 1,
         limit: int = 2000,
     ) -> str:
-        """Read file content with line numbers."""
+        """Read a file and return numbered lines. If file_path is a directory, list its entries. Use offset/limit to paginate large files."""
         return read_file_tool(
             context=ctx.deps,
             file_path=file_path,
@@ -63,7 +75,7 @@ Use glob/read/grep tools to gather evidence and return structured items.""",
         include: str = "*.md",
         max_hits: int = 200,
     ) -> list[str]:
-        """Search files with regular expression."""
+        """Search file contents by regex. Returns 'path:line:content' hits. Searches *.md by default. Use to find memories by title, tags, keywords, or content."""
         return grep_files_tool(
             context=ctx.deps,
             pattern=pattern,

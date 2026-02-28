@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from lerim.adapters.common import load_jsonl_dict_lines
 from lerim.config.logging import logger
 from lerim.app.api import (
-    api_chat,
+    api_ask,
     api_connect,
     api_connect_list,
     api_health,
@@ -1203,7 +1203,7 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
 
     def _handle_api_post(self, path: str) -> None:
         """Dispatch POST API routes to supported actions."""
-        if path == "/api/chat":
+        if path == "/api/ask":
             body = self._read_json_body()
             question = str(body.get("question") or "").strip()
             if not question:
@@ -1214,17 +1214,17 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
 
             result_holder: list[dict[str, Any]] = []
 
-            def _run_chat() -> None:
-                """Execute chat in background thread."""
-                result_holder.append(api_chat(question, limit=limit))
+            def _run_ask() -> None:
+                """Execute ask in background thread."""
+                result_holder.append(api_ask(question, limit=limit))
 
-            thread = threading.Thread(target=_run_chat)
+            thread = threading.Thread(target=_run_ask)
             thread.start()
             thread.join(timeout=300)
             if result_holder:
                 self._json(result_holder[0])
             else:
-                self._error(HTTPStatus.GATEWAY_TIMEOUT, "Chat timed out")
+                self._error(HTTPStatus.GATEWAY_TIMEOUT, "Ask timed out")
             return
         if path == "/api/sync":
             body = self._read_json_body()

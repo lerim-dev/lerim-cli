@@ -17,11 +17,11 @@ Lerim gives you persistent memory across sessions. It watches your conversations
 
 ```bash
 lerim memory search "authentication pattern"  # fast keyword search, returns raw matches
-lerim chat "Why did we choose SQLite?"         # LLM-synthesized answer from memories
+lerim ask "Why did we choose SQLite?"          # LLM-synthesized answer from memories
 lerim memory list                              # list all memories
 ```
 
-Use `memory search` for quick lookups when you can reason over the raw results. Use `chat` when you need a synthesized answer across multiple memories.
+Use `memory search` for quick lookups when you can reason over the raw results. Use `ask` when you need a synthesized answer across multiple memories.
 
 ## How it works
 
