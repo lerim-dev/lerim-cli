@@ -1,5 +1,7 @@
 FROM python:3.12-slim
 
+LABEL org.opencontainers.image.source=https://github.com/lerim-dev/lerim-cli
+
 # Install curl (for healthcheck) and Deno (for DSPy RLM)
 RUN apt-get update && apt-get install -y --no-install-recommends curl unzip ripgrep && \
     curl -fsSL https://deno.land/install.sh | sh && \
