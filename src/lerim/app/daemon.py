@@ -614,15 +614,23 @@ def run_daemon_forever(poll_seconds: int | None = None) -> None:
     last_sync = 0.0
     last_maintain = 0.0
 
+    from lerim.config.logging import logger
+
     while True:
         now = time.monotonic()
 
         if now - last_sync >= sync_interval:
-            _run_sync_cycle()
+            try:
+                _run_sync_cycle()
+            except Exception as exc:
+                logger.warning("daemon sync error: {}", exc)
             last_sync = time.monotonic()
 
         if now - last_maintain >= maintain_interval:
-            _run_maintain_cycle()
+            try:
+                _run_maintain_cycle()
+            except Exception as exc:
+                logger.warning("daemon maintain error: {}", exc)
             last_maintain = time.monotonic()
 
         # Sleep until the next task is due.

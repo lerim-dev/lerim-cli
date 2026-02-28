@@ -99,6 +99,7 @@ Fast, deterministic tests with no LLM calls and no network. External state (conf
 | `test_graph_explorer_frontend.py` | Graph explorer frontend rendering |
 | `test_index_html.py` | Dashboard index.html serving |
 | `test_trace_summarization_pipeline.py` | Trace summarization pipeline contracts |
+| `test_eval_scores.py` | Eval scoring utilities, schema checks, judge output parsing, prompt building |
 
 ### Smoke (`pytest tests/smoke/`)
 

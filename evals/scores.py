@@ -6,7 +6,7 @@ computation, and schema/field validation for extraction and summarization output
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from lerim.memory.schemas import MemoryCandidate
 
@@ -83,3 +83,4 @@ if __name__ == "__main__":
     score = EvalScore(trace="test.jsonl", schema_ok=True, has_candidates=True)
     assert score.trace == "test.jsonl"
     print("scores: self-test passed")
+

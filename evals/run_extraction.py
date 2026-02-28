@@ -90,7 +90,7 @@ def run_extraction_eval(config_path: Path) -> dict:
 
         # Deterministic checks
         schema_ok = check_extraction_schema(output)
-        has_candidates = len(output) > 0
+        has_candidates = isinstance(output, list) and len(output) > 0
 
         # Judge scoring
         try:
