@@ -30,7 +30,7 @@ def test_help_lists_minimal_commands() -> None:
         "daemon",
         "dashboard",
         "memory",
-        "chat",
+        "ask",
         "status",
     ):
         assert command in text
@@ -56,10 +56,10 @@ def test_sync_parser_accepts_canonical_flags() -> None:
     assert args.window == "7d"
 
 
-def test_chat_parser_minimal_surface() -> None:
+def test_ask_parser_minimal_surface() -> None:
     parser = cli.build_parser()
-    args = parser.parse_args(["chat", "what failed?", "--limit", "5"])
-    assert args.command == "chat"
+    args = parser.parse_args(["ask", "what failed?", "--limit", "5"])
+    assert args.command == "ask"
     assert args.question == "what failed?"
     assert args.limit == 5
 
@@ -94,8 +94,8 @@ def test_status_json_output_shape(
     assert "latest_maintain" in payload
 
 
-def test_chat_forwards_to_api(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Chat command posts to /api/chat and prints the answer."""
+def test_ask_forwards_to_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ask command posts to /api/ask and prints the answer."""
     fake_response = {
         "answer": "Use bearer tokens.",
         "agent_session_id": "ses-1",
@@ -103,26 +103,26 @@ def test_chat_forwards_to_api(monkeypatch: pytest.MonkeyPatch) -> None:
         "error": False,
     }
     monkeypatch.setattr(cli, "_api_post", lambda _path, _body: fake_response)
-    code, payload = run_cli_json(["chat", "how to deploy", "--limit", "5", "--json"])
+    code, payload = run_cli_json(["ask", "how to deploy", "--limit", "5", "--json"])
     assert code == 0
     assert payload["answer"] == "Use bearer tokens."
 
 
-def test_chat_returns_nonzero_on_auth_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ask_returns_nonzero_on_auth_error(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_response = {
         "answer": "authentication_error: invalid api key",
         "error": True,
     }
     monkeypatch.setattr(cli, "_api_post", lambda _path, _body: fake_response)
-    code, _output = run_cli(["chat", "how to deploy"])
+    code, _output = run_cli(["ask", "how to deploy"])
     assert code == 1
 
 
-def test_chat_returns_nonzero_when_server_not_running(
+def test_ask_returns_nonzero_when_server_not_running(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(cli, "_api_post", lambda _path, _body: None)
-    code, _output = run_cli(["chat", "how to deploy"])
+    code, _output = run_cli(["ask", "how to deploy"])
     assert code == 1
 
 

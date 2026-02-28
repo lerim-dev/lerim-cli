@@ -48,7 +48,7 @@ Fast, deterministic tests with no LLM calls and no network. External state (conf
 | `test_runtime_tools.py` | Tool boundary enforcement (read/write/glob/grep within allowed roots) |
 | `test_providers.py` | DSPy/PydanticAI LM provider construction, API key resolution |
 | `test_subagents.py` | Explorer subagent builder contracts, read-only tool verification |
-| `test_cli.py` | Argument parser validation, command routing, `memory list/add/search/export` |
+| `test_cli.py` | Argument parser validation, command routing, `memory list/add/search` |
 | `test_dashboard_api.py` | `_compute_stats`, `_build_memory_graph_payload`, dashboard helper functions |
 | `test_regression_contracts.py` | Public API surface checks — import paths and function signatures haven't broken |
 | `test_runtime_agent_contract.py` | Lead agent contract (typed deps, typed outputs) |
@@ -87,7 +87,7 @@ Multi-component flows with real LLM calls, real file I/O, and real DB writes. Ea
 |------|---------------|
 | `test_integration_extract.py` | Feed fixture JSONL traces through DSPy extraction pipeline; verify valid `MemoryRecord` output, correct primitives, edge-case handling (empty/short/mixed traces) |
 | `test_integration_summarize.py` | Feed seeded memory directories through summarization pipeline; verify valid summary markdown files |
-| `test_integration_agent.py` | Full PydanticAI agent chat with memory context; agent answers using seeded memories |
+| `test_integration_agent.py` | Full PydanticAI agent ask with memory context; agent answers using seeded memories |
 | `test_integration_providers.py` | LM provider construction works with actual configured backend |
 | `test_agent_memory_write_integration.py` | Agent-driven memory write flows with real LLM |
 
@@ -99,7 +99,7 @@ Full CLI command flows as a user would invoke them. Requires working LLM.
 |------|---------------|
 | `test_e2e_sync.py` | `lerim sync` against fixture traces creates memories; re-running is idempotent (no duplicates) |
 | `test_e2e_maintain.py` | `lerim maintain` on seeded memories performs maintenance actions (archival, dedup) |
-| `test_e2e_full_cycle.py` | Full lifecycle: reset -> sync -> chat; verifies the whole pipeline end-to-end |
+| `test_e2e_full_cycle.py` | Full lifecycle: reset -> sync -> ask; verifies the whole pipeline end-to-end |
 | `test_e2e_real.py` | Real-world e2e with actual connected platforms |
 | `test_context_layers_e2e.py` | Context layer resolution end-to-end |
 | `test_agent_memory_write_modes_e2e.py` | Agent memory write modes end-to-end |
@@ -115,7 +115,7 @@ Regression tests live in unit-land (no LLM needed) but serve a distinct purpose:
 - **`SyncCounts`** — fields: `add`, `update`, `no_op`
 - **`MaintainCounts`** — fields: `merged`, `archived`, `consolidated`, `decayed`, `unchanged`
 - **`MemoryCandidate`** — fields: `primitive`, `kind`, `title`, `body`, `confidence`, `tags`
-- **CLI subcommands** — `connect`, `sync`, `maintain`, `daemon`, `chat`, `memory`, `dashboard`, `status` all present
+- **CLI subcommands** — `connect`, `sync`, `maintain`, `daemon`, `ask`, `memory`, `dashboard`, `status` all present
 - **`MEMORY_FRONTMATTER_SCHEMA`** — decision and learning types have expected keys (`id`, `kind`, etc.)
 
 When changing any of these contracts, update the corresponding test assertions. These are intentionally strict — a diff in fields means the contract changed and downstream consumers may break.

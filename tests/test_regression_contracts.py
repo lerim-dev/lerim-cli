@@ -74,7 +74,7 @@ def test_cli_subcommands_present():
         "sync",
         "maintain",
         "daemon",
-        "chat",
+        "ask",
         "memory",
         "dashboard",
         "status",

@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 # Install curl (for healthcheck) and Deno (for DSPy RLM)
-RUN apt-get update && apt-get install -y --no-install-recommends curl unzip && \
+RUN apt-get update && apt-get install -y --no-install-recommends curl unzip ripgrep && \
     curl -fsSL https://deno.land/install.sh | sh && \
     ln -s /root/.deno/bin/deno /usr/local/bin/deno && \
     apt-get purge -y unzip && apt-get autoremove -y && \

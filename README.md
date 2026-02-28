@@ -91,7 +91,7 @@ At the start of a session, tell your agent:
 
 > Check lerim for any relevant memories about [topic you're working on].
 
-Your agent will run `lerim chat` or `lerim memory search` to pull in past decisions and learnings before it starts working.
+Your agent will run `lerim ask` or `lerim memory search` to pull in past decisions and learnings before it starts working.
 
 ### Running without Docker
 
@@ -155,7 +155,7 @@ lerim logs --follow                         # tail logs
 lerim serve                                 # start HTTP server + daemon loop
 
 # Service commands (require lerim up or lerim serve running)
-lerim chat "Why did we choose this?"        # query memories
+lerim ask "Why did we choose this?"          # query memories
 lerim sync                                  # one-shot: sync sessions + extract
 lerim maintain                              # one-shot: merge, archive, decay
 lerim status                                # runtime state

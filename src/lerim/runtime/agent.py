@@ -244,7 +244,7 @@ Always use tools to read/write files and produce concise completion output."""
                 offset: int = 1,
                 limit: int = 2000,
             ) -> str:
-                """Read file content with line numbers."""
+                """Read a file and return numbered lines. If file_path is a directory, list its entries instead. Use offset/limit to paginate large files."""
                 return read_file_tool(
                     context=ctx.deps,
                     file_path=file_path,
@@ -260,7 +260,7 @@ Always use tools to read/write files and produce concise completion output."""
                 pattern: str,
                 base_path: str | None = None,
             ) -> list[str]:
-                """Find files by glob pattern."""
+                """Find files matching a glob pattern. Supports recursive '**/*.md'. base_path defaults to memory root. Returns sorted absolute paths."""
                 return glob_files_tool(
                     context=ctx.deps, pattern=pattern, base_path=base_path
                 )
@@ -275,7 +275,7 @@ Always use tools to read/write files and produce concise completion output."""
                 include: str = "*.md",
                 max_hits: int = 200,
             ) -> list[str]:
-                """Search files with regular expressions."""
+                """Search file contents by regex. Returns 'path:line:content' hits. Searches *.md by default (override include for other types). base_path defaults to memory root. Use to find memories by title, tags, keywords, or content."""
                 return grep_files_tool(
                     context=ctx.deps,
                     pattern=pattern,

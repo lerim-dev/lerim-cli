@@ -16,12 +16,12 @@ Lerim is a file-first continual learning layer for coding agents.
 
 ## Deployment model
 
-Lerim runs as a single process (`lerim serve`) that provides the daemon + HTTP API + dashboard. Typically this runs inside a Docker container via `lerim up`, but can also be started directly for development. Service commands (`chat`, `sync`, `maintain`, `status`) are thin HTTP clients that forward to the server (`localhost:8765`). Skills and agents can also call the HTTP API directly.
+Lerim runs as a single process (`lerim serve`) that provides the daemon + HTTP API + dashboard. Typically this runs inside a Docker container via `lerim up`, but can also be started directly for development. Service commands (`ask`, `sync`, `maintain`, `status`) are thin HTTP clients that forward to the server (`localhost:8765`). Skills and agents can also call the HTTP API directly.
 
 ```
 CLI / clients                       lerim serve (Docker or direct)
 ─────────────                       ──────────────────────────────
-lerim chat "q"  ──HTTP POST──►     /api/chat
+lerim ask "q"   ──HTTP POST──►     /api/ask
 lerim sync      ──HTTP POST──►     /api/sync
 lerim status    ──HTTP GET───►     /api/status
 skills (curl)   ──HTTP───────►     /api/*
@@ -126,7 +126,7 @@ Memory scope modes:
 
 ### Query path
 
-**query** (`chat`, `memory search`): read-only path.
+**query** (`ask`, `memory search`): read-only path.
 
 ## Agent architecture
 

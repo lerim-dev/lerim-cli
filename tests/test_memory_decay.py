@@ -178,12 +178,13 @@ class TestChatPromptMemoryRoot:
 
     def test_guidance_with_memory_root(self) -> None:
         prompt = build_chat_prompt("test", [], [], memory_root="/data/memory")
-        assert "Memory location: /data/memory" in prompt
-        assert "two-phase retrieval" in prompt
+        assert "Memory root: /data/memory" in prompt
+        assert "grep" in prompt
+        assert "decisions/*.md" in prompt
 
     def test_no_guidance_without_memory_root(self) -> None:
         prompt = build_chat_prompt("test", [], [])
-        assert "Memory location" not in prompt
+        assert "Memory root" not in prompt
 
 
 class TestMaintainPromptDecay:

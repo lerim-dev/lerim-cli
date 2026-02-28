@@ -1,6 +1,6 @@
 """Command-line interface for Lerim runtime, memory, and service operations.
 
-Service commands (chat, sync, maintain, status) are thin HTTP clients that
+Service commands (ask, sync, maintain, status) are thin HTTP clients that
 talk to a running Lerim server (started via ``lerim up`` or ``lerim serve``).
 Host-only commands (init, project, up, down, logs, connect, memory, daemon)
 run locally and never require an HTTP server.
@@ -14,11 +14,8 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
-
-import frontmatter
 
 from lerim import __version__
 from lerim.adapters.registry import (
@@ -28,6 +25,7 @@ from lerim.adapters.registry import (
     load_platforms,
     remove_platform,
 )
+
 from lerim.app.api import (
     COMPOSE_PATH,
     api_project_add,
@@ -38,7 +36,6 @@ from lerim.app.api import (
     detect_agents,
     docker_available,
     is_container_running,
-    list_memory_files,
     write_init_config,
 )
 from lerim.app.arg_utils import parse_csv
@@ -48,7 +45,13 @@ from lerim.config.logging import configure_logging
 from lerim.config.settings import get_config, USER_CONFIG_PATH
 from lerim.config.tracing import configure_tracing
 from lerim.memory.memory_repo import build_memory_paths, reset_memory_root
-from lerim.memory.memory_record import MemoryRecord, MemoryType, memory_folder, slugify
+from lerim.memory.memory_record import (
+    MemoryRecord,
+    MemoryType,
+    canonical_memory_filename,
+    memory_folder,
+    slugify,
+)
 
 
 def _emit(message: object = "", *, file: Any | None = None) -> None:
@@ -110,26 +113,6 @@ def _hoist_global_json_flag(raw: list[str]) -> list[str]:
     if "--json" not in raw:
         return raw
     return ["--json"] + [item for item in raw if item != "--json"]
-
-
-def _read_memory_frontmatter(path: Path) -> dict[str, Any] | None:
-    """Read frontmatter from a memory markdown file. Returns None on parse error."""
-    try:
-        post = frontmatter.load(str(path))
-        fm = dict(post.metadata)
-        fm["_body"] = post.content
-        fm["_path"] = str(path)
-        return fm
-    except Exception:
-        return None
-
-
-def _format_memory_hit(fm: dict[str, Any]) -> str:
-    """Render one compact human-readable memory summary line."""
-    mid = fm.get("id", "?")
-    title = fm.get("title", "?")
-    confidence = fm.get("confidence", "?")
-    return f"{mid} conf={confidence} title={title}"
 
 
 def _cmd_connect(args: argparse.Namespace) -> int:
@@ -227,8 +210,9 @@ def _cmd_maintain(args: argparse.Namespace) -> int:
 
 def _cmd_daemon(args: argparse.Namespace) -> int:
     """Handle daemon commands for one-shot or continuous execution."""
+    max_sessions = getattr(args, "max_sessions", None)
     if args.once:
-        payload = run_daemon_once()
+        payload = run_daemon_once(max_sessions=max_sessions)
         _emit_structured(
             title="Daemon once result:", payload=payload, as_json=args.json
         )
@@ -246,65 +230,38 @@ def _cmd_dashboard(args: argparse.Namespace) -> int:
     return 0
 
 
-def search_memory(
-    question: str,
-    project_filter: str | None = None,
-    limit: int = 20,
-) -> list[dict[str, Any]]:
-    """Search memory by keyword tokens with file-scan approach."""
-    config = get_config()
-    files = list_memory_files(config.memory_dir)
-    all_fm: list[dict[str, Any]] = []
-    for path in files:
-        fm = _read_memory_frontmatter(path)
-        if fm:
-            all_fm.append(fm)
-    if not question.strip():
-        return all_fm[:limit]
-    tokens = [token.lower() for token in question.split() if token.strip()]
-    hits: list[dict[str, Any]] = []
-    for fm in all_fm:
-        haystack = " ".join(
-            [
-                str(fm.get("title", "")),
-                str(fm.get("_body", "")),
-                " ".join(fm.get("tags", [])),
-            ]
-        ).lower()
-        if any(token in haystack for token in tokens):
-            hits.append(fm)
-    return (hits or all_fm)[:limit]
-
-
 def _cmd_memory_search(args: argparse.Namespace) -> int:
-    """Search stored memories and print list or JSON output."""
-    hits = search_memory(args.query, limit=args.limit, project_filter=args.project)
-    if args.json:
-        _emit(json.dumps(hits, indent=2, ensure_ascii=True, default=str))
-        return 0
-    if not hits:
+    """Search memory files via rg and print matching lines."""
+    import subprocess
+
+    config = get_config()
+    memory_dir = config.memory_dir
+    if not memory_dir.exists():
         _emit("No matching memories.")
         return 0
-    for fm in hits:
-        _emit(_format_memory_hit(fm))
+    cmd = ["rg", "--ignore-case", "--glob=*.md", args.query, str(memory_dir)]
+    if args.json:
+        cmd.insert(1, "--json")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    if result.stdout:
+        _emit(result.stdout.strip())
+    else:
+        _emit("No matching memories.")
     return 0
 
 
 def _cmd_memory_list(args: argparse.Namespace) -> int:
-    """List recent memories, optionally filtered by project."""
+    """List memory files in the memory directory."""
     config = get_config()
-    files = list_memory_files(config.memory_dir)
-    items: list[dict[str, Any]] = []
-    for path in files:
-        fm = _read_memory_frontmatter(path)
-        if fm:
-            items.append(fm)
-    items = items[: args.limit]
-    if args.json:
-        _emit(json.dumps(items, indent=2, ensure_ascii=True, default=str))
+    memory_dir = config.memory_dir
+    if not memory_dir.exists():
         return 0
-    for fm in items:
-        _emit(_format_memory_hit(fm))
+    files = sorted(memory_dir.rglob("*.md"))[: args.limit]
+    if args.json:
+        _emit(json.dumps([str(f) for f in files], indent=2))
+        return 0
+    for f in files:
+        _emit(str(f))
     return 0
 
 
@@ -328,57 +285,20 @@ def _cmd_memory_add(args: argparse.Namespace) -> int:
         body=args.body,
         confidence=args.confidence,
         tags=parse_csv(args.tags),
+        source="cli",
     )
     folder = config.memory_dir / memory_folder(primitive)
     folder.mkdir(parents=True, exist_ok=True)
-    filename = (
-        f"{datetime.now(timezone.utc).strftime('%Y%m%d')}-{slugify(args.title)}.md"
-    )
+    filename = canonical_memory_filename(title=args.title, run_id="cli")
     filepath = folder / filename
     filepath.write_text(record.to_markdown(), encoding="utf-8")
     _emit(f"Added memory: {record.id} -> {filepath}")
     return 0
 
 
-def _cmd_memory_export(args: argparse.Namespace) -> int:
-    """Export memories as Markdown or JSON to stdout or a file."""
-    config = get_config()
-    files = list_memory_files(config.memory_dir)
-    items: list[dict[str, Any]] = []
-    for path in files:
-        fm = _read_memory_frontmatter(path)
-        if fm:
-            items.append(fm)
-
-    if args.format == "json":
-        output = json.dumps(items, indent=2, ensure_ascii=True, default=str)
-    else:
-        lines = ["# Lerim Memory Export", ""]
-        for fm in items:
-            title = fm.get("title", "?")
-            mid = fm.get("id", "?")
-            confidence = fm.get("confidence", "?")
-            body = str(fm.get("_body", "")).strip()[:260]
-            lines.append(f"## {title} ({mid})")
-            lines.append(f"- confidence: {confidence}")
-            lines.append(body)
-            lines.append("")
-        output = "\n".join(lines)
-    if args.output:
-        path = Path(args.output).expanduser()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            output + ("\n" if not output.endswith("\n") else ""), encoding="utf-8"
-        )
-        _emit(f"Exported: {path}")
-    else:
-        _emit(output)
-    return 0
-
-
-def _cmd_chat(args: argparse.Namespace) -> int:
-    """Forward chat query to the running Lerim server."""
-    data = _api_post("/api/chat", {"question": args.question, "limit": args.limit})
+def _cmd_ask(args: argparse.Namespace) -> int:
+    """Forward ask query to the running Lerim server."""
+    data = _api_post("/api/ask", {"question": args.question, "limit": args.limit})
     if data is None:
         return _not_running()
     if data.get("error"):
@@ -602,6 +522,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     init_sessions_db()
     httpd = ThreadingHTTPServer((host, port), DashboardHandler)
+    httpd.timeout = 1.0
 
     stop_event = threading.Event()
 
@@ -623,9 +544,8 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     daemon_thread.start()
 
     def _shutdown(signum: int, frame: Any) -> None:
-        """Handle graceful shutdown on SIGTERM/SIGINT."""
+        """Signal handler — just set the stop flag (no lock-acquiring calls)."""
         stop_event.set()
-        httpd.shutdown()
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
@@ -633,8 +553,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     from lerim.config.logging import logger
 
     logger.info("Lerim serve running at http://{}:{}/", host, port)
-    httpd.serve_forever()
-    stop_event.set()
+    while not stop_event.is_set():
+        httpd.handle_request()
+    httpd.server_close()
     daemon_thread.join(timeout=5)
     return 0
 
@@ -822,6 +743,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run exactly one sync+maintain cycle and exit (instead of looping forever).",
     )
     daemon.add_argument(
+        "--max-sessions",
+        type=int,
+        default=None,
+        help="Max sessions to extract per cycle. (default: sync_max_sessions from config)",
+    )
+    daemon.add_argument(
         "--poll-seconds",
         type=int,
         help="Seconds between cycles. Overrides config poll_interval_minutes. Minimum 30s.",
@@ -953,34 +880,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     memory_add.set_defaults(func=_cmd_memory_add)
 
-    memory_export = memory_sub.add_parser(
-        "export",
-        formatter_class=_F,
-        help="Export all memories to file or stdout",
-        description=(
-            "Export every memory record as JSON or markdown.\n"
-            "Prints to stdout by default, or writes to a file with --output.\n\n"
-            "Examples:\n"
-            "  lerim memory export                          # markdown to stdout\n"
-            "  lerim memory export --format json            # JSON to stdout\n"
-            "  lerim memory export --format json --output memories.json"
-        ),
-    )
-    memory_export.add_argument(
-        "--project", help="Filter to a specific project (not yet implemented)."
-    )
-    memory_export.add_argument(
-        "--format",
-        choices=["json", "markdown"],
-        default="markdown",
-        help="Output format: 'json' (frontmatter dicts) or 'markdown' (heading + body preview). (default: markdown)",
-    )
-    memory_export.add_argument(
-        "--output",
-        help="File path to write to. Creates parent directories if needed. Omit to print to stdout.",
-    )
-    memory_export.set_defaults(func=_cmd_memory_export)
-
     memory_reset = memory_sub.add_parser(
         "reset",
         formatter_class=_F,
@@ -1013,32 +912,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     memory_reset.set_defaults(func=_cmd_memory_reset)
 
-    # ── chat ─────────────────────────────────────────────────────────
-    chat = sub.add_parser(
-        "chat",
+    # ── ask ──────────────────────────────────────────────────────────
+    ask = sub.add_parser(
+        "ask",
         formatter_class=_F,
         help="Ask a question using accumulated memory as context",
         description=(
             "One-shot query: ask Lerim a question and get an answer informed by\n"
             "memories extracted from your agent sessions.\n\n"
             "Examples:\n"
-            "  lerim chat 'What auth pattern do we use?'\n"
-            '  lerim chat "How is the database configured?" --limit 5'
+            "  lerim ask 'What auth pattern do we use?'\n"
+            '  lerim ask "How is the database configured?" --limit 5'
         ),
     )
-    chat.add_argument(
+    ask.add_argument(
         "question", help="Your question (use quotes if it contains spaces)."
     )
-    chat.add_argument(
+    ask.add_argument(
         "--project", help="Scope to a specific project (not yet implemented)."
     )
-    chat.add_argument(
+    ask.add_argument(
         "--limit",
         type=int,
         default=12,
         help="Maximum number of memory items to include as context. (default: 12)",
     )
-    chat.set_defaults(func=_cmd_chat)
+    ask.set_defaults(func=_cmd_ask)
 
     # ── status ───────────────────────────────────────────────────────
     status = sub.add_parser(

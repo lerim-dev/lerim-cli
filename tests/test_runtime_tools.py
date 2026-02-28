@@ -9,7 +9,6 @@ import pytest
 from lerim.runtime.tools import (
     RuntimeToolContext,
     _memory_primitive_type,
-    _normalize_mapping_arg,
     build_tool_context,
     edit_file_tool,
     glob_files_tool,
@@ -123,16 +122,15 @@ def test_write_boundary_denies_outside(tmp_path):
 
 
 def test_write_normalizes_frontmatter(tmp_path):
-    """write_file_tool adds missing frontmatter fields (id, created, source)."""
+    """write_file_tool adds server-side fields (created, updated, source)."""
     ctx = _make_context(tmp_path)
-    content = "---\ntitle: My Decision\nconfidence: 0.85\ntags: [auth]\n---\nBody here."
+    content = "---\ntitle: My Decision\nid: my-decision\nconfidence: 0.85\ntags: [auth]\n---\nBody here."
     result = write_file_tool(
         context=ctx,
         file_path=str(ctx.memory_root / "decisions" / "my-decision.md"),
         content=content,
     )
     written = Path(result["file_path"]).read_text(encoding="utf-8")
-    assert "id:" in written
     assert "created:" in written
     assert "source:" in written
 
@@ -253,29 +251,6 @@ def test_grep_max_hits(tmp_path):
 # -- Helper tests --
 
 
-def test_normalize_mapping_arg_dict():
-    """_normalize_mapping_arg passes through dicts."""
-    assert _normalize_mapping_arg({"a": 1}, "test") == {"a": 1}
-
-
-def test_normalize_mapping_arg_json_string():
-    """_normalize_mapping_arg parses JSON strings to dicts."""
-    assert _normalize_mapping_arg('{"a": 1}', "test") == {"a": 1}
-
-
-def test_normalize_mapping_arg_none():
-    """_normalize_mapping_arg returns {} for None."""
-    assert _normalize_mapping_arg(None, "test") == {}
-
-
-def test_normalize_mapping_arg_invalid():
-    """_normalize_mapping_arg raises for invalid input."""
-    with pytest.raises(RuntimeError):
-        _normalize_mapping_arg(42, "test")
-    with pytest.raises(RuntimeError):
-        _normalize_mapping_arg("not-json", "test")
-
-
 def test_memory_primitive_type_detection(tmp_path):
     """_memory_primitive_type detects decision/learning from path."""
     memory_root = tmp_path / "memory"
@@ -298,31 +273,35 @@ def test_memory_primitive_type_detection(tmp_path):
 
 def test_record_memory_access_for_read(tmp_path):
     """Reading full body records access in tracker DB."""
-    from lerim.runtime.tools import _record_memory_access_for_read
+    from lerim.runtime.tools import _record_memory_access
 
     ctx = _make_context(tmp_path)
     test_file = ctx.memory_root / "decisions" / "20260220-test.md"
     test_file.write_text("---\nid: test\n---\nbody", encoding="utf-8")
-    # Should not crash even without pre-initialized DB
-    _record_memory_access_for_read(context=ctx, file_path=test_file, limit=2000)
+    _record_memory_access(
+        context=ctx, file_path=test_file, limit=2000, require_body_read=True
+    )
 
 
 def test_record_memory_access_skips_frontmatter_only(tmp_path):
     """Reading with small limit (frontmatter only) does not record access."""
-    from lerim.runtime.tools import _record_memory_access_for_read
+    from lerim.runtime.tools import _record_memory_access
 
     ctx = _make_context(tmp_path)
     test_file = ctx.memory_root / "decisions" / "20260220-test.md"
     test_file.write_text("---\nid: test\n---\nbody", encoding="utf-8")
-    # Small limit = frontmatter only read, should not error
-    _record_memory_access_for_read(context=ctx, file_path=test_file, limit=3)
+    _record_memory_access(
+        context=ctx, file_path=test_file, limit=3, require_body_read=True
+    )
 
 
 def test_record_memory_access_for_write(tmp_path):
     """Writing a memory file records access."""
-    from lerim.runtime.tools import _record_memory_access_for_write
+    from lerim.runtime.tools import _record_memory_access
 
     ctx = _make_context(tmp_path)
     test_file = ctx.memory_root / "decisions" / "20260220-test.md"
     test_file.write_text("---\nid: test\n---\nbody", encoding="utf-8")
-    _record_memory_access_for_write(context=ctx, file_path=test_file)
+    _record_memory_access(
+        context=ctx, file_path=test_file, limit=None, require_body_read=False
+    )

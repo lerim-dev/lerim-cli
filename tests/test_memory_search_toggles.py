@@ -1,15 +1,15 @@
-"""Search mode contract tests for files-only retrieval toggles."""
+"""Search mode contract tests for files-only retrieval via CLI rg search."""
 
 from __future__ import annotations
 
 from dataclasses import replace
 
-from lerim.app import cli
-from lerim.memory.memory_record import MemoryRecord, MemoryType
-from tests.helpers import make_config
+from lerim.memory.memory_record import MemoryRecord
+from tests.helpers import make_config, run_cli
 
 
-def test_disabled_backends_never_execute(monkeypatch, tmp_path) -> None:
+def test_memory_search_finds_seeded_file(monkeypatch, tmp_path) -> None:
+    """CLI 'memory search' uses rg and finds content in seeded memory files."""
     config = replace(
         make_config(tmp_path),
         memory_scope="global_only",
@@ -20,7 +20,7 @@ def test_disabled_backends_never_execute(monkeypatch, tmp_path) -> None:
     learnings_dir.mkdir(parents=True, exist_ok=True)
     record = MemoryRecord(
         id="queue-lifecycle",
-        primitive=MemoryType.learning,
+        primitive="learning",
         kind="insight",
         title="Queue lifecycle",
         body="Keep enqueue claim heartbeat complete fail lifecycle consistent.",
@@ -31,8 +31,10 @@ def test_disabled_backends_never_execute(monkeypatch, tmp_path) -> None:
         record.to_markdown(), encoding="utf-8"
     )
 
+    from lerim.app import cli
+
     monkeypatch.setattr(cli, "get_config", lambda: config)
 
-    hits = cli.search_memory("queue lifecycle", limit=5)
-    assert len(hits) == 1
-    assert hits[0]["title"] == "Queue lifecycle"
+    code, output = run_cli(["memory", "search", "queue lifecycle"])
+    assert code == 0
+    assert "queue" in output.lower() or "lifecycle" in output.lower()
