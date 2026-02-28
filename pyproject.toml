@@ -60,6 +60,7 @@ include = ["lerim*"]
 lerim = ["config/default.toml"]
 
 [tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/smoke", "tests/integration", "tests/e2e"]
 markers = [
     "integration: Tests that hit real external services",
     "e2e: End-to-end tests that exercise full flows",

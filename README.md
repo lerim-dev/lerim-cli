@@ -2,16 +2,55 @@
   <img src="assets/lerim.png" alt="Lerim Logo" width="160">
 </p>
 
-<p align="center"><strong>Continual learning layer for coding agents</strong></p>
-<p align="center"><a href="https://lerim.dev/">lerim.dev</a> · <a href="https://docs.lerim.dev/">docs</a> · <a href="https://pypi.org/project/lerim/">pypi</a></p>
+<h3 align="center">Your coding agents forget everything after each session.<br>Lerim remembers — across all of them.</h3>
+
+<p align="center">
+  <a href="https://pypi.org/project/lerim/"><img src="https://img.shields.io/pypi/v/lerim?style=flat-square&color=blue" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/lerim/"><img src="https://img.shields.io/pypi/pyversions/lerim?style=flat-square" alt="Python versions"></a>
+  <a href="https://github.com/lerim-dev/lerim-cli/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-BSL--1.1-green?style=flat-square" alt="License"></a>
+  <a href="https://github.com/lerim-dev/lerim-cli/actions"><img src="https://img.shields.io/github/actions/workflow/status/lerim-dev/lerim-cli/ci.yml?style=flat-square&label=tests" alt="Tests"></a>
+  <a href="https://github.com/lerim-dev/lerim-cli"><img src="https://img.shields.io/github/stars/lerim-dev/lerim-cli?style=flat-square" alt="GitHub stars"></a>
+</p>
 
 <p align="center">
   <img src="assets/agent-network.gif" alt="Lerim network animation" width="450">
 </p>
 
-Lerim is a continual learning layer that gives coding agents persistent memory across sessions. It watches your agent conversations (Claude Code, Codex, Cursor, OpenCode, ...), extracts decisions and learnings, and stores them as plain markdown files that both humans and agents can read. Memories are refined offline over time through merging, deduplication, archiving, and decay-based forgetting. You can query stored memories anytime to bring relevant past context into your current session.
+<p align="center"><a href="https://lerim.dev/">lerim.dev</a> · <a href="https://docs.lerim.dev/">docs</a> · <a href="https://pypi.org/project/lerim/">pypi</a></p>
 
-## Summary
+## The Problem
+
+> You spend 20 minutes explaining context to your coding agent. It writes great code. Next session? It's forgotten everything. Every decision, every pattern, every "we tried X and it didn't work" -- gone.
+
+> And if you use multiple agents -- Claude Code at the terminal, Cursor in the IDE, Codex for reviews -- none of them know what the others learned. Your project knowledge is **scattered across isolated sessions with no shared memory**.
+
+> This is **agent context amnesia**, and it's the biggest productivity drain in AI-assisted development.
+
+## The Solution
+
+Lerim is a **continual learning layer** that gives coding agents persistent, shared memory across sessions and platforms. Use Claude Code, Cursor, Codex, and OpenCode on the same project — Lerim unifies their knowledge into one memory store that every agent can query.
+
+- **Watches** your agent sessions across Claude Code, Codex CLI, Cursor, and OpenCode
+- **Extracts** decisions and learnings automatically using LLM pipelines
+- **Stores** everything as plain markdown files in your repo (`.lerim/`)
+- **Refines** memories continuously -- merges duplicates, archives stale entries, applies time-based decay
+- **Unifies** knowledge across all your agents -- what Cursor learns, Claude Code can recall
+- **Answers** questions about past context: `lerim ask "why did we choose Postgres?"`
+
+No proprietary format. No database lock-in. Just markdown files that both humans and agents can read. Memories get smarter over time, not stale.
+
+## Supported Agents
+
+| Agent | Session Format | Status |
+|-------|---------------|--------|
+| Claude Code | JSONL traces | Supported |
+| Codex CLI | JSONL traces | Supported |
+| Cursor | SQLite to JSONL | Supported |
+| OpenCode | SQLite to JSONL | Supported |
+
+*More agents coming soon -- PRs welcome!*
+
+## How It Works
 
 Lerim is file-first and primitive-first.
 
@@ -354,6 +393,14 @@ lerim memory reset --yes        # wipe everything
 lerim sync --max-sessions 5     # re-sync newest conversations
 ```
 
+## Contributing
+
+Lerim is open to contributions. Whether it's a new agent adapter, a bug fix, or a documentation improvement, PRs are welcome.
+
+- Read the [Contributing Guide](docs/contributing.md)
+- Browse [open issues](https://github.com/lerim-dev/lerim-cli/issues)
+- Agent adapter PRs are especially appreciated -- see `src/lerim/adapters/` for examples
+
 ## Docs
 
 Full documentation: [docs.lerim.dev](https://docs.lerim.dev)
@@ -363,3 +410,10 @@ Full documentation: [docs.lerim.dev](https://docs.lerim.dev)
 - [Configuration](https://docs.lerim.dev/configuration/)
 - [Architecture](https://docs.lerim.dev/architecture/)
 - [Contributing](https://docs.lerim.dev/contributing/)
+
+---
+
+<p align="center">
+  <strong>If lerim saves you from re-explaining context to your agent, give it a ⭐</strong><br>
+  <a href="https://github.com/lerim-dev/lerim-cli">Star on GitHub</a>
+</p>
