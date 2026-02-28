@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import mimetypes
 import sqlite3
-import tomllib
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,12 +19,24 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from lerim.adapters.common import load_jsonl_dict_lines
 from lerim.config.logging import logger
+from lerim.app.api import (
+    api_chat,
+    api_connect,
+    api_connect_list,
+    api_health,
+    api_maintain,
+    api_project_add,
+    api_project_list,
+    api_project_remove,
+    api_status,
+    api_sync,
+)
 from lerim.config.settings import (
     Config,
     get_config,
     get_config_sources,
     get_user_config_path,
-    reload_config,
+    save_config_patch,
 )
 from lerim.memory.extract_pipeline import build_extract_report
 import frontmatter as fm_lib
@@ -863,72 +874,9 @@ def _serialize_full_config(config: Config) -> dict[str, Any]:
 
 
 def _save_config_patch(patch: dict[str, Any]) -> dict[str, Any]:
-    """Apply config patch to user config TOML file and return updated config.
-
-    Reads existing ~/.lerim/config.toml, merges the patch, writes back.
-    Returns the new effective config.
-    """
-    user_path = get_user_config_path()
-    user_path.parent.mkdir(parents=True, exist_ok=True)
-
-    existing: dict[str, Any] = {}
-    if user_path.exists():
-        with open(user_path, "rb") as fh:
-            existing = tomllib.load(fh)
-
-    def deep_merge(base: dict, overlay: dict) -> dict:
-        """Recursively merge overlay into base."""
-        merged = dict(base)
-        for key, value in overlay.items():
-            if isinstance(value, dict) and isinstance(merged.get(key), dict):
-                merged[key] = deep_merge(merged[key], value)
-            else:
-                merged[key] = value
-        return merged
-
-    merged = deep_merge(existing, patch)
-
-    # Write back as TOML (simple serializer, no tomli_w needed)
-    lines = ["# Lerim user config (managed by dashboard)\n"]
-    _toml_write_dict(lines, merged, prefix="")
-    user_path.write_text("".join(lines), encoding="utf-8")
-
-    # Clear cached config so next get_config() reads fresh
-    return _serialize_full_config(reload_config())
-
-
-def _toml_write_dict(lines: list[str], data: dict[str, Any], prefix: str) -> None:
-    """Write a dict as TOML lines. Handles nested tables and basic types."""
-    scalars = {}
-    tables = {}
-    for key, value in data.items():
-        if isinstance(value, dict):
-            tables[key] = value
-        else:
-            scalars[key] = value
-    for key, value in scalars.items():
-        lines.append(f"{key} = {_toml_value(value)}\n")
-    for key, value in tables.items():
-        section = f"{prefix}{key}" if not prefix else f"{prefix}.{key}"
-        lines.append(f"\n[{section}]\n")
-        _toml_write_dict(lines, value, section)
-
-
-def _toml_value(value: Any) -> str:
-    """Serialize a Python value to TOML literal."""
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        return str(value)
-    if isinstance(value, str):
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
-    if isinstance(value, (list, tuple)):
-        items = ", ".join(_toml_value(item) for item in value)
-        return f"[{items}]"
-    return f'"{value}"'
+    """Apply config patch to user config TOML file and return updated config."""
+    config = save_config_patch(patch)
+    return _serialize_full_config(config)
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -1208,6 +1156,10 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
             "/api/config/models": self._api_config_models,
         }
         no_query_handlers = {
+            "/api/health": lambda: self._json(api_health()),
+            "/api/status": lambda: self._json(api_status()),
+            "/api/connect": lambda: self._json({"platforms": api_connect_list()}),
+            "/api/project/list": lambda: self._json({"projects": api_project_list()}),
             "/api/memory-graph/options": self._api_memory_graph_options,
             "/api/refine/status": self._api_refine_status,
             "/api/refine/report": self._api_refine_report,
@@ -1251,6 +1203,103 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
 
     def _handle_api_post(self, path: str) -> None:
         """Dispatch POST API routes to supported actions."""
+        if path == "/api/chat":
+            body = self._read_json_body()
+            question = str(body.get("question") or "").strip()
+            if not question:
+                self._error(HTTPStatus.BAD_REQUEST, "Missing 'question'")
+                return
+            limit = int(body.get("limit") or 12)
+            import threading
+
+            result_holder: list[dict[str, Any]] = []
+
+            def _run_chat() -> None:
+                """Execute chat in background thread."""
+                result_holder.append(api_chat(question, limit=limit))
+
+            thread = threading.Thread(target=_run_chat)
+            thread.start()
+            thread.join(timeout=300)
+            if result_holder:
+                self._json(result_holder[0])
+            else:
+                self._error(HTTPStatus.GATEWAY_TIMEOUT, "Chat timed out")
+            return
+        if path == "/api/sync":
+            body = self._read_json_body()
+            import threading
+            import uuid
+
+            job_id = str(uuid.uuid4())[:8]
+
+            def _run_sync() -> None:
+                """Execute sync in background."""
+                api_sync(
+                    agent=body.get("agent"),
+                    window=body.get("window", "7d"),
+                    max_sessions=body.get("max_sessions"),
+                    force=bool(body.get("force")),
+                    dry_run=bool(body.get("dry_run")),
+                )
+
+            threading.Thread(
+                target=_run_sync, name=f"sync-{job_id}", daemon=True
+            ).start()
+            self._json({"status": "started", "job_id": job_id})
+            return
+        if path == "/api/maintain":
+            body = self._read_json_body()
+            import threading
+            import uuid
+
+            job_id = str(uuid.uuid4())[:8]
+
+            def _run_maintain() -> None:
+                """Execute maintain in background."""
+                api_maintain(
+                    force=bool(body.get("force")),
+                    dry_run=bool(body.get("dry_run")),
+                )
+
+            threading.Thread(
+                target=_run_maintain, name=f"maintain-{job_id}", daemon=True
+            ).start()
+            self._json({"status": "started", "job_id": job_id})
+            return
+        if path == "/api/connect":
+            body = self._read_json_body()
+            platform = str(body.get("platform") or "").strip()
+            if not platform:
+                self._error(HTTPStatus.BAD_REQUEST, "Missing 'platform'")
+                return
+            result = api_connect(platform, path=body.get("path"))
+            self._json(result)
+            return
+        if path == "/api/project/add":
+            body = self._read_json_body()
+            proj_path = str(body.get("path") or "").strip()
+            if not proj_path:
+                self._error(HTTPStatus.BAD_REQUEST, "Missing 'path'")
+                return
+            result = api_project_add(proj_path)
+            status_code = (
+                HTTPStatus.BAD_REQUEST if result.get("error") else HTTPStatus.OK
+            )
+            self._json(result, status=status_code)
+            return
+        if path == "/api/project/remove":
+            body = self._read_json_body()
+            name = str(body.get("name") or "").strip()
+            if not name:
+                self._error(HTTPStatus.BAD_REQUEST, "Missing 'name'")
+                return
+            result = api_project_remove(name)
+            status_code = (
+                HTTPStatus.BAD_REQUEST if result.get("error") else HTTPStatus.OK
+            )
+            self._json(result, status=status_code)
+            return
         if path == "/api/memory-graph/query":
             payload = self._read_json_body()
             self._json(_memory_graph_query(payload))

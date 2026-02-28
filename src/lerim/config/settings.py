@@ -271,6 +271,11 @@ class Config:
     zai_api_key: str | None
     openrouter_api_key: str | None
 
+    provider_api_bases: dict[str, str]
+
+    agents: dict[str, str]
+    projects: dict[str, str]
+
     @property
     def provider(self) -> str:
         """Backward-compatible shortcut to lead role provider."""
@@ -383,6 +388,9 @@ class Config:
             "tracing_enabled": self.tracing_enabled,
             "tracing_include_httpx": self.tracing_include_httpx,
             "tracing_include_content": self.tracing_include_content,
+            "provider_api_bases": dict(self.provider_api_bases),
+            "agents": dict(self.agents),
+            "projects": dict(self.projects),
         }
 
 
@@ -436,6 +444,35 @@ def _build_dspy_role(
             raw.get("openrouter_provider_order")
         ),
     )
+
+
+def _parse_string_table(raw: dict[str, Any]) -> dict[str, str]:
+    """Parse a TOML table of ``name = "path"`` entries into a string dict."""
+    result: dict[str, str] = {}
+    for key, value in raw.items():
+        text = str(value).strip() if value is not None else ""
+        if text:
+            result[key] = text
+    return result
+
+
+def _migrate_platforms_json(platforms_path: Path) -> dict[str, str]:
+    """Read platforms.json and return agent name->path mapping for migration."""
+    import json
+
+    try:
+        data = json.loads(platforms_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    platforms = data.get("platforms", {})
+    if not isinstance(platforms, dict):
+        return {}
+    agents: dict[str, str] = {}
+    for name, info in platforms.items():
+        path = info.get("path") if isinstance(info, dict) else None
+        if path:
+            agents[str(name)] = str(path)
+    return agents
 
 
 @lru_cache(maxsize=1)
@@ -524,6 +561,18 @@ def load_config() -> Config:
     if port > 65535:
         port = 8765
 
+    agents_raw = toml_data.get("agents", {})
+    agents = _parse_string_table(agents_raw if isinstance(agents_raw, dict) else {})
+    projects_raw = toml_data.get("projects", {})
+    projects = _parse_string_table(
+        projects_raw if isinstance(projects_raw, dict) else {}
+    )
+
+    # Migrate platforms.json -> [agents] if agents section is empty
+    platforms_path = global_data_dir / "platforms.json"
+    if not agents and platforms_path.exists():
+        agents = _migrate_platforms_json(platforms_path)
+
     return Config(
         data_dir=primary,
         global_data_dir=global_data_dir,
@@ -568,6 +617,13 @@ def load_config() -> Config:
         zai_api_key=_to_non_empty_string(os.environ.get("ZAI_API_KEY")) or None,
         openrouter_api_key=_to_non_empty_string(os.environ.get("OPENROUTER_API_KEY"))
         or None,
+        provider_api_bases=_parse_string_table(
+            toml_data.get("providers", {})
+            if isinstance(toml_data.get("providers"), dict)
+            else {}
+        ),
+        agents=agents,
+        projects=projects,
     )
 
 
@@ -580,6 +636,61 @@ def reload_config() -> Config:
     """Clear config cache and return reloaded configuration."""
     load_config.cache_clear()
     return load_config()
+
+
+def _toml_value(value: Any) -> str:
+    """Serialize a Python value to TOML literal."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return str(value)
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(value, (list, tuple)):
+        items = ", ".join(_toml_value(item) for item in value)
+        return f"[{items}]"
+    return f'"{value}"'
+
+
+def _toml_write_dict(lines: list[str], data: dict[str, Any], prefix: str) -> None:
+    """Write a dict as TOML lines. Handles nested tables and basic types."""
+    scalars = {}
+    tables = {}
+    for key, value in data.items():
+        if isinstance(value, dict):
+            tables[key] = value
+        else:
+            scalars[key] = value
+    for key, value in scalars.items():
+        lines.append(f"{key} = {_toml_value(value)}\n")
+    for key, value in tables.items():
+        section = f"{prefix}{key}" if not prefix else f"{prefix}.{key}"
+        lines.append(f"\n[{section}]\n")
+        _toml_write_dict(lines, value, section)
+
+
+def save_config_patch(patch: dict[str, Any]) -> Config:
+    """Apply config patch to user config TOML and return reloaded Config.
+
+    Reads existing ~/.lerim/config.toml, deep-merges the patch, writes back,
+    then reloads the cached config.
+    """
+    user_path = USER_CONFIG_PATH
+    user_path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing: dict[str, Any] = {}
+    if user_path.exists():
+        existing = load_toml_file(user_path)
+
+    merged = _deep_merge(existing, patch)
+    lines = ["# Lerim user config\n"]
+    _toml_write_dict(lines, merged, prefix="")
+    user_path.write_text("".join(lines), encoding="utf-8")
+
+    return reload_config()
 
 
 if __name__ == "__main__":
@@ -602,16 +713,22 @@ if __name__ == "__main__":
     assert isinstance(cfg.tracing_enabled, bool)
     assert isinstance(cfg.tracing_include_httpx, bool)
     assert isinstance(cfg.tracing_include_content, bool)
+    assert isinstance(cfg.agents, dict)
+    assert isinstance(cfg.projects, dict)
     payload = cfg.public_dict()
     assert "lead_role" in payload
     assert "explorer_role" in payload
     assert "extract_role" in payload
     assert "summarize_role" in payload
     assert "decay_enabled" in payload
+    assert "agents" in payload
+    assert "projects" in payload
     print(
         f"""\
 Config loaded: \
 data_dir={cfg.data_dir}, \
 lead={cfg.lead_role.provider}/{cfg.lead_role.model}, \
-extract={cfg.extract_role.provider}/{cfg.extract_role.model}"""
+extract={cfg.extract_role.provider}/{cfg.extract_role.model}, \
+agents={list(cfg.agents.keys())}, \
+projects={list(cfg.projects.keys())}"""
     )

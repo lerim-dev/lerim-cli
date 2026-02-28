@@ -6,6 +6,10 @@ Canonical parser source:
 Canonical command:
 - `lerim`
 
+Service commands (`chat`, `sync`, `maintain`, `status`) are thin HTTP clients that
+require a running server (`lerim up` or `lerim serve`). Commands marked **(host-only)**
+always run on the host.
+
 ## Global flags
 
 ```bash
@@ -23,6 +27,10 @@ Canonical command:
 
 ## Command map
 
+- `init` (host-only)
+- `project` (`add`, `list`, `remove`) (host-only)
+- `up` / `down` / `logs` (host-only)
+- `serve` (Docker entrypoint, or run directly)
 - `connect`
 - `sync`
 - `maintain`
@@ -33,6 +41,49 @@ Canonical command:
 - `status`
 
 ## Commands
+
+### `lerim init` (host-only)
+
+Interactive setup wizard. Detects installed coding agents, writes config to
+`~/.lerim/config.toml`.
+
+```bash
+lerim init
+```
+
+### `lerim project` (host-only)
+
+Manage tracked repositories. Each project gets a `.lerim/` directory.
+
+```bash
+lerim project add ~/codes/my-app       # register a project
+lerim project add .                     # register current directory
+lerim project list                      # show all registered projects
+lerim project remove my-app             # unregister a project
+```
+
+Adding/removing a project restarts the Docker container if running.
+
+### `lerim up` / `lerim down` / `lerim logs` (host-only)
+
+Docker container lifecycle.
+
+```bash
+lerim up                    # start Lerim service (recreates container)
+lerim down                  # stop it
+lerim logs                  # view logs
+lerim logs --follow         # tail logs
+```
+
+### `lerim serve`
+
+HTTP API + dashboard + daemon loop in one process. This is the Docker container
+entrypoint, but can also be run directly for development without Docker.
+
+```bash
+lerim serve
+lerim serve --host 0.0.0.0 --port 8765  # custom bind
+```
 
 ### `lerim connect`
 
@@ -59,6 +110,7 @@ lerim connect remove claude               # disconnect Claude
 
 Hot-path: discover new agent sessions from connected platforms, enqueue them,
 and run DSPy extraction to create memory primitives.
+Requires a running server (`lerim up` or `lerim serve`).
 
 **Time window** controls which sessions to scan:
 - `--window <duration>` -- relative window like `7d`, `24h`, `30m` (default: from config, `7d`)
@@ -102,6 +154,7 @@ Notes:
 Cold-path: offline memory refinement. Scans existing memories and merges
 duplicates, archives low-value items, and consolidates related memories.
 Archived items go to `memory/archived/{decisions,learnings}/`.
+Requires a running server (`lerim up` or `lerim serve`).
 
 ```bash
 lerim maintain                # run one maintenance pass
@@ -133,18 +186,12 @@ lerim daemon --poll-seconds 120  # poll every 2 minutes
 
 ### `lerim dashboard`
 
-Launch a local HTTP dashboard to browse sessions/memories, view pipeline status,
-and update settings (writes to `~/.lerim/config.toml`).
+Prints the dashboard URL. The dashboard itself is served by `lerim serve`
+(or `lerim up`).
 
 ```bash
-lerim dashboard                          # start on default host/port
-lerim dashboard --host 0.0.0.0 --port 9000  # custom bind address
+lerim dashboard                  # print the dashboard URL
 ```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--host` | `127.0.0.1` | Bind address |
-| `--port` | `8765` | Bind port |
 
 ### `lerim memory`
 
@@ -241,6 +288,7 @@ lerim memory reset --yes && lerim sync --max-sessions 5  # fresh start
 ### `lerim chat`
 
 One-shot query: ask Lerim a question with memory-informed context.
+Requires a running server (`lerim up` or `lerim serve`).
 
 ```bash
 lerim chat 'What auth pattern do we use?'
@@ -261,6 +309,7 @@ Notes:
 
 Print runtime state: connected platforms, memory count, session queue stats,
 and timestamps of the latest sync/maintain runs.
+Requires a running server (`lerim up` or `lerim serve`).
 
 ```bash
 lerim status

@@ -8,11 +8,19 @@ Lerim includes a local web dashboard for session analytics, memory browsing, and
 
 ## Launch
 
+When running via Docker (recommended), the dashboard is automatically available:
+
 ```bash
-lerim dashboard
+lerim up
+# Dashboard at http://localhost:8765
 ```
 
-Then open `http://127.0.0.1:8765`.
+Or run standalone without Docker:
+
+```bash
+lerim dashboard
+# Then open http://127.0.0.1:8765
+```
 
 Custom host/port:
 
@@ -61,7 +69,15 @@ Dashboard-editable configuration:
 
 Changes are saved to `~/.lerim/config.toml`.
 
+## HTTP API
+
+The dashboard server also exposes a JSON API used by the thin CLI and skills.
+Key endpoints include `/api/health`, `/api/chat`, `/api/sync`, `/api/maintain`,
+`/api/memories`, `/api/search`, and `/api/status`. See [Architecture](architecture.md)
+for the full endpoint list.
+
 ## Notes
 
 - Top bar filters (`Agent`, `Scope`) update dashboard metrics and run listings across all tabs.
 - The dashboard is read-only for memory content by default — edits go through the edit interface in the Memories tab.
+- When running via Docker, the dashboard is served by the `lerim serve` process alongside the daemon loop and HTTP API.

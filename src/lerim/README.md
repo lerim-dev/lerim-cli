@@ -5,7 +5,7 @@
 This folder contains Lerim runtime code.
 The package is organized by feature boundary:
 
-- `app/`: CLI, daemon loop, dashboard server
+- `app/`: CLI, daemon loop, dashboard server, shared API logic (`api.py`)
 - `config/`: config loading, scope resolution, logging, OpenTelemetry tracing
 - `sessions/`: platform indexing, session catalog, queue
 - `memory/`: memory taxonomy/record schema (`memory_record.py`), repository paths (`memory_repo.py`), extraction pipeline, trace summarization pipeline

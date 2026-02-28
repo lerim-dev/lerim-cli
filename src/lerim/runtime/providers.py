@@ -38,15 +38,11 @@ def _dspy_role_config(config: Config, role: DSPyRoleName) -> DSPyRoleConfig:
     return config.extract_role if role == "extract" else config.summarize_role
 
 
-def _default_api_base(provider: str) -> str:
-    """Return provider default API base for OpenAI-compatible clients."""
-    defaults = {
-        "zai": "https://api.z.ai/api/paas/v4",
-        "openai": "https://api.openai.com/v1",
-        "openrouter": "https://openrouter.ai/api/v1",
-        "ollama": "http://127.0.0.1:11434",
-    }
-    return defaults.get(provider, "")
+def _default_api_base(provider: str, config: Config | None = None) -> str:
+    """Return provider default API base from config's [providers] section."""
+    if config is None:
+        config = get_config()
+    return config.provider_api_bases.get(provider, "")
 
 
 def _api_key_for_provider(config: Config, provider: str) -> str | None:
@@ -102,9 +98,12 @@ def _build_single_orchestration_model(
             model_name=model, provider=provider_obj, settings=settings
         )
     if provider_name == "ollama":
+        ollama_base = api_base or _default_api_base("ollama", config)
         provider_obj = OpenAIProvider(
             api_key="ollama",
-            base_url=api_base or "http://127.0.0.1:11434/v1",
+            base_url=f"{ollama_base}/v1"
+            if not ollama_base.endswith("/v1")
+            else ollama_base,
         )
         return OpenAIChatModel(model_name=model, provider=provider_obj)
     if provider_name in {"zai", "openai"}:

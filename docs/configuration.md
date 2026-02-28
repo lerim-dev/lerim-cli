@@ -22,11 +22,40 @@ export ZAI_API_KEY="..."                # ZAI provider
 export ANTHROPIC_API_KEY="..."          # Anthropic provider (optional)
 ```
 
+## Agents and projects
+
+The `[agents]` section declares connected coding agent platforms.
+The `[projects]` section declares which repositories Lerim tracks.
+
+These are written by `lerim init` and `lerim project add` — you can also edit
+them directly.
+
+```toml
+[agents]
+claude = "~/.claude/projects"
+# codex = "~/.codex/sessions"
+# cursor = "~/Library/Application Support/Cursor/User/globalStorage"
+# opencode = "~/.local/share/opencode"
+
+[projects]
+my-app = "~/codes/my-app"
+backend = "~/work/backend"
+```
+
+When running in Docker (`lerim up`), these paths determine the volume mounts.
+Adding or removing a project restarts the container to update mounts.
+
 ## Default configuration
 
 The full default config shipped with the package:
 
 ```toml
+[agents]
+# Written by `lerim init` — detected agent platforms
+
+[projects]
+# Written by `lerim project add` — tracked repositories
+
 [data]
 dir = "~/.lerim"
 

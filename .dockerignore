@@ -1,0 +1,16 @@
+.git
+.venv
+__pycache__
+*.pyc
+.ruff_cache
+.pytest_cache
+.mypy_cache
+dist
+build
+*.egg-info
+node_modules
+.lerim/
+tests/
+specs/
+dev-docs/
+dashboard/node_modules

@@ -1,11 +1,19 @@
-"""Command-line interface for Lerim runtime, memory, and service operations."""
+"""Command-line interface for Lerim runtime, memory, and service operations.
+
+Service commands (chat, sync, maintain, status) are thin HTTP clients that
+talk to a running Lerim server (started via ``lerim up`` or ``lerim serve``).
+Host-only commands (init, project, up, down, logs, connect, memory, daemon)
+run locally and never require an HTTP server.
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
-from dataclasses import asdict
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -16,32 +24,31 @@ from lerim import __version__
 from lerim.adapters.registry import (
     KNOWN_PLATFORMS,
     connect_platform,
-    get_connected_agents,
     list_platforms,
     load_platforms,
     remove_platform,
 )
-from lerim.app.arg_utils import (
-    parse_agent_filter,
-    parse_csv,
-    parse_duration_to_seconds,
+from lerim.app.api import (
+    COMPOSE_PATH,
+    api_project_add,
+    api_project_list,
+    api_project_remove,
+    api_up,
+    api_down,
+    detect_agents,
+    docker_available,
+    is_container_running,
+    list_memory_files,
+    write_init_config,
 )
-from lerim.app.dashboard import run_dashboard_server
-from lerim.app.daemon import resolve_window_bounds, run_maintain_once, run_sync_once
+from lerim.app.arg_utils import parse_csv
 from lerim.app.daemon import run_daemon_forever, run_daemon_once
 from lerim.config.project_scope import resolve_data_dirs
 from lerim.config.logging import configure_logging
-from lerim.config.settings import get_config
+from lerim.config.settings import get_config, USER_CONFIG_PATH
 from lerim.config.tracing import configure_tracing
 from lerim.memory.memory_repo import build_memory_paths, reset_memory_root
 from lerim.memory.memory_record import MemoryRecord, MemoryType, memory_folder, slugify
-from lerim.runtime.agent import LerimAgent
-from lerim.runtime.prompts.chat import build_chat_prompt, looks_like_auth_error
-from lerim.sessions.catalog import (
-    count_fts_indexed,
-    count_session_jobs_by_status,
-    latest_service_run,
-)
 
 
 def _emit(message: object = "", *, file: Any | None = None) -> None:
@@ -60,21 +67,49 @@ def _emit_structured(*, title: str, payload: dict[str, Any], as_json: bool) -> N
         _emit(f"- {key}: {value}")
 
 
+def _not_running() -> int:
+    """Print an error that the Lerim server is not reachable and return exit 1."""
+    _emit(
+        "Lerim is not running. Start with: lerim up (Docker) or lerim serve (direct)",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _api_get(path: str) -> dict[str, Any] | None:
+    """GET from the running Lerim server. Returns None if not reachable."""
+    config = get_config()
+    url = f"http://localhost:{config.server_port}{path}"
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode())
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return None
+
+
+def _api_post(path: str, body: dict[str, Any]) -> dict[str, Any] | None:
+    """POST JSON to the running Lerim server. Returns None if not reachable."""
+    config = get_config()
+    url = f"http://localhost:{config.server_port}{path}"
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode(),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            return json.loads(resp.read().decode())
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return None
+
+
 def _hoist_global_json_flag(raw: list[str]) -> list[str]:
     """Allow ``--json`` before or after subcommands by normalizing argv order."""
     if "--json" not in raw:
         return raw
     return ["--json"] + [item for item in raw if item != "--json"]
-
-
-def _list_memory_files(memory_dir: Path) -> list[Path]:
-    """List all markdown files in canonical memory primitive folders."""
-    paths: list[Path] = []
-    for mtype in MemoryType:
-        folder = memory_dir / memory_folder(mtype)
-        if folder.exists():
-            paths.extend(sorted(folder.rglob("*.md")))
-    return paths
 
 
 def _read_memory_frontmatter(path: Path) -> dict[str, Any] | None:
@@ -162,47 +197,32 @@ def _cmd_connect(args: argparse.Namespace) -> int:
 
 
 def _cmd_sync(args: argparse.Namespace) -> int:
-    """Run one sync command invocation and print summary output."""
-    config = get_config()
-    try:
-        window_start, window_end = resolve_window_bounds(
-            window=args.window,
-            since_raw=args.since,
-            until_raw=args.until,
-            parse_duration_to_seconds=parse_duration_to_seconds,
-        )
-    except ValueError as exc:
-        _emit(str(exc), file=sys.stderr)
-        return 2
-
-    max_sessions = (
-        args.max_sessions if args.max_sessions is not None else config.sync_max_sessions
-    )
-    code, summary = run_sync_once(
-        run_id=args.run_id,
-        agent_filter=parse_agent_filter(args.agent),
-        no_extract=args.no_extract,
-        force=args.force,
-        max_sessions=max_sessions,
-        dry_run=args.dry_run,
-        ignore_lock=args.ignore_lock,
-        trigger="manual",
-        window_start=window_start,
-        window_end=window_end,
-    )
-    payload = asdict(summary)
-    _emit_structured(title="Sync summary:", payload=payload, as_json=args.json)
-    return code
+    """Forward sync request to the running Lerim server."""
+    body: dict[str, Any] = {
+        "agent": getattr(args, "agent", None),
+        "window": getattr(args, "window", None),
+        "max_sessions": getattr(args, "max_sessions", None),
+        "force": getattr(args, "force", False),
+        "dry_run": getattr(args, "dry_run", False),
+    }
+    data = _api_post("/api/sync", body)
+    if data is None:
+        return _not_running()
+    _emit_structured(title="Sync:", payload=data, as_json=args.json)
+    return 0
 
 
 def _cmd_maintain(args: argparse.Namespace) -> int:
-    """Run one maintain command invocation and print summary output."""
-    code, payload = run_maintain_once(
-        force=args.force,
-        dry_run=args.dry_run,
-    )
-    _emit_structured(title="Maintain summary:", payload=payload, as_json=args.json)
-    return code
+    """Forward maintain request to the running Lerim server."""
+    body = {
+        "force": getattr(args, "force", False),
+        "dry_run": getattr(args, "dry_run", False),
+    }
+    data = _api_post("/api/maintain", body)
+    if data is None:
+        return _not_running()
+    _emit_structured(title="Maintain:", payload=data, as_json=args.json)
+    return 0
 
 
 def _cmd_daemon(args: argparse.Namespace) -> int:
@@ -218,8 +238,12 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
 
 
 def _cmd_dashboard(args: argparse.Namespace) -> int:
-    """Run the dashboard server with provided host/port args."""
-    return run_dashboard_server(host=args.host, port=args.port)
+    """Print the dashboard URL (dashboard is served by lerim serve)."""
+    config = get_config()
+    port = args.port or config.server_port or 8765
+    _emit(f"Dashboard: http://localhost:{port}")
+    _emit("The dashboard is served by `lerim serve` (or `lerim up` for Docker).")
+    return 0
 
 
 def search_memory(
@@ -229,7 +253,7 @@ def search_memory(
 ) -> list[dict[str, Any]]:
     """Search memory by keyword tokens with file-scan approach."""
     config = get_config()
-    files = _list_memory_files(config.memory_dir)
+    files = list_memory_files(config.memory_dir)
     all_fm: list[dict[str, Any]] = []
     for path in files:
         fm = _read_memory_frontmatter(path)
@@ -269,7 +293,7 @@ def _cmd_memory_search(args: argparse.Namespace) -> int:
 def _cmd_memory_list(args: argparse.Namespace) -> int:
     """List recent memories, optionally filtered by project."""
     config = get_config()
-    files = _list_memory_files(config.memory_dir)
+    files = list_memory_files(config.memory_dir)
     items: list[dict[str, Any]] = []
     for path in files:
         fm = _read_memory_frontmatter(path)
@@ -319,7 +343,7 @@ def _cmd_memory_add(args: argparse.Namespace) -> int:
 def _cmd_memory_export(args: argparse.Namespace) -> int:
     """Export memories as Markdown or JSON to stdout or a file."""
     config = get_config()
-    files = _list_memory_files(config.memory_dir)
+    files = list_memory_files(config.memory_dir)
     items: list[dict[str, Any]] = []
     for path in files:
         fm = _read_memory_frontmatter(path)
@@ -353,36 +377,17 @@ def _cmd_memory_export(args: argparse.Namespace) -> int:
 
 
 def _cmd_chat(args: argparse.Namespace) -> int:
-    """Run one chat query against the runtime agent."""
-    config = get_config()
-    memory_root = str(config.memory_dir)
-    hits: list[dict[str, Any]] = []
-    context_docs: list[dict[str, Any]] = []
-    prompt = build_chat_prompt(
-        args.question, hits, context_docs, memory_root=memory_root
-    )
-    agent = LerimAgent()
-    response, session_id = agent.chat(
-        prompt, cwd=str(Path.cwd()), memory_root=memory_root
-    )
-    if looks_like_auth_error(response):
-        _emit(response, file=sys.stderr)
+    """Forward chat query to the running Lerim server."""
+    data = _api_post("/api/chat", {"question": args.question, "limit": args.limit})
+    if data is None:
+        return _not_running()
+    if data.get("error"):
+        _emit(data.get("answer", "Error"), file=sys.stderr)
         return 1
     if args.json:
-        _emit(
-            json.dumps(
-                {
-                    "response": response,
-                    "agent_session_id": session_id,
-                    "memory_ids": [fm.get("id", "") for fm in hits],
-                    "fallback_used": False,
-                },
-                indent=2,
-                ensure_ascii=True,
-            )
-        )
+        _emit(json.dumps(data, indent=2, ensure_ascii=True))
     else:
-        _emit(response)
+        _emit(data.get("answer", ""))
     return 0
 
 
@@ -428,27 +433,209 @@ def _cmd_memory_reset(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
-    """Print runtime status summary across memory, queue, and services."""
-    config = get_config()
-    memory_count = len(_list_memory_files(config.memory_dir))
-    payload = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "connected_agents": get_connected_agents(config.platforms_path),
-        "platforms": list_platforms(config.platforms_path),
-        "memory_count": memory_count,
-        "sessions_indexed_count": count_fts_indexed(),
-        "queue": count_session_jobs_by_status(),
-        "latest_sync": latest_service_run("sync"),
-        "latest_maintain": latest_service_run("maintain"),
-    }
+    """Forward status request to the running Lerim server."""
+    data = _api_get("/api/status")
+    if data is None:
+        return _not_running()
     if args.json:
-        _emit(json.dumps(payload, indent=2, ensure_ascii=True))
+        _emit(json.dumps(data, indent=2, ensure_ascii=True))
     else:
         _emit("Lerim status:")
-        _emit(f"- connected_agents: {len(payload['connected_agents'])}")
-        _emit(f"- memory_count: {payload['memory_count']}")
-        _emit(f"- sessions_indexed_count: {payload['sessions_indexed_count']}")
-        _emit(f"- queue: {payload['queue']}")
+        _emit(f"- connected_agents: {len(data.get('connected_agents', []))}")
+        _emit(f"- memory_count: {data.get('memory_count', 0)}")
+        _emit(f"- sessions_indexed_count: {data.get('sessions_indexed_count', 0)}")
+        _emit(f"- queue: {data.get('queue', {})}")
+    return 0
+
+
+def _cmd_init(args: argparse.Namespace) -> int:
+    """Interactive setup wizard that writes ~/.lerim/config.toml."""
+    _emit("Welcome to Lerim.\n")
+    _emit("Which coding agents do you use?")
+
+    detected = detect_agents()
+    selected: dict[str, str] = {}
+    for name, info in detected.items():
+        exists = info["exists"]
+        marker = "detected" if exists else "not found"
+        answer = (
+            input(f"  {name} ({marker}) [{'Y/n' if exists else 'y/N'}]: ")
+            .strip()
+            .lower()
+        )
+        if (exists and answer != "n") or (not exists and answer == "y"):
+            selected[name] = info["path"]
+
+    if selected:
+        write_init_config(selected)
+        _emit(f"\nConfig written to {USER_CONFIG_PATH}")
+        _emit(f"Agents: {', '.join(selected.keys())}")
+    else:
+        _emit("\nNo agents selected. You can add them later by editing:")
+        _emit(f"  {USER_CONFIG_PATH}")
+
+    # Check Docker
+    if docker_available():
+        _emit("\nDocker: found")
+    else:
+        _emit("\nDocker: not found")
+        _emit("  Install Docker to use `lerim up` (recommended).")
+        _emit("  Or run `lerim serve` directly without Docker.")
+
+    _emit("\nNext steps:")
+    _emit("  lerim project add /path/to/repo   # register a project")
+    _emit("  lerim up                           # start the Docker service")
+    return 0
+
+
+def _cmd_project(args: argparse.Namespace) -> int:
+    """Dispatch project subcommands."""
+    action = getattr(args, "project_action", None)
+    if not action:
+        _emit("Usage: lerim project {add,list,remove}", file=sys.stderr)
+        return 2
+
+    if action == "list":
+        projects = api_project_list()
+        if args.json:
+            _emit(json.dumps(projects, indent=2, ensure_ascii=True))
+            return 0
+        if not projects:
+            _emit("No projects registered.")
+            return 0
+        _emit(f"Registered projects: {len(projects)}")
+        for p in projects:
+            status = "ok" if p["exists"] else "missing"
+            lerim = " .lerim/" if p["has_lerim"] else ""
+            _emit(f"  {p['name']}: {p['path']} ({status}{lerim})")
+        return 0
+
+    if action == "add":
+        path_str = getattr(args, "path", None)
+        if not path_str:
+            _emit("Usage: lerim project add <path>", file=sys.stderr)
+            return 2
+        result = api_project_add(path_str)
+        if result.get("error"):
+            _emit(result["error"], file=sys.stderr)
+            return 1
+        _emit(f'Added project "{result["name"]}" ({result["path"]})')
+        _emit(f"Created {result['path']}/.lerim/")
+        # Restart container if running
+        if is_container_running():
+            _emit("Restarting Lerim to mount new project...")
+            api_up()
+            _emit("Done.")
+        return 0
+
+    if action == "remove":
+        name = getattr(args, "name", None)
+        if not name:
+            _emit("Usage: lerim project remove <name>", file=sys.stderr)
+            return 2
+        result = api_project_remove(name)
+        if result.get("error"):
+            _emit(result["error"], file=sys.stderr)
+            return 1
+        _emit(f'Removed project "{name}"')
+        if is_container_running():
+            _emit("Restarting Lerim...")
+            api_up()
+            _emit("Done.")
+        return 0
+
+    _emit("Usage: lerim project {add,list,remove}", file=sys.stderr)
+    return 2
+
+
+def _cmd_up(args: argparse.Namespace) -> int:
+    """Start the Docker container."""
+    config = get_config()
+    _emit(
+        f"Starting Lerim with {len(config.projects)} projects and {len(config.agents)} agents..."
+    )
+    result = api_up()
+    if result.get("error"):
+        _emit(result["error"], file=sys.stderr)
+        return 1
+    _emit(f"Lerim is running at http://localhost:{config.server_port}")
+    return 0
+
+
+def _cmd_down(args: argparse.Namespace) -> int:
+    """Stop the Docker container."""
+    result = api_down()
+    if result.get("error"):
+        _emit(result["error"], file=sys.stderr)
+        return 1
+    _emit("Lerim stopped.")
+    return 0
+
+
+def _cmd_logs(args: argparse.Namespace) -> int:
+    """Tail Docker container logs."""
+    if not COMPOSE_PATH.exists():
+        _emit("No compose file found. Run `lerim up` first.", file=sys.stderr)
+        return 1
+    cmd = ["docker", "compose", "-f", str(COMPOSE_PATH), "logs"]
+    if args.follow:
+        cmd.append("--follow")
+    try:
+        subprocess.run(cmd)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """Start HTTP API + dashboard + daemon loop in one process."""
+    import signal
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from lerim.app.dashboard import DashboardHandler
+    from lerim.sessions.catalog import init_sessions_db
+
+    config = get_config()
+    host = args.host or config.server_host or "0.0.0.0"
+    port = int(args.port or config.server_port or 8765)
+
+    init_sessions_db()
+    httpd = ThreadingHTTPServer((host, port), DashboardHandler)
+
+    stop_event = threading.Event()
+
+    def _daemon_loop() -> None:
+        """Background daemon loop running sync + maintain cycles."""
+        from lerim.config.logging import logger
+
+        interval = max(config.poll_interval_minutes * 60, 30)
+        while not stop_event.is_set():
+            try:
+                run_daemon_once()
+            except Exception as exc:
+                logger.warning("daemon cycle error: {}", exc)
+            stop_event.wait(interval)
+
+    daemon_thread = threading.Thread(
+        target=_daemon_loop, name="lerim-daemon", daemon=True
+    )
+    daemon_thread.start()
+
+    def _shutdown(signum: int, frame: Any) -> None:
+        """Handle graceful shutdown on SIGTERM/SIGINT."""
+        stop_event.set()
+        httpd.shutdown()
+
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT, _shutdown)
+
+    from lerim.config.logging import logger
+
+    logger.info("Lerim serve running at http://{}:{}/", host, port)
+    httpd.serve_forever()
+    stop_event.set()
+    daemon_thread.join(timeout=5)
     return 0
 
 
@@ -645,18 +832,13 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard = sub.add_parser(
         "dashboard",
         formatter_class=_F,
-        help="Start local read-only dashboard web server",
+        help="Show dashboard URL",
         description=(
-            "Launch a local HTTP dashboard to browse memories, sessions, and status.\n"
-            "Opens a read-only web UI -- no writes are performed.\n\n"
+            "Print the dashboard URL. The dashboard is served by `lerim serve`\n"
+            "(or `lerim up` for Docker). No separate server is started.\n\n"
             "Examples:\n"
-            "  lerim dashboard                          # start on default host/port\n"
-            "  lerim dashboard --host 0.0.0.0 --port 9000  # custom bind address"
+            "  lerim dashboard"
         ),
-    )
-    dashboard.add_argument(
-        "--host",
-        help="Bind address for the dashboard server (default: 127.0.0.1 or config value).",
     )
     dashboard.add_argument(
         "--port",
@@ -874,6 +1056,118 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status.set_defaults(func=_cmd_status)
 
+    # ── init ─────────────────────────────────────────────────────────
+    init = sub.add_parser(
+        "init",
+        formatter_class=_F,
+        help="Interactive setup wizard",
+        description=(
+            "Run the interactive setup wizard. Detects available coding agents,\n"
+            "lets you select which ones to use, and writes ~/.lerim/config.toml.\n\n"
+            "Examples:\n"
+            "  lerim init"
+        ),
+    )
+    init.set_defaults(func=_cmd_init)
+
+    # ── project ──────────────────────────────────────────────────────
+    project = sub.add_parser(
+        "project",
+        formatter_class=_F,
+        help="Manage registered projects (add, list, remove)",
+        description=(
+            "Register, list, or remove projects.\n"
+            "Registered projects are mounted into the Docker container.\n\n"
+            "Subcommands:\n"
+            "  add <path>    Register a project directory\n"
+            "  list          Show registered projects\n"
+            "  remove <name> Unregister a project"
+        ),
+    )
+    project_sub = project.add_subparsers(dest="project_action")
+
+    proj_add = project_sub.add_parser(
+        "add",
+        formatter_class=_F,
+        help="Register a project directory",
+    )
+    proj_add.add_argument("path", help="Path to the project directory.")
+
+    project_sub.add_parser(
+        "list",
+        formatter_class=_F,
+        help="List registered projects",
+    )
+
+    proj_remove = project_sub.add_parser(
+        "remove",
+        formatter_class=_F,
+        help="Unregister a project",
+    )
+    proj_remove.add_argument("name", help="Short name of the project to remove.")
+
+    project.set_defaults(func=_cmd_project)
+
+    # ── up ───────────────────────────────────────────────────────────
+    up = sub.add_parser(
+        "up",
+        formatter_class=_F,
+        help="Start the Docker container",
+        description=(
+            "Read ~/.lerim/config.toml, generate docker-compose.yml with volume\n"
+            "mounts for agents and projects, and start the container.\n\n"
+            "Examples:\n"
+            "  lerim up"
+        ),
+    )
+    up.set_defaults(func=_cmd_up)
+
+    # ── down ─────────────────────────────────────────────────────────
+    down = sub.add_parser(
+        "down",
+        formatter_class=_F,
+        help="Stop the Docker container",
+        description="Stop the running Lerim Docker container.\n\nExamples:\n  lerim down",
+    )
+    down.set_defaults(func=_cmd_down)
+
+    # ── logs ─────────────────────────────────────────────────────────
+    logs = sub.add_parser(
+        "logs",
+        formatter_class=_F,
+        help="Tail Docker container logs",
+        description=(
+            "View the Lerim Docker container logs.\n\n"
+            "Examples:\n"
+            "  lerim logs\n"
+            "  lerim logs --follow"
+        ),
+    )
+    logs.add_argument(
+        "--follow",
+        "-f",
+        action="store_true",
+        help="Follow log output (like tail -f).",
+    )
+    logs.set_defaults(func=_cmd_logs)
+
+    # ── serve ────────────────────────────────────────────────────────
+    serve = sub.add_parser(
+        "serve",
+        formatter_class=_F,
+        help="Start HTTP API + dashboard + daemon loop (Docker entrypoint)",
+        description=(
+            "Combined server: HTTP API + dashboard + background daemon loop\n"
+            "in one process. This is the Docker container entrypoint.\n\n"
+            "Examples:\n"
+            "  lerim serve\n"
+            "  lerim serve --host 0.0.0.0 --port 8765"
+        ),
+    )
+    serve.add_argument("--host", help="Bind address (default: 0.0.0.0).")
+    serve.add_argument("--port", type=int, help="Bind port (default: 8765).")
+    serve.set_defaults(func=_cmd_serve)
+
     return parser
 
 
@@ -889,6 +1183,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "memory" and not getattr(args, "memory_command", None):
+        parser.parse_args([args.command, "--help"])
+        return 0
+
+    if args.command == "project" and not getattr(args, "project_action", None):
         parser.parse_args([args.command, "--help"])
         return 0
 
