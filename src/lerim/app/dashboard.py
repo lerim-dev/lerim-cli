@@ -36,7 +36,6 @@ from lerim.config.settings import (
     get_config,
     get_config_sources,
     get_user_config_path,
-    reload_config,
     save_config_patch,
 )
 from lerim.memory.extract_pipeline import build_extract_report

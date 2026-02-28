@@ -29,7 +29,6 @@ from lerim.adapters.registry import (
     remove_platform,
 )
 from lerim.app.api import (
-    AGENT_DEFAULT_PATHS,
     COMPOSE_PATH,
     api_project_add,
     api_project_list,
@@ -1094,7 +1093,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     proj_add.add_argument("path", help="Path to the project directory.")
 
-    proj_list = project_sub.add_parser(
+    project_sub.add_parser(
         "list",
         formatter_class=_F,
         help="List registered projects",

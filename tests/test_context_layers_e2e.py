@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from tests.helpers import make_config, run_cli_json
+from tests.helpers import run_cli_json
 
 
 @pytest.mark.e2e

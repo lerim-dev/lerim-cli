@@ -7,7 +7,6 @@ management so both the argparse CLI and the HTTP API call the same code.
 from __future__ import annotations
 
 import subprocess
-import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,11 +14,8 @@ from typing import Any
 
 from lerim import __version__
 from lerim.adapters.registry import (
-    KNOWN_PLATFORMS,
     connect_platform,
     list_platforms,
-    load_platforms,
-    remove_platform,
 )
 from lerim.app.arg_utils import parse_agent_filter, parse_duration_to_seconds
 from lerim.app.daemon import (
