@@ -16,7 +16,7 @@ pip install lerim
 
 ## 2. Set up API keys
 
-Lerim needs an LLM provider for extraction and chat. Set at least one:
+Lerim needs an LLM provider for extraction and querying. Set at least one:
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-..."   # default provider

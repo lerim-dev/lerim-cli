@@ -36,7 +36,7 @@ always run on the host.
 - `maintain`
 - `daemon`
 - `dashboard`
-- `memory` (`search`, `list`, `add`, `export`, `reset`)
+- `memory` (`search`, `list`, `add`, `reset`)
 - `ask`
 - `status`
 
@@ -286,7 +286,7 @@ lerim ask "How is the database configured?" --limit 5
 | `--limit` | `12` | Max memory items as context |
 
 Notes:
-- Chat uses memory retrieval evidence.
+- Ask uses memory retrieval evidence.
 - If provider auth fails, CLI returns exit code 1.
 
 ### `lerim status`

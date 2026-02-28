@@ -778,7 +778,7 @@ def build_parser() -> argparse.ArgumentParser:
     memory = sub.add_parser(
         "memory",
         formatter_class=_F,
-        help="Memory store operations (search, list, add, export, reset)",
+        help="Memory store operations (search, list, add, reset)",
         description=(
             "Subcommands for managing the memory store directly.\n"
             "Memories are stored as markdown files in .lerim/memory/.\n\n"
@@ -786,7 +786,6 @@ def build_parser() -> argparse.ArgumentParser:
             "  search   Search memories by keyword\n"
             "  list     List recent memory items\n"
             "  add      Create a new memory manually\n"
-            "  export   Export all memories to file or stdout\n"
             "  reset    Destructive wipe of memory data"
         ),
     )

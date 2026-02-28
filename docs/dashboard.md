@@ -72,7 +72,7 @@ Changes are saved to `~/.lerim/config.toml`.
 ## HTTP API
 
 The dashboard server also exposes a JSON API used by the thin CLI and skills.
-Key endpoints include `/api/health`, `/api/chat`, `/api/sync`, `/api/maintain`,
+Key endpoints include `/api/health`, `/api/ask`, `/api/sync`, `/api/maintain`,
 `/api/memories`, `/api/search`, and `/api/status`. See [Architecture](architecture.md)
 for the full endpoint list.
 

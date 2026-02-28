@@ -53,7 +53,7 @@ flowchart TD
     C --> P["Runtime write-boundary checks"]
 
     F --> H["Files Search (default)"]
-    H --> L["chat / memory search"]
+    H --> L["ask / memory search"]
 
     M["maintain"] --> N["Agent-led: scan, merge, archive, consolidate, report"]
 
@@ -177,7 +177,7 @@ Key endpoints:
 |--------|----------|---------|
 | GET | `/api/health` | Health check (Docker HEALTHCHECK + CLI detection) |
 | GET | `/api/status` | Runtime state |
-| POST | `/api/chat` | Query memories |
+| POST | `/api/ask` | Query memories |
 | POST | `/api/sync` | Trigger sync |
 | POST | `/api/maintain` | Trigger maintenance |
 | GET | `/api/memories` | List memories |
