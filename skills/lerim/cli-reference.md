@@ -169,20 +169,23 @@ lerim maintain --dry-run      # preview only, no writes
 
 ### `lerim daemon`
 
-Runs a continuous loop: sync (index + extract) then maintain (refine),
-repeating at a configurable interval. Sessions are processed in parallel
-using a thread pool (configurable via `sync_max_workers`, default 4).
+Runs a continuous loop with independent sync and maintain intervals.
+Sync (hot path) runs frequently; maintain (cold path) runs less often.
+Sessions are processed in parallel using a thread pool (configurable
+via `sync_max_workers`, default 4).
 
 ```bash
-lerim daemon                     # run forever with default poll interval (30 min)
+lerim daemon                     # run forever (sync every 10 min, maintain every 60 min)
 lerim daemon --once              # run one sync+maintain cycle and exit
-lerim daemon --poll-seconds 120  # poll every 2 minutes
+lerim daemon --poll-seconds 120  # override both intervals uniformly to 2 minutes
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--once` | off | Run one cycle and exit |
-| `--poll-seconds` | config `poll_interval_minutes` (`30` min) | Seconds between cycles (minimum 30s) |
+| `--poll-seconds` | -- | Override both sync and maintain intervals uniformly (seconds, minimum 30s) |
+
+Default intervals from config: `sync_interval_minutes` (10) and `maintain_interval_minutes` (60).
 
 ### `lerim dashboard`
 

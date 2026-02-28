@@ -595,16 +595,69 @@ def run_daemon_once(max_sessions: int | None = None) -> dict:
 
 
 def run_daemon_forever(poll_seconds: int | None = None) -> None:
-    """Run daemon loop continuously using configured or explicit poll interval."""
+    """Run daemon loop with independent sync and maintain intervals.
+
+    When *poll_seconds* is given (e.g. via ``--poll-seconds``), both intervals
+    are overridden uniformly so the caller gets a single predictable cadence.
+    Otherwise ``sync_interval_minutes`` and ``maintain_interval_minutes`` from
+    config drive each path independently.
+    """
     config = get_config()
-    interval = (
-        poll_seconds
-        if poll_seconds and poll_seconds > 0
-        else max(config.poll_interval_minutes * 60, 30)
-    )
+
+    if poll_seconds and poll_seconds > 0:
+        sync_interval = poll_seconds
+        maintain_interval = poll_seconds
+    else:
+        sync_interval = max(config.sync_interval_minutes * 60, 30)
+        maintain_interval = max(config.maintain_interval_minutes * 60, 30)
+
+    last_sync = 0.0
+    last_maintain = 0.0
+
     while True:
-        run_daemon_once()
-        time.sleep(interval)
+        now = time.monotonic()
+
+        if now - last_sync >= sync_interval:
+            _run_sync_cycle()
+            last_sync = time.monotonic()
+
+        if now - last_maintain >= maintain_interval:
+            _run_maintain_cycle()
+            last_maintain = time.monotonic()
+
+        # Sleep until the next task is due.
+        next_sync = last_sync + sync_interval
+        next_maintain = last_maintain + maintain_interval
+        sleep_for = max(1.0, min(next_sync, next_maintain) - time.monotonic())
+        time.sleep(sleep_for)
+
+
+def _run_sync_cycle() -> tuple[int, SyncSummary]:
+    """Execute one sync cycle using current config window bounds."""
+    config = get_config()
+    window_start, window_end = resolve_window_bounds(
+        window=f"{config.sync_window_days}d",
+        since_raw=None,
+        until_raw=None,
+        parse_duration_to_seconds=parse_duration_to_seconds,
+    )
+    return run_sync_once(
+        run_id=None,
+        agent_filter=None,
+        no_extract=False,
+        force=False,
+        max_sessions=config.sync_max_sessions,
+        dry_run=False,
+        ignore_lock=False,
+        trigger="daemon",
+        window_start=window_start,
+        window_end=window_end,
+    )
+
+
+def _run_maintain_cycle() -> tuple[int, dict]:
+    """Execute one maintain cycle."""
+    return run_maintain_once(force=False, dry_run=False)
 
 
 if __name__ == "__main__":

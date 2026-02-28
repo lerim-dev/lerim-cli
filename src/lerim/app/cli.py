@@ -12,6 +12,7 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -39,7 +40,13 @@ from lerim.app.api import (
     write_init_config,
 )
 from lerim.app.arg_utils import parse_csv
-from lerim.app.daemon import run_daemon_forever, run_daemon_once
+from lerim.app.daemon import (
+    run_daemon_forever,
+    run_daemon_once,
+    run_maintain_once,
+    run_sync_once,
+    resolve_window_bounds,
+)
 from lerim.config.project_scope import resolve_data_dirs
 from lerim.config.logging import configure_logging
 from lerim.config.settings import get_config, USER_CONFIG_PATH
@@ -527,16 +534,54 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     stop_event = threading.Event()
 
     def _daemon_loop() -> None:
-        """Background daemon loop running sync + maintain cycles."""
+        """Background daemon loop with independent sync and maintain intervals."""
+        from lerim.app.arg_utils import parse_duration_to_seconds as _parse_dur
         from lerim.config.logging import logger
 
-        interval = max(config.poll_interval_minutes * 60, 30)
+        sync_interval = max(config.sync_interval_minutes * 60, 30)
+        maintain_interval = max(config.maintain_interval_minutes * 60, 30)
+
+        last_sync = 0.0
+        last_maintain = 0.0
+
         while not stop_event.is_set():
-            try:
-                run_daemon_once()
-            except Exception as exc:
-                logger.warning("daemon cycle error: {}", exc)
-            stop_event.wait(interval)
+            now = time.monotonic()
+
+            if now - last_sync >= sync_interval:
+                try:
+                    window_start, window_end = resolve_window_bounds(
+                        window=f"{config.sync_window_days}d",
+                        since_raw=None,
+                        until_raw=None,
+                        parse_duration_to_seconds=_parse_dur,
+                    )
+                    run_sync_once(
+                        run_id=None,
+                        agent_filter=None,
+                        no_extract=False,
+                        force=False,
+                        max_sessions=config.sync_max_sessions,
+                        dry_run=False,
+                        ignore_lock=False,
+                        trigger="daemon",
+                        window_start=window_start,
+                        window_end=window_end,
+                    )
+                except Exception as exc:
+                    logger.warning("daemon sync error: {}", exc)
+                last_sync = time.monotonic()
+
+            if now - last_maintain >= maintain_interval:
+                try:
+                    run_maintain_once(force=False, dry_run=False)
+                except Exception as exc:
+                    logger.warning("daemon maintain error: {}", exc)
+                last_maintain = time.monotonic()
+
+            next_sync = last_sync + sync_interval
+            next_maintain = last_maintain + maintain_interval
+            sleep_for = max(1.0, min(next_sync, next_maintain) - time.monotonic())
+            stop_event.wait(sleep_for)
 
     daemon_thread = threading.Thread(
         target=_daemon_loop, name="lerim-daemon", daemon=True
@@ -751,7 +796,7 @@ def build_parser() -> argparse.ArgumentParser:
     daemon.add_argument(
         "--poll-seconds",
         type=int,
-        help="Seconds between cycles. Overrides config poll_interval_minutes. Minimum 30s.",
+        help="Override both sync and maintain intervals uniformly (seconds). Minimum 30s.",
     )
     daemon.set_defaults(func=_cmd_daemon)
 
