@@ -1,11 +1,11 @@
-"""Chat prompt builder and auth-error helper for LerimAgent chat flow."""
+"""Ask prompt builder and auth-error helper for LerimAgent ask flow."""
 
 from __future__ import annotations
 
 from typing import Any
 
 
-def build_chat_prompt(
+def build_ask_prompt(
     question: str,
     hits: list[dict[str, Any]],
     context_docs: list[dict[str, Any]],
@@ -84,7 +84,7 @@ def looks_like_auth_error(response: str) -> bool:
 
 
 if __name__ == "__main__":
-    prompt = build_chat_prompt(
+    prompt = build_ask_prompt(
         "how to deploy",
         [
             {
@@ -101,17 +101,17 @@ if __name__ == "__main__":
     assert "doc-1" in prompt
 
     # With memory_root — should include search guidance
-    prompt_mr = build_chat_prompt("test", [], [], memory_root="/tmp/test/memory")
+    prompt_mr = build_ask_prompt("test", [], [], memory_root="/tmp/test/memory")
     assert "Memory root: /tmp/test/memory" in prompt_mr
     assert "grep" in prompt_mr
     assert "decisions/*.md" in prompt_mr
 
     # Without memory_root — no guidance block
-    prompt_no = build_chat_prompt("test", [], [])
+    prompt_no = build_ask_prompt("test", [], [])
     assert "Memory root" not in prompt_no
 
     assert looks_like_auth_error("Failed to authenticate with provider")
     assert looks_like_auth_error("authentication_error: invalid key")
     assert not looks_like_auth_error("All good")
 
-    print("chat prompt: all self-tests passed")
+    print("ask prompt: all self-tests passed")

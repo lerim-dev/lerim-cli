@@ -209,12 +209,12 @@ class LerimAgent:
     def _build_lead_agent(self, mode: str) -> Agent[RuntimeToolContext, str]:
         """Build one lead PydanticAI agent with mode-specific tool registration."""
         mode_tools = {
-            "chat": CHAT_TOOLS,
+            "ask": CHAT_TOOLS,
             "sync": SYNC_TOOLS,
             "maintain": MAINTAIN_TOOLS,
         }
         allowed_tools = set(
-            self.single_tools if mode == "chat" else mode_tools.get(mode, CHAT_TOOLS)
+            self.single_tools if mode == "ask" else mode_tools.get(mode, CHAT_TOOLS)
         )
 
         instructions = f"""\
@@ -449,14 +449,14 @@ Always use tools to read/write files and produce concise completion output."""
         """Validate maintain payload against stable public contract."""
         return MaintainResultContract.model_validate(payload).model_dump(mode="json")
 
-    def chat(
+    def ask(
         self,
         prompt: str,
         session_id: str | None = None,
         cwd: str | None = None,
         memory_root: str | Path | None = None,
     ) -> tuple[str, str]:
-        """Run one chat prompt via lead runtime agent."""
+        """Run one ask prompt via lead runtime agent."""
         runtime_cwd = (
             Path(cwd or self._default_cwd or str(Path.cwd())).expanduser().resolve()
         )
@@ -476,7 +476,7 @@ Always use tools to read/write files and produce concise completion output."""
         )
         response, resolved_session = self._run_agent_once(
             prompt=prompt,
-            mode="chat",
+            mode="ask",
             context=context,
         )
         return response, (session_id or resolved_session)

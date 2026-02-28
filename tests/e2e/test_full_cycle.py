@@ -42,8 +42,8 @@ def test_reset_sync_chat_cycle(tmp_path):
     )
     assert isinstance(sync_result, dict)
 
-    # Chat
-    response, _ = agent.chat(
+    # Ask
+    response, _ = agent.ask(
         "What was discussed about authentication?",
         memory_root=tmp_path,
     )

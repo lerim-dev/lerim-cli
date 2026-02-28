@@ -14,7 +14,7 @@ from lerim.memory.access_tracker import (
     record_access,
 )
 from lerim.memory.memory_repo import build_memory_paths
-from lerim.runtime.prompts.chat import build_chat_prompt
+from lerim.runtime.prompts.ask import build_ask_prompt
 from lerim.runtime.prompts.maintain import (
     build_maintain_artifact_paths,
     build_maintain_prompt,
@@ -173,17 +173,17 @@ class TestRuntimeToolAccessTracking:
         assert stats[0]["memory_id"].endswith("-queue-pattern")
 
 
-class TestChatPromptMemoryRoot:
-    """Chat prompt includes memory guidance when memory_root is provided."""
+class TestAskPromptMemoryRoot:
+    """Ask prompt includes memory guidance when memory_root is provided."""
 
     def test_guidance_with_memory_root(self) -> None:
-        prompt = build_chat_prompt("test", [], [], memory_root="/data/memory")
+        prompt = build_ask_prompt("test", [], [], memory_root="/data/memory")
         assert "Memory root: /data/memory" in prompt
         assert "grep" in prompt
         assert "decisions/*.md" in prompt
 
     def test_no_guidance_without_memory_root(self) -> None:
-        prompt = build_chat_prompt("test", [], [])
+        prompt = build_ask_prompt("test", [], [])
         assert "Memory root" not in prompt
 
 

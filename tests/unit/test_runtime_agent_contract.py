@@ -26,9 +26,9 @@ def test_default_read_only_tools_exist() -> None:
     assert "explore" in agent.single_tools
 
 
-def test_chat_mode_honors_single_tools_allowlist() -> None:
+def test_ask_mode_honors_single_tools_allowlist() -> None:
     agent = LerimAgent(single_tools=["read", "glob"])
-    built = agent._build_lead_agent("chat")
+    built = agent._build_lead_agent("ask")
     tool_names = set(built._function_toolset.tools.keys())
     assert tool_names == {"read", "glob"}
 

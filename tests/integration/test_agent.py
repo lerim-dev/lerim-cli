@@ -29,7 +29,7 @@ def test_chat_uses_memory_context(tmp_path):
     (decisions / src.name).write_text(src.read_text(), encoding="utf-8")
 
     agent = LerimAgent()
-    response, _ = agent.chat(
+    response, _ = agent.ask(
         "What auth decisions were made?",
         memory_root=tmp_path,
     )

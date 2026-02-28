@@ -33,7 +33,7 @@ from lerim.config.settings import (
     USER_CONFIG_PATH,
 )
 from lerim.runtime.agent import LerimAgent
-from lerim.runtime.prompts.chat import build_chat_prompt, looks_like_auth_error
+from lerim.runtime.prompts.ask import build_ask_prompt, looks_like_auth_error
 from lerim.sessions.catalog import (
     count_fts_indexed,
     count_session_jobs_by_status,
@@ -57,14 +57,14 @@ def api_health() -> dict[str, Any]:
 
 
 def api_ask(question: str, limit: int = 12) -> dict[str, Any]:
-    """Run one chat query against the runtime agent and return result dict."""
+    """Run one ask query against the runtime agent and return result dict."""
     config = get_config()
     memory_root = str(config.memory_dir)
     hits: list[dict[str, Any]] = []
     context_docs: list[dict[str, Any]] = []
-    prompt = build_chat_prompt(question, hits, context_docs, memory_root=memory_root)
+    prompt = build_ask_prompt(question, hits, context_docs, memory_root=memory_root)
     agent = LerimAgent()
-    response, session_id = agent.chat(
+    response, session_id = agent.ask(
         prompt, cwd=str(Path.cwd()), memory_root=memory_root
     )
     error = looks_like_auth_error(response)

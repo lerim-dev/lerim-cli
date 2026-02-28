@@ -36,5 +36,5 @@ def test_provider_fallback_on_error(tmp_path):
     cfg = replace(cfg, lead_role=role)
     # This tests that the agent can recover via fallback
     agent = LerimAgent()
-    response, _ = agent.chat("hello", memory_root=tmp_path)
+    response, _ = agent.ask("hello", memory_root=tmp_path)
     assert isinstance(response, str)
