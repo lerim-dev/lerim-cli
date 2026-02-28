@@ -171,6 +171,7 @@ def iter_sessions(
             continue
         start_time: datetime | None = None
         repo_name: str | None = None
+        cwd: str | None = None
         message_count = 0
         tool_calls = 0
         errors = 0
@@ -190,6 +191,8 @@ def iter_sessions(
                 git = payload.get("git") or {}
                 if isinstance(git, dict) and not repo_name:
                     repo_name = git.get("branch") or None
+                if not cwd:
+                    cwd = payload.get("cwd") or None
 
             if entry.get("type") == "event_msg":
                 ev_type = payload.get("type")
@@ -224,6 +227,7 @@ def iter_sessions(
                 agent_type="codex",
                 session_path=str(path),
                 start_time=start_time.isoformat() if start_time else None,
+                repo_path=cwd,
                 repo_name=repo_name,
                 message_count=message_count,
                 tool_call_count=tool_calls,

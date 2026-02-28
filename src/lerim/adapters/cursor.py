@@ -273,6 +273,7 @@ WHERE key LIKE 'bubbleId:%' ORDER BY key"""
                     agent_type="cursor",
                     session_path=str(jsonl_path),
                     start_time=started_at.isoformat() if started_at else None,
+                    repo_path=None,
                     message_count=message_count,
                     tool_call_count=tool_count,
                     summaries=summaries,

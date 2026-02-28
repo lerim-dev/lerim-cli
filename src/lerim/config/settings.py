@@ -253,6 +253,8 @@ class Config:
     server_host: str
     server_port: int
     poll_interval_minutes: int
+    sync_interval_minutes: int
+    maintain_interval_minutes: int
     sync_window_days: int
     sync_max_sessions: int
     sync_max_workers: int
@@ -332,6 +334,8 @@ class Config:
             "server_host": self.server_host,
             "server_port": self.server_port,
             "poll_interval_minutes": self.poll_interval_minutes,
+            "sync_interval_minutes": self.sync_interval_minutes,
+            "maintain_interval_minutes": self.maintain_interval_minutes,
             "lead_role": {
                 "provider": self.lead_role.provider,
                 "model": self.lead_role.model,
@@ -602,6 +606,12 @@ def load_config() -> Config:
         server_port=port,
         poll_interval_minutes=_to_int(
             server.get("poll_interval_minutes"), 30, minimum=1
+        ),
+        sync_interval_minutes=_to_int(
+            server.get("sync_interval_minutes"), 10, minimum=1
+        ),
+        maintain_interval_minutes=_to_int(
+            server.get("maintain_interval_minutes"), 60, minimum=1
         ),
         sync_window_days=_to_int(server.get("sync_window_days"), 7, minimum=1),
         sync_max_sessions=_to_int(server.get("sync_max_sessions"), 50, minimum=1),

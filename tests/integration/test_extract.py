@@ -14,7 +14,7 @@ _skip = pytest.mark.skipif(
     reason="LERIM_INTEGRATION not set",
 )
 
-FIXTURES_DIR = Path(__file__).parent / "fixtures" / "traces"
+FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "traces"
 
 
 @_skip

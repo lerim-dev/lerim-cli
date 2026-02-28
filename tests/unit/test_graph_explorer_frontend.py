@@ -12,7 +12,7 @@ class TestGraphExplorerFrontend(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         src_path = (
-            Path(__file__).parent.parent
+            Path(__file__).parent.parent.parent
             / "dashboard"
             / "frontend"
             / "graph-explorer"
@@ -20,7 +20,7 @@ class TestGraphExplorerFrontend(unittest.TestCase):
             / "main.ts"
         )
         inspector_path = (
-            Path(__file__).parent.parent
+            Path(__file__).parent.parent.parent
             / "dashboard"
             / "frontend"
             / "graph-explorer"
@@ -29,7 +29,7 @@ class TestGraphExplorerFrontend(unittest.TestCase):
             / "inspector.ts"
         )
         graph_path = (
-            Path(__file__).parent.parent
+            Path(__file__).parent.parent.parent
             / "dashboard"
             / "frontend"
             / "graph-explorer"

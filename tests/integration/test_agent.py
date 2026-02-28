@@ -14,7 +14,7 @@ _skip = pytest.mark.skipif(
     reason="LERIM_INTEGRATION not set",
 )
 
-MEMORIES_DIR = Path(__file__).parent / "fixtures" / "memories"
+MEMORIES_DIR = Path(__file__).parent.parent / "fixtures" / "memories"
 
 
 @_skip

@@ -74,10 +74,23 @@ recent_access_grace_days = 30       # recently accessed memories skip archiving
 host = "127.0.0.1"
 port = 8765
 poll_interval_minutes = 30
+sync_interval_minutes = 10          # sync hot path interval (default: 10)
+maintain_interval_minutes = 60      # maintain cold path interval (default: 60)
 sync_window_days = 7
 sync_max_sessions = 50
 sync_max_workers = 4
 ```
+
+### Daemon intervals
+
+The daemon runs two independent loops:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `sync_interval_minutes` | `10` | How often the sync (hot) path runs — index sessions and extract memories |
+| `maintain_interval_minutes` | `60` | How often the maintain (cold) path runs — merge duplicates, archive stale, consolidate |
+
+`poll_interval_minutes` is kept for backward compatibility but the two specific intervals take precedence inside `run_daemon_forever()` and `lerim serve`. When `--poll-seconds` is passed to `lerim daemon`, it overrides both intervals uniformly.
 
 ## Model roles
 

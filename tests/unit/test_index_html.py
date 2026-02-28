@@ -6,7 +6,7 @@ import re
 import unittest
 from pathlib import Path
 
-INDEX_HTML = (Path(__file__).parent.parent / "dashboard" / "index.html").read_text(encoding="utf-8")
+INDEX_HTML = (Path(__file__).parent.parent.parent / "dashboard" / "index.html").read_text(encoding="utf-8")
 
 
 class TestIndexHtmlAgenticWidgetRemoval(unittest.TestCase):

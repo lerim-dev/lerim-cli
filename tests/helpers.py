@@ -32,6 +32,8 @@ def make_config(base: Path) -> Config:
         server_host="127.0.0.1",
         server_port=8765,
         poll_interval_minutes=5,
+        sync_interval_minutes=5,
+        maintain_interval_minutes=5,
         lead_role=LLMRoleConfig(
             provider="openrouter",
             model="qwen/qwen3-coder-30b-a3b-instruct",

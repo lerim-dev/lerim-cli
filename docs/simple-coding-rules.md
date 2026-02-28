@@ -33,8 +33,9 @@ Do not add hidden defaults that mask misconfiguration.
 
 ## 6) Real tests over mock-only checks
 
-Each file should be runnable in isolation when practical.
-`__main__` self-tests should run real paths (no mock/stub self-test flow).
+Every module should have corresponding tests in `tests/`. Prefer real-path tests over mocked tests.
+Tests are organized in `tests/unit/`, `tests/smoke/`, `tests/integration/`, `tests/e2e/`.
+Keep existing `if __name__ == "__main__":` blocks but don't require new ones.
 Validate quality of outputs, not only counts/status.
 
 ## 7) Remove old paths when replacing logic

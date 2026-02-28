@@ -174,6 +174,7 @@ def iter_sessions(
             continue
         started_at: datetime | None = None
         repo_name: str | None = None
+        cwd: str | None = None
         summaries: list[str] = []
         message_count = 0
         tool_calls = 0
@@ -191,6 +192,8 @@ def iter_sessions(
                     started_at = ts
             if not repo_name:
                 repo_name = entry.get("gitBranch") or None
+            if not cwd:
+                cwd = entry.get("cwd")
 
             entry_type = entry.get("type")
             if entry_type == "summary":
@@ -224,6 +227,7 @@ def iter_sessions(
                 agent_type="claude",
                 session_path=str(path),
                 start_time=started_at.isoformat() if started_at else None,
+                repo_path=cwd,
                 repo_name=repo_name,
                 message_count=message_count,
                 tool_call_count=tool_calls,

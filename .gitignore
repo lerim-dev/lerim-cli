@@ -41,6 +41,9 @@ specs/
 
 dev-docs/
 
+# Eval results
+evals/results/
+
 # Test artifacts
 snapshot_report.html
 qa_artifacts/*

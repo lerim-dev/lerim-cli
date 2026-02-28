@@ -60,15 +60,23 @@ Adding or removing a project restarts the Docker container if it is running
 Docker container lifecycle management.
 
 ```bash
-lerim up                    # start Lerim (Docker container)
+lerim up                    # start Lerim (pull GHCR image)
+lerim up --build            # build from local Dockerfile instead
 lerim down                  # stop it
 lerim logs                  # tail logs
 lerim logs --follow         # follow logs continuously
 ```
 
 `lerim up` reads `~/.lerim/config.toml`, generates a `docker-compose.yml` in
-`~/.lerim/`, and runs `docker compose up -d`. The container runs `lerim serve`
+`~/.lerim/`, and runs `docker compose up -d`. By default the compose file
+references the pre-built GHCR image (`ghcr.io/lerim-dev/lerim-cli`) tagged with
+the current package version. Use `--build` to build from the local Dockerfile
+instead (useful for development). The container runs `lerim serve`
 (daemon + API + dashboard). Running `lerim up` again recreates the container.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--build` | off | Build from local Dockerfile instead of pulling the GHCR image |
 
 ---
 
@@ -175,18 +183,20 @@ lerim maintain --dry-run      # preview only, no writes
 
 ## `lerim daemon`
 
-Runs a continuous loop: sync (index + extract) then maintain (refine), repeating at a configurable interval. Sessions are processed in parallel using a thread pool (configurable via `sync_max_workers`, default 4).
+Runs a continuous loop with independent sync and maintain intervals. Sync (hot path) runs frequently; maintain (cold path) runs less often. Sessions are processed in parallel using a thread pool (configurable via `sync_max_workers`, default 4).
 
 ```bash
-lerim daemon                     # run forever with default poll interval (30 min)
+lerim daemon                     # run forever (sync every 10 min, maintain every 60 min)
 lerim daemon --once              # run one sync+maintain cycle and exit
-lerim daemon --poll-seconds 120  # poll every 2 minutes
+lerim daemon --poll-seconds 120  # override both intervals uniformly to 2 minutes
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--once` | off | Run one cycle and exit |
-| `--poll-seconds` | config `poll_interval_minutes` (`30` min) | Seconds between cycles (minimum 30s) |
+| `--poll-seconds` | — | Override both sync and maintain intervals uniformly (seconds, minimum 30s) |
+
+Default intervals come from config: `sync_interval_minutes` (10) and `maintain_interval_minutes` (60).
 
 ---
 

@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 
-SKILLS_DIR = Path(__file__).parent.parent / "skills"
+SKILLS_DIR = Path(__file__).parent.parent.parent / "skills"
 
 EXPECTED_SKILLS = [
     "lerim",

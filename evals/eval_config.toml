@@ -1,0 +1,17 @@
+# Eval configuration — per-pipeline LLM settings and judge choice.
+# Create multiple configs (eval_cheap.toml, eval_premium.toml) and compare results.
+
+[judge]
+agent = "claude"  # "claude" | "codex" | "opencode"
+
+[extraction]
+provider = "openrouter"
+model = "qwen/qwen3-coder-30b-a3b-instruct"
+sub_provider = "openrouter"
+sub_model = "qwen/qwen3-coder-30b-a3b-instruct"
+
+[summarization]
+provider = "openrouter"
+model = "qwen/qwen3-coder-30b-a3b-instruct"
+sub_provider = "openrouter"
+sub_model = "qwen/qwen3-coder-30b-a3b-instruct"
