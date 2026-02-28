@@ -1,31 +1,20 @@
 # Getting Started
 
-Get Lerim running in under 2 minutes.
+Get Lerim running in under 5 minutes.
 
 ## Prerequisites
 
 - Python 3.10+
-- [Deno](https://deno.land/) (required by the DSPy extraction pipeline)
+- [Docker](https://docs.docker.com/get-docker/) (for the always-on service)
 - An LLM API key (OpenRouter, OpenAI, or Anthropic)
 
-```bash
-brew install deno  # macOS
-```
-
-## Install
+## 1. Install
 
 ```bash
 pip install lerim
 ```
 
-For development installs:
-
-```bash
-uv venv && source .venv/bin/activate
-uv pip install -e .
-```
-
-## Set up API keys
+## 2. Set up API keys
 
 Lerim needs an LLM provider for extraction and chat. Set at least one:
 
@@ -37,53 +26,50 @@ export OPENAI_API_KEY="sk-..."
 export ZAI_API_KEY="..."
 ```
 
-## Connect your agent platforms
+## 3. Initialize
 
-Auto-detect and connect all supported platforms:
-
-```bash
-lerim connect auto
-```
-
-Or connect specific platforms:
+Run the interactive setup wizard:
 
 ```bash
-lerim connect claude
-lerim connect codex
-lerim connect cursor
-lerim connect opencode
+lerim init
 ```
 
-Check what's connected:
+This detects your installed coding agents (Claude Code, Codex, Cursor, OpenCode)
+and writes the config to `~/.lerim/config.toml`.
+
+## 4. Add your projects
+
+Register the projects you want Lerim to track:
 
 ```bash
-lerim connect list
+lerim project add ~/codes/my-app
+lerim project add ~/work/backend
+lerim project add .                   # current directory
 ```
 
-## Start the learning loop
+Each registered project gets a `.lerim/` directory for its memories.
 
-Run the daemon for continuous sync + maintain:
+## 5. Start Lerim
 
 ```bash
-lerim daemon
+lerim up
 ```
 
-Or run one-shot commands:
+This starts a Docker container that runs the daemon (sync + maintain loop) and
+serves the dashboard + HTTP API on `http://localhost:8765`.
 
-```bash
-lerim sync       # extract memories from new sessions
-lerim maintain   # refine existing memories
-```
-
-## Query your memories
+## 6. Query your memories
 
 ```bash
 lerim chat "What auth pattern do we use?"
 lerim memory search "database migration"
 lerim memory list
+lerim status
 ```
 
-## Teach your agent about Lerim
+These commands are thin HTTP clients that forward to the running server.
+
+## 7. Teach your agent about Lerim
 
 Install the Lerim skill so your coding agent knows how to query past context:
 
@@ -97,7 +83,29 @@ At the start of a session, tell your agent:
 
 > Check lerim for any relevant memories about [topic you're working on].
 
-Your agent will run `lerim chat` or `lerim memory search` to pull in past decisions and learnings.
+## Managing the service
+
+```bash
+lerim down                  # stop the container
+lerim up                    # start again (recreates the container)
+lerim logs                  # view logs
+lerim logs --follow         # tail logs
+lerim project list          # list registered projects
+lerim project remove my-app # unregister a project
+```
+
+## Running without Docker
+
+If you prefer not to use Docker, run `lerim serve` directly:
+
+```bash
+brew install deno            # Deno is required for extraction
+lerim connect auto           # detect agent platforms
+lerim serve                  # start API server + dashboard + daemon loop
+```
+
+Then use `lerim chat`, `lerim sync`, `lerim status`, etc. as usual — they
+connect to the running server.
 
 ## Next steps
 

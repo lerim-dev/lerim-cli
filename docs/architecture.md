@@ -1,6 +1,6 @@
 # Architecture
 
-Last updated: 2026-02-26
+Last updated: 2026-02-28
 
 ## Summary
 
@@ -14,14 +14,31 @@ Lerim is a file-first continual learning layer for coding agents.
 6. Run evidence is stored as flat artifacts in the workspace folder.
 7. Retrieve with project-first scope and global fallback.
 
+## Deployment model
+
+Lerim runs as a single process (`lerim serve`) that provides the daemon + HTTP API + dashboard. Typically this runs inside a Docker container via `lerim up`, but can also be started directly for development. Service commands (`chat`, `sync`, `maintain`, `status`) are thin HTTP clients that forward to the server (`localhost:8765`). Skills and agents can also call the HTTP API directly.
+
+```
+CLI / clients                       lerim serve (Docker or direct)
+─────────────                       ──────────────────────────────
+lerim chat "q"  ──HTTP POST──►     /api/chat
+lerim sync      ──HTTP POST──►     /api/sync
+lerim status    ──HTTP GET───►     /api/status
+skills (curl)   ──HTTP───────►     /api/*
+browser         ──HTTP───────►     dashboard UI
+
+lerim init        (host only)
+lerim project add (host only)
+lerim up/down     (host only)
+```
+
+Setup: `pip install lerim && lerim init && lerim project add . && lerim up`
+
 ## Runtime prerequisites
 
-`dspy.RLM` runs through DSPy's Deno/Pyodide interpreter. Install Deno on host machines that run extraction.
-
-```bash
-brew install deno
-deno --version
-```
+- **Docker** — required for the always-on service (`lerim up`)
+- **Deno** — required inside the container by `dspy.RLM` (baked into the Docker image)
+- **Python 3.10+** — required on the host for `pip install lerim` (init, project management)
 
 ## System flow
 
@@ -39,6 +56,12 @@ flowchart TD
     H --> L["chat / memory search"]
 
     M["maintain"] --> N["Agent-led: scan, merge, archive, consolidate, report"]
+
+    API["HTTP API (port 8765)"] --> C
+    API --> H
+    API --> M
+    CLI["Thin CLI (host)"] --> API
+    SKILLS["Skills / Agents"] --> API
 ```
 
 ## Storage model
@@ -143,9 +166,33 @@ When tracing is enabled (`LERIM_TRACING=1` or `[tracing] enabled = true`):
 - Traces are sent to Logfire cloud (free tier) — view at [logfire.pydantic.dev](https://logfire.pydantic.dev)
 - DSPy pipelines run with `verbose=False`; their LLM calls are visible via httpx spans when enabled
 
+## HTTP API
+
+The dashboard HTTP server exposes a JSON API that serves as the canonical interface
+for the thin CLI, skills, agents, and the dashboard UI.
+
+Key endpoints:
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/health` | Health check (Docker HEALTHCHECK + CLI detection) |
+| GET | `/api/status` | Runtime state |
+| POST | `/api/chat` | Query memories |
+| POST | `/api/sync` | Trigger sync |
+| POST | `/api/maintain` | Trigger maintenance |
+| GET | `/api/memories` | List memories |
+| GET | `/api/search` | Search memories |
+| GET | `/api/connect` | List connected platforms |
+| POST | `/api/connect` | Connect a platform |
+| GET | `/api/project/list` | List registered projects |
+| POST | `/api/project/add` | Register a project |
+
+Full endpoint list in `src/lerim/app/dashboard.py`.
+
 ## Security boundaries
 
 - Runtime tools deny `write` and `edit` outside `memory_root` and workspace roots
 - Memory writes are normalized to canonical markdown frontmatter and filename rules
 - All file operations use Python tools (no shell/subprocess)
 - Explorer subagent is read-only (`read`, `glob`, `grep` only)
+- HTTP API binds to `127.0.0.1` by default (localhost only, no auth needed)

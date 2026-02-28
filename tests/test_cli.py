@@ -76,6 +76,17 @@ def test_status_json_output_shape(
     config_path = write_test_config(tmp_path)
     monkeypatch.setenv("LERIM_CONFIG", str(config_path))
     reload_config()
+    fake_status = {
+        "timestamp": "2026-02-28T00:00:00+00:00",
+        "connected_agents": ["claude"],
+        "platforms": [],
+        "memory_count": 5,
+        "sessions_indexed_count": 10,
+        "queue": {"pending": 0},
+        "latest_sync": None,
+        "latest_maintain": None,
+    }
+    monkeypatch.setattr(cli, "_api_get", lambda _path: fake_status)
     code, payload = run_cli_json(["status", "--json"])
     assert code == 0
     assert "queue" in payload
@@ -83,41 +94,34 @@ def test_status_json_output_shape(
     assert "latest_maintain" in payload
 
 
-def test_chat_uses_context_docs_when_memory_signal_is_thin(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(cli, "search_memory", lambda *_args, **_kwargs: [])
-
-    captured: dict[str, str] = {}
-
-    class _FakeAgent:
-        def __init__(self, **_kwargs) -> None:
-            pass
-
-        def chat(self, prompt: str, cwd: str | None = None, **_kwargs):
-            _ = cwd
-            captured["prompt"] = prompt
-            return "answer", "agent-session-1"
-
-    monkeypatch.setattr(cli, "LerimAgent", _FakeAgent)
-
+def test_chat_forwards_to_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chat command posts to /api/chat and prints the answer."""
+    fake_response = {
+        "answer": "Use bearer tokens.",
+        "agent_session_id": "ses-1",
+        "memories_used": [],
+        "error": False,
+    }
+    monkeypatch.setattr(cli, "_api_post", lambda _path, _body: fake_response)
     code, payload = run_cli_json(["chat", "how to deploy", "--limit", "5", "--json"])
     assert code == 0
-
-    assert "Context docs (loaded only if needed)" in captured["prompt"]
-    assert "memory-explorer" in captured["prompt"]
+    assert payload["answer"] == "Use bearer tokens."
 
 
 def test_chat_returns_nonzero_on_auth_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _FakeAgent:
-        def __init__(self, **_kwargs) -> None:
-            pass
+    fake_response = {
+        "answer": "authentication_error: invalid api key",
+        "error": True,
+    }
+    monkeypatch.setattr(cli, "_api_post", lambda _path, _body: fake_response)
+    code, _output = run_cli(["chat", "how to deploy"])
+    assert code == 1
 
-        def chat(self, prompt: str, cwd: str | None = None, **_kwargs):
-            _ = (prompt, cwd)
-            return "authentication_error: invalid api key", "agent-session-1"
 
-    monkeypatch.setattr(cli, "LerimAgent", _FakeAgent)
+def test_chat_returns_nonzero_when_server_not_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli, "_api_post", lambda _path, _body: None)
     code, _output = run_cli(["chat", "how to deploy"])
     assert code == 1
 
@@ -164,6 +168,17 @@ def test_json_flag_hoisting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     config_path = write_test_config(tmp_path)
     monkeypatch.setenv("LERIM_CONFIG", str(config_path))
     reload_config()
+    fake_status = {
+        "timestamp": "2026-02-28T00:00:00+00:00",
+        "connected_agents": [],
+        "platforms": [],
+        "memory_count": 0,
+        "sessions_indexed_count": 0,
+        "queue": {},
+        "latest_sync": None,
+        "latest_maintain": None,
+    }
+    monkeypatch.setattr(cli, "_api_get", lambda _path: fake_status)
     code1, payload1 = run_cli_json(["status", "--json"])
     code2, payload2 = run_cli_json(["--json", "status"])
     assert code1 == 0

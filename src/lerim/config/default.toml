@@ -64,10 +64,30 @@ max_iterations = 8
 max_llm_calls = 12
 openrouter_provider_order = []
 
+[providers]
+# Default API base URLs per provider.
+# Override here to point all roles using that provider at a different endpoint.
+# Per-role api_base (under [roles.*]) takes precedence over these defaults.
+zai = "https://api.z.ai/api/paas/v4"
+openai = "https://api.openai.com/v1"
+openrouter = "https://openrouter.ai/api/v1"
+ollama = "http://127.0.0.1:11434"
+
 [tracing]
 enabled = false                          # set true or LERIM_TRACING=1 to enable
 include_httpx = false                    # capture raw HTTP request/response bodies
 include_content = true                   # include prompt/completion text in spans
+
+[agents]
+# Map agent names to session directory paths.
+# claude = "~/.claude/projects"
+# codex = "~/.codex/sessions"
+# cursor = "~/Library/Application Support/Cursor/User/globalStorage"
+# opencode = "~/.local/share/opencode"
+
+[projects]
+# Map project short names to absolute host paths.
+# my-project = "~/codes/my-project"
 
 # --- Planned features (uncomment when implemented) ---
 # [embeddings]

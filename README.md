@@ -57,22 +57,25 @@ The maintain path runs offline refinement over stored memories: merges duplicate
 pip install lerim
 ```
 
-Lerim's extraction pipeline requires [Deno](https://deno.land/):
+Prerequisites: Python 3.10+, [Docker](https://docs.docker.com/get-docker/)
+
+### 2. Set up
 
 ```bash
-brew install deno
+lerim init                     # interactive setup — detects your coding agents
+lerim project add .            # add current project (repeat for other repos)
 ```
 
-### 2. Connect your agent platforms and start the learning loop
+### 3. Start Lerim
 
 ```bash
-lerim connect auto    # detect Claude Code, Codex, Cursor, OpenCode sessions
-lerim daemon          # sync sessions + maintain memories in a continuous loop
+lerim up
 ```
 
-That's it. Lerim now watches your sessions, extracts decisions and learnings, and refines them over time.
+That's it. Lerim is now running as a Docker service — syncing sessions, extracting
+decisions and learnings, refining memories, and serving a dashboard at `http://localhost:8765`.
 
-### 3. Teach your agent about Lerim
+### 4. Teach your agent about Lerim
 
 Install the Lerim skill so your agent knows how to query past context:
 
@@ -82,13 +85,23 @@ npx skills add lerim-dev/lerim-cli
 
 This works with Claude Code, Codex, Cursor, Copilot, Cline, Windsurf, OpenCode, and [other agents that support skills](https://skills-ai.dev).
 
-### 4. Get the most out of Lerim
+### 5. Get the most out of Lerim
 
 At the start of a session, tell your agent:
 
 > Check lerim for any relevant memories about [topic you're working on].
 
 Your agent will run `lerim chat` or `lerim memory search` to pull in past decisions and learnings before it starts working.
+
+### Running without Docker
+
+If you prefer not to use Docker, Lerim works directly:
+
+```bash
+brew install deno              # required for extraction
+lerim connect auto             # detect agent platforms
+lerim daemon                   # run sync + maintain in terminal
+```
 
 ## Dashboard
 
@@ -128,17 +141,31 @@ Then open `http://127.0.0.1:8765`.
 Full command reference: [`skills/lerim/cli-reference.md`](skills/lerim/cli-reference.md)
 
 ```bash
-lerim connect auto                          # detect and connect platforms
+# Setup (host-only)
+lerim init                                  # interactive setup wizard
+lerim project add ~/codes/my-app            # register a project
+lerim project list                          # list registered projects
+
+# Docker service
+lerim up                                    # start Lerim container
+lerim down                                  # stop it
+lerim logs --follow                         # tail logs
+
+# Alternative: run directly without Docker
+lerim serve                                 # start HTTP server + daemon loop
+
+# Service commands (require lerim up or lerim serve running)
+lerim chat "Why did we choose this?"        # query memories
 lerim sync                                  # one-shot: sync sessions + extract
 lerim maintain                              # one-shot: merge, archive, decay
-lerim daemon                                # continuous sync + maintain loop
-lerim chat "Why did we choose this?"        # query memories
+lerim status                                # runtime state
+lerim dashboard                             # show dashboard URL
+
+# Local commands (run on host, no server needed)
 lerim memory search "auth pattern"          # keyword search
 lerim memory list                           # list all memories
 lerim memory add --title "..." --body "..." # manual memory
-lerim memory reset --scope both --yes       # wipe and start fresh
-lerim dashboard                             # local web UI
-lerim status                                # runtime state
+lerim connect auto                          # detect and connect platforms
 ```
 
 ### Development
@@ -146,6 +173,10 @@ lerim status                                # runtime state
 ```bash
 uv venv && source .venv/bin/activate
 uv pip install -e .
+lerim init                    # first-time config
+lerim project add .           # track this repo
+docker build -t lerim .       # build Docker image locally
+lerim up                      # start the service
 tests/run_tests.sh unit
 tests/run_tests.sh all
 ```
