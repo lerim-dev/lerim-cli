@@ -7,7 +7,7 @@ from pathlib import Path
 
 def test_dashboard_read_only_api_contract() -> None:
     source = (
-        Path(__file__).parent.parent / "src" / "lerim" / "app" / "dashboard.py"
+        Path(__file__).parent.parent.parent / "src" / "lerim" / "app" / "dashboard.py"
     ).read_text(encoding="utf-8")
     assert 'if path in {"/api/refine/run", "/api/reflect"}:' in source
     assert "READ_ONLY_MESSAGE" in source

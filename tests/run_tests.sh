@@ -159,7 +159,7 @@ cd "$ROOT_DIR"
 
 run_unit() {
   print_section "Unit tests"
-  python -m pytest -m "not integration and not e2e and not smoke"
+  python -m pytest tests/unit/ -x -q
   if command -v node >/dev/null 2>&1; then
     node tests/js_render_harness.js
   else
@@ -184,19 +184,19 @@ run_integration() {
   export LERIM_INTEGRATION=1
   export LERIM_LLM_INTEGRATION=1
   export LERIM_EMBEDDINGS_INTEGRATION=1
-  run_pytest_allow_empty -m "integration"
+  run_pytest_allow_empty tests/integration/
 }
 
 run_e2e() {
   print_section "End-to-end tests"
   export LERIM_E2E=1
-  run_pytest_allow_empty -m "e2e"
+  run_pytest_allow_empty tests/e2e/
 }
 
 run_smoke() {
   print_section "Smoke tests"
   export LERIM_SMOKE=1
-  run_pytest_allow_empty -m "smoke"
+  run_pytest_allow_empty tests/smoke/
 }
 
 run_lint() {

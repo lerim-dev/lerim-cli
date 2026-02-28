@@ -26,7 +26,7 @@ def test_configure_logging_clears_existing_handlers() -> None:
 
 
 def test_loguru_messages_do_not_use_percent_style_placeholders() -> None:
-    source_root = Path(__file__).resolve().parents[1] / "src" / "lerim"
+    source_root = Path(__file__).resolve().parents[2] / "src" / "lerim"
     pattern = re.compile(
         r"logger\.(?:trace|debug|info|success|warning|error|critical|exception)\(.*%[0-9\.\-]*[sdiforx]"
     )

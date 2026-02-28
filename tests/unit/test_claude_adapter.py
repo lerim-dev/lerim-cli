@@ -14,7 +14,7 @@ from lerim.adapters.claude import (
     read_session,
 )
 
-FIXTURES_DIR = Path(__file__).parent / "fixtures" / "traces"
+FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "traces"
 
 
 def _write_claude_jsonl(path: Path, entries: list[dict]) -> Path:

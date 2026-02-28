@@ -1,7 +1,13 @@
 """Shared test fixtures for Lerim test suite.
 
 Provides temp directories, seeded memories, and auto-applies a test config
-(ollama/qwen3:4b) for smoke/integration/e2e tests via LERIM_CONFIG env var.
+for smoke/integration/e2e tests via LERIM_CONFIG env var.
+
+Tier-specific fixtures live in each subdirectory's conftest.py:
+- unit/conftest.py   — autouse dummy API key
+- smoke/conftest.py  — skip unless LERIM_SMOKE=1
+- integration/conftest.py — skip unless LERIM_INTEGRATION=1
+- e2e/conftest.py    — skip unless LERIM_E2E=1
 """
 
 import os
@@ -90,17 +96,6 @@ def _toml_value(v) -> str:
         return str(v)
     return f'"{v}"'
 
-
-@pytest.fixture(autouse=True)
-def _ensure_api_key(monkeypatch):
-    """Set a dummy OPENROUTER_API_KEY for unit tests that construct LerimAgent.
-
-    The PydanticAI provider constructor requires an API key even when the
-    actual LLM call is monkeypatched.  Real keys are only needed for
-    smoke/integration/e2e tests.
-    """
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-dummy-key")
 
 
 def pytest_configure(config):

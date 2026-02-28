@@ -23,11 +23,36 @@ The test runner auto-activates `.venv` if not already active and `cd`s to the pr
 Override the test LLM provider/model via env vars `LERIM_TEST_PROVIDER` and `LERIM_TEST_MODEL`, or via `tests/test_config.toml`.
 Default provider: `openrouter/qwen/qwen3-coder-30b-a3b-instruct` for all roles.
 
+## Directory Structure
+
+```
+tests/
+  conftest.py              # Root: shared fixtures, marker registration
+  helpers.py               # make_config, run_cli, etc.
+  run_tests.sh             # Directory-based test selection
+  test_config.toml         # Default LLM config for smoke/integration/e2e
+  js_render_harness.js     # JavaScript rendering test
+  fixtures/                # Shared across tiers
+    traces/                # JSONL session traces
+    memories/              # Seeded memory files
+    cline/                 # Cline adapter test data
+  unit/                    # Flat, descriptive names. No LLM, <5s.
+    conftest.py            # autouse dummy API key
+  smoke/                   # Quick LLM sanity, requires LERIM_SMOKE=1
+    conftest.py            # Skip gate
+  integration/             # Real LLM, quality checks, requires LERIM_INTEGRATION=1
+    conftest.py            # Skip gate
+  e2e/                     # Full CLI flows, requires LERIM_E2E=1
+    conftest.py            # Skip gate
+```
+
+Test selection is **directory-based**: `pytest tests/unit/` runs only unit tests. No `--ignore` flags or marker filtering needed.
+
 ## Test Categories
 
-### Unit (`pytest -m "not integration and not e2e and not smoke"`)
+### Unit (`pytest tests/unit/`)
 
-Fast, deterministic tests with no LLM calls and no network. External state (config paths, DB paths) is monkeypatched to temp directories. These test individual functions and classes in isolation.
+Fast, deterministic tests with no LLM calls and no network. External state (config paths, DB paths) is monkeypatched to temp directories.
 
 | File | What it tests |
 |------|---------------|
@@ -43,6 +68,7 @@ Fast, deterministic tests with no LLM calls and no network. External state (conf
 | `test_catalog_queries.py` | Session catalog DB: FTS indexing, job queue enqueue/claim/reclaim, pagination, service runs |
 | `test_fts.py` | Full-text search queries and ranking |
 | `test_config.py` | Settings loading, `_deep_merge`, `_to_int`/`_to_float` validators, role config building |
+| `test_settings.py` | Settings coverage gaps: `load_toml_file`, `_expand`, `_to_fallback_models`, `_parse_string_table`, `save_config_patch`, layer precedence |
 | `test_project_scope.py` | Project scope resolution (project-first vs global-only) |
 | `test_arg_utils.py` | `parse_duration_to_seconds`, CSV/tag parsing, CLI argument utilities |
 | `test_runtime_tools.py` | Tool boundary enforcement (read/write/glob/grep within allowed roots) |
@@ -55,13 +81,16 @@ Fast, deterministic tests with no LLM calls and no network. External state (conf
 | `test_memory_layout.py` | Canonical memory directory structure |
 | `test_memory_search_toggles.py` | Search mode toggles (files/fts/vector/graph) |
 | `test_memory_decay.py` | Confidence decay and archive-threshold logic |
+| `test_memory_repo.py` | Memory path helpers: `build_memory_paths`, `ensure_memory_paths`, `reset_memory_root` |
+| `test_access_tracker.py` | Memory access tracking: `init_access_db`, `record_access`, `get_access_stats`, `is_body_read`, `extract_memory_id` |
+| `test_queue.py` | Queue facade verification: re-export completeness, identity with catalog originals |
 | `test_logging.py` | Logger configuration |
 | `test_skills.py` | Skill file discovery |
 | `test_indexer_platform_paths.py` | Platform path resolution for indexing |
 | `test_extract_lead_authority.py` | Lead agent is sole write authority |
 | `test_extract_parser_boundary.py` | Extraction parser boundary enforcement |
 | `test_session_extract_writeback.py` | Session extraction writeback to catalog |
-| `test_daemon_sync_maintain.py` | Daemon loop scheduling |
+| `test_daemon_sync_maintain.py` | Daemon loop scheduling: independent sync/maintain intervals, config fields |
 | `test_maintain_command.py` | Maintain CLI command routing |
 | `test_learning_runs.py` | Learning run tracking |
 | `test_agent_memory_write_flow.py` | Agent memory write flow (unit-level) |
@@ -69,56 +98,52 @@ Fast, deterministic tests with no LLM calls and no network. External state (conf
 | `test_dashboard_visual_polish.py` | Dashboard HTML rendering |
 | `test_graph_explorer_frontend.py` | Graph explorer frontend rendering |
 | `test_index_html.py` | Dashboard index.html serving |
+| `test_trace_summarization_pipeline.py` | Trace summarization pipeline contracts |
 
-### Smoke (`LERIM_SMOKE=1 pytest -m smoke`)
+### Smoke (`pytest tests/smoke/`)
 
-Quick LLM sanity checks gated behind `LERIM_SMOKE=1`. Default provider: `openrouter/qwen/qwen3-coder-30b-a3b-instruct` (configurable via `tests/test_config.toml`).
-
-| File | What it tests |
-|------|---------------|
-| `test_smoke_pipelines.py` | DSPy LM configuration for extract/summarize roles; extraction and summarization pipelines produce output against fixture traces |
-| `test_smoke_agent.py` | PydanticAI agent returns a response for a simple question |
-
-### Integration (`LERIM_INTEGRATION=1 pytest -m integration`)
-
-Multi-component flows with real LLM calls, real file I/O, and real DB writes. Each test is scoped to one subsystem. Slow (~14 min total).
+Quick LLM sanity checks. Skipped unless `LERIM_SMOKE=1` is set. Default provider: `openrouter/qwen/qwen3-coder-30b-a3b-instruct`.
 
 | File | What it tests |
 |------|---------------|
-| `test_integration_extract.py` | Feed fixture JSONL traces through DSPy extraction pipeline; verify valid `MemoryRecord` output, correct primitives, edge-case handling (empty/short/mixed traces) |
-| `test_integration_summarize.py` | Feed seeded memory directories through summarization pipeline; verify valid summary markdown files |
-| `test_integration_agent.py` | Full PydanticAI agent ask with memory context; agent answers using seeded memories |
-| `test_integration_providers.py` | LM provider construction works with actual configured backend |
-| `test_agent_memory_write_integration.py` | Agent-driven memory write flows with real LLM |
+| `test_pipelines.py` | DSPy LM configuration for extract/summarize roles; extraction and summarization pipelines produce output against fixture traces |
+| `test_agent.py` | PydanticAI agent returns a response for a simple question |
 
-### E2E (`LERIM_E2E=1 pytest -m e2e`)
+### Integration (`pytest tests/integration/`)
 
-Full CLI command flows as a user would invoke them. Requires working LLM.
+Multi-component flows with real LLM calls, real file I/O, and real DB writes. Skipped unless `LERIM_INTEGRATION=1` is set.
 
 | File | What it tests |
 |------|---------------|
-| `test_e2e_sync.py` | `lerim sync` against fixture traces creates memories; re-running is idempotent (no duplicates) |
-| `test_e2e_maintain.py` | `lerim maintain` on seeded memories performs maintenance actions (archival, dedup) |
-| `test_e2e_full_cycle.py` | Full lifecycle: reset -> sync -> ask; verifies the whole pipeline end-to-end |
-| `test_e2e_real.py` | Real-world e2e with actual connected platforms |
-| `test_context_layers_e2e.py` | Context layer resolution end-to-end |
-| `test_agent_memory_write_modes_e2e.py` | Agent memory write modes end-to-end |
+| `test_extract.py` | Feed fixture JSONL traces through DSPy extraction pipeline; verify valid `MemoryRecord` output |
+| `test_summarize.py` | Feed seeded memory directories through summarization pipeline; verify valid summary markdown files |
+| `test_agent.py` | Full PydanticAI agent ask with memory context |
+| `test_providers.py` | LM provider construction works with actual configured backend |
+| `test_memory_write.py` | Agent-driven memory write flows with real LLM |
+
+### E2E (`pytest tests/e2e/`)
+
+Full CLI command flows as a user would invoke them. Skipped unless `LERIM_E2E=1` is set.
+
+| File | What it tests |
+|------|---------------|
+| `test_sync.py` | `lerim sync` against fixture traces creates memories; re-running is idempotent |
+| `test_maintain.py` | `lerim maintain` on seeded memories performs maintenance actions |
+| `test_full_cycle.py` | Full lifecycle: reset -> sync -> ask |
+| `test_real.py` | Real-world e2e with actual connected platforms |
+| `test_context_layers.py` | Context layer resolution end-to-end |
+| `test_memory_write_modes.py` | Agent memory write modes end-to-end |
 
 ## Regression / Contract Tests
 
-Regression tests live in unit-land (no LLM needed) but serve a distinct purpose: they pin down public API surfaces so accidental breakage is caught immediately. If a field is added or removed from a Pydantic model, or a CLI subcommand is renamed, these tests fail.
+Regression tests live in unit-land (no LLM needed) but pin down public API surfaces. If a field is added or removed from a Pydantic model, or a CLI subcommand is renamed, these tests fail.
 
 `test_regression_contracts.py` checks:
-
-- **`SyncResultContract`** — exact field set (`trace_path`, `memory_root`, `workspace_root`, `run_folder`, `artifacts`, `counts`, `written_memory_paths`, `summary_path`)
-- **`MaintainResultContract`** — exact field set (`memory_root`, `workspace_root`, `run_folder`, `artifacts`, `counts`)
-- **`SyncCounts`** — fields: `add`, `update`, `no_op`
-- **`MaintainCounts`** — fields: `merged`, `archived`, `consolidated`, `decayed`, `unchanged`
-- **`MemoryCandidate`** — fields: `primitive`, `kind`, `title`, `body`, `confidence`, `tags`
-- **CLI subcommands** — `connect`, `sync`, `maintain`, `daemon`, `ask`, `memory`, `dashboard`, `status` all present
-- **`MEMORY_FRONTMATTER_SCHEMA`** — decision and learning types have expected keys (`id`, `kind`, etc.)
-
-When changing any of these contracts, update the corresponding test assertions. These are intentionally strict — a diff in fields means the contract changed and downstream consumers may break.
+- **`SyncResultContract`** — exact field set
+- **`MaintainResultContract`** — exact field set
+- **`MemoryCandidate`** — required fields
+- **CLI subcommands** — all present
+- **`MEMORY_FRONTMATTER_SCHEMA`** — expected keys per type
 
 ## Fixture Dataset
 
@@ -128,12 +153,12 @@ Hand-crafted fixture files live in `tests/fixtures/`. These are NOT auto-generat
 
 | File | Lines | Format | Purpose |
 |------|-------|--------|---------|
-| `claude_simple.jsonl` | 6 | Claude (`type`/`message`) | JWT auth decision + CORS learning; primary happy-path trace |
+| `claude_simple.jsonl` | 6 | Claude | JWT auth decision + CORS learning; primary happy-path trace |
 | `claude_long_multitopic.jsonl` | ~20 | Claude | Long multi-topic session; tests windowed extraction |
 | `codex_simple.jsonl` | varies | Codex | Codex adapter parsing verification |
 | `codex_with_tools.jsonl` | varies | Codex | Codex trace with tool calls; tests tool-call extraction |
 | `debug_session.jsonl` | ~10 | Generic | Debugging session; tests friction/pitfall extraction |
-| `mixed_decisions_learnings.jsonl` | 8 | Generic (`role`/`content`) | Multiple decisions AND learnings in one trace; tests extraction of mixed primitives |
+| `mixed_decisions_learnings.jsonl` | 8 | Generic | Multiple decisions AND learnings in one trace |
 | `edge_short.jsonl` | 2 | Generic | Minimal conversation; edge case for very short input |
 | `edge_empty.jsonl` | 2 | Generic | Empty user content; edge case for noise/empty input handling |
 
@@ -141,30 +166,33 @@ Hand-crafted fixture files live in `tests/fixtures/`. These are NOT auto-generat
 
 | File | Primitive | Purpose |
 |------|-----------|---------|
-| `decision_auth_pattern.md` | decision | JWT/HS256 auth decision with full frontmatter; used by `seeded_memory` fixture |
-| `learning_queue_fix.md` | learning | Atomic queue operations learning; general seeding |
-| `learning_stale.md` | learning | Old (2025), low-confidence (0.3) record; tests archival/decay logic |
+| `decision_auth_pattern.md` | decision | JWT/HS256 auth decision with full frontmatter |
+| `learning_queue_fix.md` | learning | Atomic queue operations learning |
+| `learning_stale.md` | learning | Old (2025), low-confidence (0.3) record; tests archival/decay |
 | `learning_duplicate_a.md` | learning | Near-duplicate A; tests deduplication |
 | `learning_duplicate_b.md` | learning | Near-duplicate B; tests deduplication |
 
-There is also a `fixtures/cline/` directory with Cline adapter test data (pre-existing).
-
 ## Shared Infrastructure
 
-### `conftest.py`
+### `conftest.py` (root)
 
-Shared pytest fixtures available to all tests:
-
-- **`tmp_lerim_root`** — Temporary directory with canonical Lerim folder structure (`memory/decisions`, `memory/learnings`, `memory/summaries`, `memory/archived/*`, `workspace/`, `index/`)
+Shared pytest fixtures available to all test tiers:
+- **`tmp_lerim_root`** — Temporary directory with canonical Lerim folder structure
 - **`tmp_config`** — `Config` object pointing at `tmp_lerim_root`
-- **`seeded_memory`** — `tmp_lerim_root` with fixture memory files copied into the correct subdirectories
-- **`skip_unless_env(var)`** — Marker helper that skips unless an env var is set
+- **`seeded_memory`** — `tmp_lerim_root` with fixture memory files
+- **`skip_unless_env(var)`** — Marker helper
+- **LLM config auto-apply** — Detects smoke/integration/e2e tests and sets `LERIM_CONFIG`
+
+### Tier-specific `conftest.py`
+
+- **`unit/conftest.py`** — Autouse dummy API key for PydanticAI constructors
+- **`smoke/conftest.py`** — Skip all unless `LERIM_SMOKE=1`
+- **`integration/conftest.py`** — Skip all unless `LERIM_INTEGRATION=1`
+- **`e2e/conftest.py`** — Skip all unless `LERIM_E2E=1`
 
 ### `helpers.py`
 
-Shared test utilities:
-
-- **`make_config(base)`** — Builds a deterministic `Config` rooted at a given path. Uses `openrouter`/`qwen/qwen3-coder-30b-a3b-instruct` for all roles (overridable via `LERIM_TEST_PROVIDER`/`LERIM_TEST_MODEL`).
+- **`make_config(base)`** — Builds a deterministic `Config` rooted at a given path
 - **`write_test_config(tmp_path, **sections)`** — Writes a TOML config file for CLI integration tests
 - **`run_cli(args)`** — Runs a CLI command in-process, returns `(exit_code, stdout)`
 - **`run_cli_json(args)`** — Runs a CLI command and parses stdout as JSON
@@ -182,15 +210,13 @@ Shared test utilities:
 
 ## Adding New Tests
 
-- Place unit tests in `tests/test_<module>.py` — no special marker needed.
-- For smoke/integration/e2e, use the appropriate pytest marker and gate with `skip_unless_env`.
-- Add new fixture files to `tests/fixtures/traces/` or `tests/fixtures/memories/` as needed.
+- Place unit tests in `tests/unit/test_<name>.py` — no marker needed.
+- For smoke/integration/e2e, place in the appropriate directory with the `pytestmark` marker.
+- Add new fixture files to `tests/fixtures/` as needed.
 - Each test file must have a docstring at the top explaining what it tests.
 - Each test function should test ONE thing.
-- Update this README if you add new test files, fixtures, or change the test infrastructure.
+- Update this README when adding new test files or changing test infrastructure.
 
 ## DSPy Thread Safety
 
-PydanticAI dispatches tool functions to worker threads via `anyio.to_thread.run_sync()`. DSPy's `dspy.configure(lm=lm)` is **not thread-safe** — it enforces that settings can only be changed by the thread that initially configured them.
-
-The pipelines use `dspy.context(lm=lm)` (a thread-local context manager) instead of `dspy.configure()`. This ensures extract/summarize tools work correctly when called from PydanticAI worker threads. See `extract_pipeline.py` and `summarization_pipeline.py`.
+PydanticAI dispatches tool functions to worker threads. DSPy's `dspy.configure(lm=lm)` is **not thread-safe**. The pipelines use `dspy.context(lm=lm)` (thread-local context manager) instead. See `extract_pipeline.py` and `summarization_pipeline.py`.
