@@ -481,7 +481,7 @@ def _cmd_up(args: argparse.Namespace) -> int:
     _emit(
         f"Starting Lerim with {len(config.projects)} projects and {len(config.agents)} agents..."
     )
-    result = api_up()
+    result = api_up(build_local=getattr(args, "build", False))
     if result.get("error"):
         _emit(result["error"], file=sys.stderr)
         return 1
@@ -1059,9 +1059,17 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Read ~/.lerim/config.toml, generate docker-compose.yml with volume\n"
             "mounts for agents and projects, and start the container.\n\n"
+            "By default the pre-built image is pulled from GHCR. Use --build\n"
+            "to build from the local Dockerfile instead.\n\n"
             "Examples:\n"
-            "  lerim up"
+            "  lerim up              # pull GHCR image\n"
+            "  lerim up --build      # build locally from Dockerfile"
         ),
+    )
+    up.add_argument(
+        "--build",
+        action="store_true",
+        help="Build the Docker image from local Dockerfile instead of pulling from GHCR.",
     )
     up.set_defaults(func=_cmd_up)
 

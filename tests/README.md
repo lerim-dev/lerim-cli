@@ -70,11 +70,13 @@ Fast, deterministic tests with no LLM calls and no network. External state (conf
 | `test_config.py` | Settings loading, `_deep_merge`, `_to_int`/`_to_float` validators, role config building |
 | `test_settings.py` | Settings coverage gaps: `load_toml_file`, `_expand`, `_to_fallback_models`, `_parse_string_table`, `save_config_patch`, layer precedence |
 | `test_project_scope.py` | Project scope resolution (project-first vs global-only) |
+| `test_project_routing.py` | Per-project memory routing: `match_session_project`, `repo_path` on `SessionRecord`/`IndexedSession` |
 | `test_arg_utils.py` | `parse_duration_to_seconds`, CSV/tag parsing, CLI argument utilities |
 | `test_runtime_tools.py` | Tool boundary enforcement (read/write/glob/grep within allowed roots) |
 | `test_providers.py` | DSPy/PydanticAI LM provider construction, API key resolution |
 | `test_subagents.py` | Explorer subagent builder contracts, read-only tool verification |
-| `test_cli.py` | Argument parser validation, command routing, `memory list/add/search` |
+| `test_cli.py` | Argument parser validation, command routing, `memory list/add/search`, `--build` flag |
+| `test_docker_compose.py` | Docker compose generation: GHCR image, `--build` directive, secret leak prevention, version tag |
 | `test_dashboard_api.py` | `_compute_stats`, `_build_memory_graph_payload`, dashboard helper functions |
 | `test_regression_contracts.py` | Public API surface checks — import paths and function signatures haven't broken |
 | `test_runtime_agent_contract.py` | Lead agent contract (typed deps, typed outputs) |

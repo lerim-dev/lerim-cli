@@ -12,7 +12,7 @@ from tests.helpers import make_config, write_test_config
 
 def _setup(tmp_path, monkeypatch) -> None:
     """Set up test environment with tmp dirs and config."""
-    config_path = write_test_config(tmp_path)
+    config_path = write_test_config(tmp_path, projects={"testproj": str(tmp_path)})
     monkeypatch.setenv("LERIM_CONFIG", str(config_path))
     reload_config()
     catalog.init_sessions_db()
@@ -29,6 +29,7 @@ def test_sync_does_not_run_vector_rebuild(monkeypatch, tmp_path) -> None:
         agent_type="codex",
         content="session content",
         session_path=str(session_path),
+        repo_path=str(tmp_path),
     )
 
     monkeypatch.setattr(
@@ -90,6 +91,7 @@ def test_sync_force_enqueues_changed_sessions(monkeypatch, tmp_path) -> None:
                 agent_type="codex",
                 session_path=str(session_path),
                 start_time="2026-02-20T10:00:00Z",
+                repo_path=str(tmp_path),
                 changed=True,
             )
         ],

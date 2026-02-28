@@ -43,6 +43,7 @@ class SessionRecord:
     agent_type: str
     session_path: str
     start_time: str | None = None
+    repo_path: str | None = None
     repo_name: str | None = None
     status: str = "completed"
     duration_ms: int = 0

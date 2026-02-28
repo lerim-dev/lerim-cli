@@ -37,6 +37,7 @@ class IndexedSession:
     agent_type: str
     session_path: str
     start_time: str | None
+    repo_path: str | None = None
     changed: bool = False
 
 
@@ -140,6 +141,8 @@ def init_sessions_db() -> None:
         }
         if "content_hash" not in sd_columns:
             conn.execute("ALTER TABLE session_docs ADD COLUMN content_hash TEXT")
+        if "repo_path" not in sd_columns:
+            conn.execute("ALTER TABLE session_docs ADD COLUMN repo_path TEXT")
 
         conn.execute(
             """
@@ -230,6 +233,7 @@ def init_sessions_db() -> None:
             "error": "TEXT",
             "created_at": "TEXT",
             "updated_at": "TEXT",
+            "repo_path": "TEXT",
         }
         for name, ddl in additive_columns.items():
             if name in columns:
@@ -558,6 +562,7 @@ def index_new_sessions(
                 run_id=session.run_id,
                 agent_type=session.agent_type,
                 content=content,
+                repo_path=session.repo_path,
                 repo_name=session.repo_name,
                 start_time=session.start_time,
                 status=session.status,
@@ -582,6 +587,7 @@ def index_new_sessions(
                     agent_type=session.agent_type,
                     session_path=session.session_path,
                     start_time=session.start_time,
+                    repo_path=session.repo_path,
                     changed=is_changed,
                 )
             )
@@ -599,6 +605,7 @@ def enqueue_session_job(
     trigger: str | None = None,
     force: bool = False,
     max_attempts: int = 3,
+    repo_path: str | None = None,
 ) -> bool:
     """Create or reset one queue job for session extraction."""
     if not run_id:
@@ -627,7 +634,7 @@ def enqueue_session_job(
                 SET agent_type = ?, session_path = ?, start_time = ?, status = ?,
                     attempts = 0, trigger = ?, available_at = ?, claimed_at = NULL,
                     completed_at = NULL, heartbeat_at = NULL, error = NULL,
-                    updated_at = ?, max_attempts = ?
+                    updated_at = ?, max_attempts = ?, repo_path = ?
                 WHERE run_id = ? AND job_type = ?
                 """,
                 (
@@ -639,6 +646,7 @@ def enqueue_session_job(
                     now,
                     now,
                     max(1, int(max_attempts)),
+                    repo_path,
                     run_id,
                     job_type,
                 ),
@@ -648,9 +656,10 @@ def enqueue_session_job(
                 """
                 INSERT INTO session_jobs (
                     run_id, job_type, agent_type, session_path, start_time, status,
-                    attempts, max_attempts, trigger, available_at, created_at, updated_at
+                    attempts, max_attempts, trigger, available_at, created_at,
+                    updated_at, repo_path
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -664,6 +673,7 @@ def enqueue_session_job(
                     now,
                     now,
                     now,
+                    repo_path,
                 ),
             )
         conn.commit()

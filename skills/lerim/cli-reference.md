@@ -69,11 +69,16 @@ Adding/removing a project restarts the Docker container if running.
 Docker container lifecycle.
 
 ```bash
-lerim up                    # start Lerim service (recreates container)
+lerim up                    # start Lerim (pull GHCR image)
+lerim up --build            # build from local Dockerfile instead
 lerim down                  # stop it
 lerim logs                  # view logs
 lerim logs --follow         # tail logs
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--build` | off | Build from local Dockerfile instead of pulling the GHCR image |
 
 ### `lerim serve`
 

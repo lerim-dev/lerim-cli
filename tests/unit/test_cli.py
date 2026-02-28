@@ -244,3 +244,19 @@ def test_memory_search_finds_seeded(
     )
     code, output = run_cli(["memory", "search", "auth", "--json"])
     assert code == 0
+
+
+def test_up_build_flag_accepted() -> None:
+    """The --build flag is accepted by the up subparser."""
+    parser = cli.build_parser()
+    args = parser.parse_args(["up", "--build"])
+    assert args.command == "up"
+    assert args.build is True
+
+
+def test_up_default_has_build_false() -> None:
+    """Default 'up' command has build=False."""
+    parser = cli.build_parser()
+    args = parser.parse_args(["up"])
+    assert args.command == "up"
+    assert args.build is False

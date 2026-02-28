@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from lerim.app.arg_utils import parse_duration_to_seconds
+from lerim.config.project_scope import match_session_project
 from lerim.config.settings import get_config, reload_config
 from lerim.runtime.agent import LerimAgent
 from lerim.sessions.catalog import (
@@ -302,6 +303,22 @@ def _process_one_job(job: dict[str, Any]) -> dict[str, Any]:
     rid = str(job.get("run_id") or "")
     if not rid:
         return {"status": "skipped"}
+
+    repo_path = str(job.get("repo_path") or "").strip()
+
+    # Skip sessions that don't match a registered project
+    if not repo_path:
+        complete_session_job(rid)
+        return {"status": "skipped", "reason": "no_project_match"}
+
+    # Validate project directory still exists
+    if not Path(repo_path).is_dir():
+        complete_session_job(rid)
+        return {"status": "skipped", "reason": "project_dir_missing"}
+
+    # Route memories to the project's .lerim/memory/
+    project_memory = str(Path(repo_path) / ".lerim" / "memory")
+
     attempts = max(int(job.get("attempts") or 1), 1)
     try:
         with _job_heartbeat(rid, heartbeat_session_job):
@@ -309,8 +326,8 @@ def _process_one_job(job: dict[str, Any]) -> dict[str, Any]:
             if not session_path:
                 doc = fetch_session_doc(rid) or {}
                 session_path = str(doc.get("session_path") or "").strip()
-            agent = LerimAgent(default_cwd=str(Path.cwd()))
-            result = agent.sync(Path(session_path))
+            agent = LerimAgent(default_cwd=repo_path)
+            result = agent.sync(Path(session_path), memory_root=project_memory)
     except Exception as exc:
         fail_session_job(
             rid,
@@ -331,10 +348,11 @@ def _process_claimed_jobs(
     claimed: list[dict[str, Any]],
     *,
     max_workers: int = 4,
-) -> tuple[int, int, int, int]:
-    """Process claimed jobs in parallel. Returns (extracted, failed, new, updated)."""
+) -> tuple[int, int, int, int, int]:
+    """Process claimed jobs in parallel. Returns (extracted, failed, skipped, new, updated)."""
     extracted = 0
     failed = 0
+    skipped = 0
     learnings_new = 0
     learnings_updated = 0
     workers = min(max(max_workers, 1), len(claimed)) if claimed else 1
@@ -348,7 +366,9 @@ def _process_claimed_jobs(
                 learnings_updated += result.get("learnings_updated", 0)
             elif result["status"] == "failed":
                 failed += 1
-    return extracted, failed, learnings_new, learnings_updated
+            elif result["status"] == "skipped":
+                skipped += 1
+    return extracted, failed, skipped, learnings_new, learnings_updated
 
 
 def run_sync_once(
@@ -386,6 +406,7 @@ def run_sync_once(
             return EXIT_LOCK_BUSY, _empty_sync_summary()
 
     try:
+        config = get_config()
         target_run_ids: list[str] = []
         indexed_sessions = 0
         queued_sessions = 0
@@ -393,6 +414,13 @@ def run_sync_once(
             target_run_ids = [run_id]
             if not dry_run:
                 session = fetch_session_doc(run_id)
+                session_repo_path = (
+                    str(session.get("repo_path") or "") if session else ""
+                )
+                match = match_session_project(
+                    session_repo_path or None, config.projects
+                )
+                matched_path = str(match[1]) if match else None
                 queued = enqueue_session_job(
                     run_id,
                     agent_type=session.get("agent_type") if session else None,
@@ -400,6 +428,7 @@ def run_sync_once(
                     start_time=session.get("start_time") if session else None,
                     trigger=trigger,
                     force=True,
+                    repo_path=matched_path,
                 )
                 queued_sessions = 1 if queued else 0
         else:
@@ -417,6 +446,12 @@ def run_sync_once(
                 )
                 indexed_sessions = len(details)
                 for item in details:
+                    match = match_session_project(
+                        item.repo_path, config.projects
+                    )
+                    if match is None:
+                        continue
+                    _project_name, project_path = match
                     queued = enqueue_session_job(
                         item.run_id,
                         agent_type=item.agent_type,
@@ -424,6 +459,7 @@ def run_sync_once(
                         start_time=item.start_time,
                         trigger=trigger,
                         force=item.changed,
+                        repo_path=str(project_path),
                     )
                     if queued:
                         queued_sessions += 1
@@ -447,10 +483,11 @@ def run_sync_once(
                 str(item.get("run_id") or "") for item in claimed if item.get("run_id")
             ]
             max_workers = get_config().sync_max_workers
-            extracted, failed, learnings_new, learnings_updated = _process_claimed_jobs(
+            extracted, failed, routing_skipped, learnings_new, learnings_updated = _process_claimed_jobs(
                 claimed,
                 max_workers=max_workers,
             )
+            skipped += routing_skipped
 
         summary = SyncSummary(
             indexed_sessions=indexed_sessions,

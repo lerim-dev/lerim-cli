@@ -390,6 +390,7 @@ ORDER BY time_created"""
                 agent_type="opencode",
                 session_path=str(jsonl_path),
                 start_time=start_dt.isoformat() if start_dt else None,
+                repo_path=directory or None,
                 repo_name=directory or None,
                 message_count=message_count,
                 tool_call_count=tool_calls,

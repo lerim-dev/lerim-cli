@@ -60,15 +60,23 @@ Adding or removing a project restarts the Docker container if it is running
 Docker container lifecycle management.
 
 ```bash
-lerim up                    # start Lerim (Docker container)
+lerim up                    # start Lerim (pull GHCR image)
+lerim up --build            # build from local Dockerfile instead
 lerim down                  # stop it
 lerim logs                  # tail logs
 lerim logs --follow         # follow logs continuously
 ```
 
 `lerim up` reads `~/.lerim/config.toml`, generates a `docker-compose.yml` in
-`~/.lerim/`, and runs `docker compose up -d`. The container runs `lerim serve`
+`~/.lerim/`, and runs `docker compose up -d`. By default the compose file
+references the pre-built GHCR image (`ghcr.io/lerim-dev/lerim-cli`) tagged with
+the current package version. Use `--build` to build from the local Dockerfile
+instead (useful for development). The container runs `lerim serve`
 (daemon + API + dashboard). Running `lerim up` again recreates the container.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--build` | off | Build from local Dockerfile instead of pulling the GHCR image |
 
 ---
 
