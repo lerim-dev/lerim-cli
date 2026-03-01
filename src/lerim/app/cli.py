@@ -495,7 +495,13 @@ def _cmd_down(args: argparse.Namespace) -> int:
     if result.get("error"):
         _emit(result["error"], file=sys.stderr)
         return 1
-    _emit("Lerim stopped.")
+    if result.get("status") == "not_running":
+        _emit("Lerim is not running.")
+        return 0
+    if result.get("was_running"):
+        _emit("Lerim stopped.")
+    else:
+        _emit("Lerim was not running. Cleaned up containers.")
     return 0
 
 

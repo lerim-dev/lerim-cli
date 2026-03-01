@@ -346,7 +346,7 @@ services:
 {image_or_build}
     container_name: lerim
     command: ["--host", "0.0.0.0", "--port", "{port}"]
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "127.0.0.1:{port}:{port}"
     environment:
@@ -400,9 +400,11 @@ def api_up(build_local: bool = False) -> dict[str, Any]:
 
 
 def api_down() -> dict[str, Any]:
-    """Stop Docker container."""
+    """Stop Docker container. Reports whether it was actually running."""
     if not COMPOSE_PATH.exists():
-        return {"error": "No compose file found. Run `lerim up` first."}
+        return {"status": "not_running", "message": "No compose file found."}
+
+    was_running = is_container_running()
 
     result = subprocess.run(
         ["docker", "compose", "-f", str(COMPOSE_PATH), "down"],
@@ -412,7 +414,7 @@ def api_down() -> dict[str, Any]:
     )
     if result.returncode != 0:
         return {"error": result.stderr.strip() or "docker compose down failed"}
-    return {"status": "stopped"}
+    return {"status": "stopped", "was_running": was_running}
 
 
 def is_container_running() -> bool:
