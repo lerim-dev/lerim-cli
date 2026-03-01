@@ -56,12 +56,12 @@ Default config (`evals/eval_config.toml`):
 agent = "claude"  # "claude" | "codex" | "opencode"
 
 [extraction]
-provider = "openrouter"
-model = "qwen/qwen3-coder-30b-a3b-instruct"
+provider = "minimax"
+model = "MiniMax-M2.5"
 
 [summarization]
-provider = "openrouter"
-model = "qwen/qwen3-coder-30b-a3b-instruct"
+provider = "minimax"
+model = "MiniMax-M2.5"
 ```
 
 ### Comparing models
@@ -155,7 +155,7 @@ Result structure:
 {
   "timestamp": "2026-02-28T14:30:00Z",
   "pipeline": "extraction",
-  "config": {"provider": "openrouter", "model": "qwen/qwen3-coder-30b-a3b-instruct"},
+  "config": {"provider": "minimax", "model": "MiniMax-M2.5"},
   "judge": {"agent": "claude", "model": ""},
   "performance": {
     "total_wall_time_s": 45.2,
@@ -181,7 +181,7 @@ Result structure:
 Pipeline: extraction
 Config                                   schema  compl  faith   clar   COMP  time/t
 --------------------------------------------------------------------------------
-qwen3-coder-30b-a3b-instruct (openrouter)  1.00   0.75   0.82   0.68   0.76   15.1s
+MiniMax-M2.5 (minimax)                      1.00   0.75   0.82   0.68   0.76   15.1s
 claude-sonnet (anthropic)                   1.00   0.88   0.91   0.80   0.87   22.3s
 ```
 

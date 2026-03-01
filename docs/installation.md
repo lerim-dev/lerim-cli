@@ -8,7 +8,7 @@ Before you begin, make sure you have:
 
 - **Python 3.10 or higher**
 - **Docker** installed ([get Docker](https://docs.docker.com/get-docker/)) — recommended for the always-on service
-- **An LLM API key** — OpenRouter, OpenAI, or Anthropic
+- **An LLM API key** — you only need a key for the provider(s) you configure (MiniMax, Z.AI, OpenRouter, OpenAI, or Anthropic)
 
 !!! tip "Docker is optional"
     If you don't have Docker, you can run Lerim directly using `lerim serve` instead of `lerim up`. See [Running without Docker](#running-without-docker) below.
@@ -43,13 +43,20 @@ lerim --version
 
 Lerim needs an LLM provider for extraction and querying. Set at least one:
 
-=== "OpenRouter (recommended)"
+=== "MiniMax + ZAI (recommended)"
+
+    ```bash
+    export MINIMAX_API_KEY="sk-cp-..."
+    export ZAI_API_KEY="..."
+    ```
+
+    MiniMax is the default provider (MiniMax-M2.5 for all roles) with Z.AI as fallback. Both use subscription-based coding plans for low, predictable costs.
+
+=== "OpenRouter"
 
     ```bash
     export OPENROUTER_API_KEY="sk-or-v1-..."
     ```
-
-    OpenRouter is the default provider. It gives you access to multiple models including GPT-5-nano (extraction) and Grok-4.1-fast (agents).
 
 === "OpenAI"
 
@@ -57,14 +64,8 @@ Lerim needs an LLM provider for extraction and querying. Set at least one:
     export OPENAI_API_KEY="sk-..."
     ```
 
-=== "ZAI"
-
-    ```bash
-    export ZAI_API_KEY="..."
-    ```
-
 !!! note
-    OpenRouter is the default provider. If you use a different provider, update `[roles.*]` in your config. See [model roles](configuration/model-roles.md).
+    You only need API keys for the providers you configure. The defaults use MiniMax (primary) with Z.AI (fallback), but you can switch to any supported provider by updating `[roles.*]` in your config. See [model roles](configuration/model-roles.md).
 
 ## First-time setup
 
@@ -136,10 +137,10 @@ If sync or ask commands fail with authentication errors:
 
 ```bash
 # Verify your key is set
-echo $OPENROUTER_API_KEY
+echo $MINIMAX_API_KEY
 
 # Re-export if needed
-export OPENROUTER_API_KEY="sk-or-v1-..."
+export MINIMAX_API_KEY="sk-cp-..."
 ```
 
 ### Port already in use

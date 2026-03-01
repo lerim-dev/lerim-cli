@@ -48,7 +48,7 @@ tests/run_tests.sh all
 ```
 
 !!! info "LLM tests"
-    Smoke, integration, and e2e tests require a valid `OPENROUTER_API_KEY` (or
+    Smoke, integration, and e2e tests require a valid `MINIMAX_API_KEY` (or
     equivalent) and are gated behind environment variables (`LERIM_SMOKE=1`,
     `LERIM_INTEGRATION=1`, `LERIM_E2E=1`).
 

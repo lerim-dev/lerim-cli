@@ -29,10 +29,14 @@ API keys are **never** stored in TOML files. They come from environment variable
 
 | Variable | Provider | Required when |
 |----------|----------|---------------|
-| `OPENROUTER_API_KEY` | OpenRouter | Using OpenRouter models (default) |
-| `OPENAI_API_KEY` | OpenAI | Using OpenAI directly |
-| `ZAI_API_KEY` | Z.AI (xAI) | Using Z.AI endpoint directly |
-| `ANTHROPIC_API_KEY` | Anthropic | Using Anthropic models directly |
+| `MINIMAX_API_KEY` | MiniMax | When any role uses `provider = "minimax"` (default) |
+| `ZAI_API_KEY` | Z.AI | When any role uses `provider = "zai"` (default fallback) |
+| `OPENROUTER_API_KEY` | OpenRouter | When any role uses `provider = "openrouter"` |
+| `OPENAI_API_KEY` | OpenAI | When any role uses `provider = "openai"` |
+| `ANTHROPIC_API_KEY` | Anthropic | When any role uses `provider = "anthropic"` |
+
+!!! info "Only set what you use"
+    You only need API keys for the providers referenced in your `[roles.*]` config. Switch providers freely — just set the matching key.
 
 !!! warning "No fallback"
     If a required API key is missing, Lerim raises an error immediately.
@@ -68,8 +72,8 @@ API keys are **never** stored in TOML files. They come from environment variable
 
     ```toml
     [roles.lead]
-    provider = "openrouter"
-    model = "x-ai/grok-4.1-fast"
+    provider = "minimax"
+    model = "MiniMax-M2.5"
     ```
 
 === "Server"

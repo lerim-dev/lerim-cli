@@ -8,10 +8,10 @@ and quality.
 
 | Role | Runtime | Purpose | Default model |
 |------|---------|---------|---------------|
-| `lead` | PydanticAI | Orchestrates sync/maintain/ask flows, delegates to explorer, runs decision policy, writes memory | `x-ai/grok-4.1-fast` |
-| `explorer` | PydanticAI | Read-only subagent for candidate gathering (glob, grep, read) | `x-ai/grok-4.1-fast` |
-| `extract` | DSPy | Extracts decision and learning candidates from session transcripts via ChainOfThought | `openai/gpt-5-nano` |
-| `summarize` | DSPy | Generates structured session summaries from transcripts via ChainOfThought | `openai/gpt-5-nano` |
+| `lead` | PydanticAI | Orchestrates sync/maintain/ask flows, delegates to explorer, runs decision policy, writes memory | `MiniMax-M2.5` |
+| `explorer` | PydanticAI | Read-only subagent for candidate gathering (glob, grep, read) | `MiniMax-M2.5` |
+| `extract` | DSPy | Extracts decision and learning candidates from session transcripts via ChainOfThought | `MiniMax-M2.5` |
+| `summarize` | DSPy | Generates structured session summaries from transcripts via ChainOfThought | `MiniMax-M2.5` |
 
 ```mermaid
 flowchart LR
@@ -31,10 +31,10 @@ Each role is configured under `[roles.<name>]` in your TOML config.
 
     ```toml
     [roles.lead]
-    provider = "openrouter"
-    model = "x-ai/grok-4.1-fast"
+    provider = "minimax"
+    model = "MiniMax-M2.5"
     api_base = ""
-    fallback_models = []
+    fallback_models = ["zai:glm-4.7"]
     timeout_seconds = 300
     max_iterations = 10
     openrouter_provider_order = []
@@ -47,10 +47,10 @@ Each role is configured under `[roles.<name>]` in your TOML config.
 
     ```toml
     [roles.explorer]
-    provider = "openrouter"
-    model = "x-ai/grok-4.1-fast"
+    provider = "minimax"
+    model = "MiniMax-M2.5"
     api_base = ""
-    fallback_models = []
+    fallback_models = ["zai:glm-4.7"]
     timeout_seconds = 180
     max_iterations = 8
     openrouter_provider_order = []
@@ -63,10 +63,10 @@ Each role is configured under `[roles.<name>]` in your TOML config.
 
     ```toml
     [roles.extract]
-    provider = "openrouter"
-    model = "openai/gpt-5-nano"
+    provider = "minimax"
+    model = "MiniMax-M2.5"
     api_base = ""
-    fallback_models = ["x-ai/grok-4.1-fast"]
+    fallback_models = ["zai:glm-4.5-air"]
     timeout_seconds = 180
     max_window_tokens = 300000
     window_overlap_tokens = 5000
@@ -81,10 +81,10 @@ Each role is configured under `[roles.<name>]` in your TOML config.
 
     ```toml
     [roles.summarize]
-    provider = "openrouter"
-    model = "openai/gpt-5-nano"
+    provider = "minimax"
+    model = "MiniMax-M2.5"
     api_base = ""
-    fallback_models = ["x-ai/grok-4.1-fast"]
+    fallback_models = ["zai:glm-4.5-air"]
     timeout_seconds = 180
     max_window_tokens = 300000
     window_overlap_tokens = 5000
@@ -108,12 +108,12 @@ model = "gpt-5"
 
 Requires `OPENAI_API_KEY` in your environment.
 
-### Use Z.AI (xAI) directly
+### Use Z.AI (Coding Plan)
 
 ```toml
 [roles.lead]
 provider = "zai"
-model = "grok-4.1-fast"
+model = "glm-4.7"
 ```
 
 Requires `ZAI_API_KEY` in your environment.
@@ -155,7 +155,7 @@ ollama = "http://127.0.0.1:11434"
 
 | Option | Applies to | Description |
 |--------|-----------|-------------|
-| `provider` | All roles | Backend: `openrouter`, `openai`, `zai`, `ollama` |
+| `provider` | All roles | Backend: `minimax`, `zai`, `openrouter`, `openai`, `ollama` |
 | `model` | All roles | Model identifier. For OpenRouter, use the full slug (e.g. `openai/gpt-5-nano`). |
 | `api_base` | All roles | Custom API endpoint. Empty string = use default from `[providers]`. |
 | `fallback_models` | All roles | Ordered fallback chain. Format: `"model-slug"` (inherits role provider) or `"provider:model-slug"`. |
@@ -171,9 +171,9 @@ When a primary model fails, Lerim tries each fallback in order:
 
 ```toml
 [roles.extract]
-provider = "openrouter"
-model = "openai/gpt-5-nano"
-fallback_models = ["x-ai/grok-4.1-fast", "openai:gpt-4.1-mini"]
+provider = "minimax"
+model = "MiniMax-M2.5"
+fallback_models = ["zai:glm-4.5-air", "openai:gpt-4.1-mini"]
 ```
 
 Fallback format:
@@ -185,9 +185,10 @@ Fallback format:
 
 | Provider | Environment variable |
 |----------|---------------------|
+| `minimax` | `MINIMAX_API_KEY` |
+| `zai` | `ZAI_API_KEY` |
 | `openrouter` | `OPENROUTER_API_KEY` |
 | `openai` | `OPENAI_API_KEY` |
-| `zai` | `ZAI_API_KEY` |
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `ollama` | *(none required)* |
 

@@ -45,7 +45,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Infrastructure
 
 - Added `pytest-xdist` for parallel LLM-bound test execution. Smoke, integration, and e2e tests run with `-n auto` (~2x speedup for e2e: 10min to 5min).
-- Test runner defaults updated to match `default.toml` models (`x-ai/grok-4.1-fast` lead/explorer, `openai/gpt-5-nano` extract/summarize).
+- Test runner defaults updated to match `default.toml` models (`MiniMax-M2.5` all roles, with ZAI coding plan fallbacks).
 
 ## [0.1.1] - 2026-02-28
 

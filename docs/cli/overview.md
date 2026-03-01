@@ -170,10 +170,13 @@ LERIM_CONFIG env var              # explicit override path
 
 API keys come from environment variables:
 
-- `OPENROUTER_API_KEY` (required for default models)
-- `OPENAI_API_KEY` (optional)
-- `ANTHROPIC_API_KEY` (optional)
-- `ZAI_API_KEY` (optional)
+- `MINIMAX_API_KEY` (default provider)
+- `ZAI_API_KEY` (default fallback)
+- `OPENROUTER_API_KEY`
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+
+Only the keys for providers you configure in `[roles.*]` are needed.
 
 ## Next steps
 

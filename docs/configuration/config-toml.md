@@ -36,45 +36,46 @@ sync_window_days = 7
 sync_max_sessions = 50
 
 [roles.lead]
-provider = "openrouter"
-model = "x-ai/grok-4.1-fast"
+provider = "minimax"
+model = "MiniMax-M2.5"
 api_base = ""
-fallback_models = []
+fallback_models = ["zai:glm-4.7"]
 timeout_seconds = 300
 max_iterations = 10
 openrouter_provider_order = []
 
 [roles.explorer]
-provider = "openrouter"
-model = "x-ai/grok-4.1-fast"
+provider = "minimax"
+model = "MiniMax-M2.5"
 api_base = ""
-fallback_models = []
+fallback_models = ["zai:glm-4.7"]
 timeout_seconds = 180
 max_iterations = 8
 openrouter_provider_order = []
 
 [roles.extract]
-provider = "openrouter"
-model = "openai/gpt-5-nano"
+provider = "minimax"
+model = "MiniMax-M2.5"
 api_base = ""
-fallback_models = ["x-ai/grok-4.1-fast"]
+fallback_models = ["zai:glm-4.5-air"]
 timeout_seconds = 180
 max_window_tokens = 300000
 window_overlap_tokens = 5000
 openrouter_provider_order = []
 
 [roles.summarize]
-provider = "openrouter"
-model = "openai/gpt-5-nano"
+provider = "minimax"
+model = "MiniMax-M2.5"
 api_base = ""
-fallback_models = ["x-ai/grok-4.1-fast"]
+fallback_models = ["zai:glm-4.5-air"]
 timeout_seconds = 180
 max_window_tokens = 300000
 window_overlap_tokens = 5000
 openrouter_provider_order = []
 
 [providers]
-zai = "https://api.z.ai/api/paas/v4"
+minimax = "https://api.minimax.io/v1"
+zai = "https://api.z.ai/api/coding/paas/v4"
 openai = "https://api.openai.com/v1"
 openrouter = "https://openrouter.ai/api/v1"
 ollama = "http://127.0.0.1:11434"
@@ -163,8 +164,8 @@ for a full breakdown.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `provider` | string | `"openrouter"` | Provider backend: `openrouter`, `openai`, `zai`, `ollama`. |
-| `model` | string | varies | Model identifier (e.g. `x-ai/grok-4.1-fast`). |
+| `provider` | string | `"minimax"` | Provider backend: `minimax`, `zai`, `openrouter`, `openai`, `ollama`. |
+| `model` | string | varies | Model identifier (e.g. `MiniMax-M2.5`). |
 | `api_base` | string | `""` | Custom API base URL. Empty = use provider default from `[providers]`. |
 | `fallback_models` | list | `[]` | Fallback model chain (format: `"model"` or `"provider:model"`). |
 | `timeout_seconds` | int | `300`/`180` | Request timeout. |
@@ -186,7 +187,8 @@ Default API base URLs per provider. Per-role `api_base` takes precedence over th
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `zai` | string | `"https://api.z.ai/api/paas/v4"` | Z.AI (xAI) API base. |
+| `minimax` | string | `"https://api.minimax.io/v1"` | MiniMax API base (Coding Plan). |
+| `zai` | string | `"https://api.z.ai/api/coding/paas/v4"` | Z.AI API base (Coding Plan). |
 | `openai` | string | `"https://api.openai.com/v1"` | OpenAI API base. |
 | `openrouter` | string | `"https://openrouter.ai/api/v1"` | OpenRouter API base. |
 | `ollama` | string | `"http://127.0.0.1:11434"` | Ollama local API base. |

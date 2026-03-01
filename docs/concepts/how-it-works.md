@@ -256,7 +256,7 @@ Config precedence (low to high priority):
 | 3 | `<repo>/.lerim/config.toml` | Project-specific overrides |
 | 4 (highest) | `LERIM_CONFIG` env var | Explicit path override (for CI/tests) |
 
-API keys come from environment variables only: `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ZAI_API_KEY`, optional `ANTHROPIC_API_KEY`.
+API keys come from environment variables only: `MINIMAX_API_KEY`, `ZAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, optional `ANTHROPIC_API_KEY`.
 
 ---
 
