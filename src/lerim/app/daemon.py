@@ -568,6 +568,7 @@ def run_maintain_once(
     *,
     force: bool,
     dry_run: bool,
+    trigger: str = "manual",
 ) -> tuple[int, dict]:
     """Run one maintain cycle with lock handling and service run record."""
     t0 = time.monotonic()
@@ -581,7 +582,7 @@ def run_maintain_once(
             job_type="maintain",
             status="completed",
             started_at=started,
-            trigger="manual",
+            trigger=trigger,
             details={"dry_run": True},
         )
         return EXIT_OK, {"dry_run": True}
@@ -595,7 +596,7 @@ def run_maintain_once(
             job_type="maintain",
             status="lock_busy",
             started_at=started,
-            trigger="manual",
+            trigger=trigger,
             details={"error": str(exc)},
         )
         return EXIT_LOCK_BUSY, {"error": str(exc)}
@@ -651,7 +652,7 @@ def run_maintain_once(
             job_type="maintain",
             status=status,
             started_at=started,
-            trigger="manual",
+            trigger=trigger,
             details=details,
         )
         code = (
@@ -666,7 +667,7 @@ def run_maintain_once(
             job_type="maintain",
             status="failed",
             started_at=started,
-            trigger="manual",
+            trigger=trigger,
             details={"error": str(exc)},
         )
         return EXIT_FATAL, {"error": str(exc)}
@@ -726,24 +727,42 @@ def run_daemon_forever(poll_seconds: int | None = None) -> None:
         sync_interval = max(config.sync_interval_minutes * 60, 30)
         maintain_interval = max(config.maintain_interval_minutes * 60, 30)
 
-    last_sync = 0.0
-    last_maintain = 0.0
+    # Initialise to (now - interval) so both trigger on the first
+    # iteration regardless of the monotonic clock epoch (see Docker note
+    # in _cmd_serve._daemon_loop).
+    _now_init = time.monotonic()
+    last_sync = _now_init - sync_interval
+    last_maintain = _now_init - maintain_interval
 
     from lerim.config.logging import logger
+
+    logger.info(
+        "daemon loop started (sync every {}s, maintain every {}s)",
+        sync_interval,
+        maintain_interval,
+    )
 
     while True:
         now = time.monotonic()
 
         if now - last_sync >= sync_interval:
             try:
-                _run_sync_cycle()
+                _code, summary = _run_sync_cycle()
+                logger.info(
+                    "daemon sync done — indexed={} extracted={} skipped={} failed={}",
+                    summary.indexed_sessions,
+                    summary.extracted_sessions,
+                    summary.skipped_sessions,
+                    summary.failed_sessions,
+                )
             except Exception as exc:
                 logger.warning("daemon sync error: {}", exc)
             last_sync = time.monotonic()
 
         if now - last_maintain >= maintain_interval:
             try:
-                _run_maintain_cycle()
+                _code, details = _run_maintain_cycle()
+                logger.info("daemon maintain done — {}", details)
             except Exception as exc:
                 logger.warning("daemon maintain error: {}", exc)
             last_maintain = time.monotonic()
@@ -780,7 +799,7 @@ def _run_sync_cycle() -> tuple[int, SyncSummary]:
 
 def _run_maintain_cycle() -> tuple[int, dict]:
     """Execute one maintain cycle."""
-    return run_maintain_once(force=False, dry_run=False)
+    return run_maintain_once(force=False, dry_run=False, trigger="daemon")
 
 
 if __name__ == "__main__":

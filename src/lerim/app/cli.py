@@ -547,8 +547,20 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         sync_interval = max(config.sync_interval_minutes * 60, 30)
         maintain_interval = max(config.maintain_interval_minutes * 60, 30)
 
-        last_sync = 0.0
-        last_maintain = 0.0
+        # Initialise to (now - interval) so both trigger on the first
+        # iteration regardless of the monotonic clock epoch.  In Docker
+        # containers the monotonic clock reflects VM uptime which can be
+        # smaller than maintain_interval, causing the first maintain to
+        # be silently skipped when initialised to 0.0.
+        _now_init = time.monotonic()
+        last_sync = _now_init - sync_interval
+        last_maintain = _now_init - maintain_interval
+
+        logger.info(
+            "daemon loop started (sync every {}s, maintain every {}s)",
+            sync_interval,
+            maintain_interval,
+        )
 
         while not stop_event.is_set():
             now = time.monotonic()
@@ -561,7 +573,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
                         until_raw=None,
                         parse_duration_to_seconds=_parse_dur,
                     )
-                    run_sync_once(
+                    _code, summary = run_sync_once(
                         run_id=None,
                         agent_filter=None,
                         no_extract=False,
@@ -573,13 +585,25 @@ def _cmd_serve(args: argparse.Namespace) -> int:
                         window_start=window_start,
                         window_end=window_end,
                     )
+                    logger.info(
+                        "daemon sync done — indexed={} extracted={} skipped={} failed={}",
+                        summary.indexed_sessions,
+                        summary.extracted_sessions,
+                        summary.skipped_sessions,
+                        summary.failed_sessions,
+                    )
                 except Exception as exc:
                     logger.warning("daemon sync error: {}", exc)
                 last_sync = time.monotonic()
 
             if now - last_maintain >= maintain_interval:
                 try:
-                    run_maintain_once(force=False, dry_run=False)
+                    _code, details = run_maintain_once(
+                        force=False,
+                        dry_run=False,
+                        trigger="daemon",
+                    )
+                    logger.info("daemon maintain done — {}", details)
                 except Exception as exc:
                     logger.warning("daemon maintain error: {}", exc)
                 last_maintain = time.monotonic()
