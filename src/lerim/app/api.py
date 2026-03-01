@@ -366,7 +366,8 @@ def api_up(build_local: bool = False) -> dict[str, Any]:
     """Generate compose file and start Docker container.
 
     When *build_local* is True the image is built from the local Dockerfile
-    instead of pulling the pre-built GHCR image.
+    instead of pulling the pre-built GHCR image.  Docker output is streamed
+    to stderr in real-time so the user sees pull/build progress.
     """
     if not docker_available():
         return {"error": "Docker is not installed or not running."}
@@ -386,16 +387,11 @@ def api_up(build_local: bool = False) -> dict[str, Any]:
         cmd.append("--build")
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+        result = subprocess.run(cmd, timeout=300)
     except subprocess.TimeoutExpired:
         return {"error": "Docker compose up timed out after 300 seconds."}
     if result.returncode != 0:
-        return {"error": result.stderr.strip() or "docker compose up failed"}
+        return {"error": "docker compose up failed"}
 
     return {"status": "started", "compose_path": str(COMPOSE_PATH)}
 
