@@ -76,7 +76,9 @@ def test_sync_force_enqueues_changed_sessions(monkeypatch, tmp_path) -> None:
         session_path=str(session_path),
         content_hash="oldhash",
     )
-    catalog.enqueue_session_job("run-changed-1", session_path=str(session_path))
+    catalog.enqueue_session_job(
+        "run-changed-1", session_path=str(session_path), repo_path="/tmp/project"
+    )
     jobs = catalog.claim_session_jobs(limit=1, run_ids=["run-changed-1"])
     assert len(jobs) == 1
     catalog.complete_session_job("run-changed-1")

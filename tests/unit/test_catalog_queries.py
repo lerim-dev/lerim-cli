@@ -97,7 +97,9 @@ def test_stale_job_reclamation():
     from lerim.sessions.catalog import _connect
 
     _seed_session("stale-job")
-    enqueue_session_job("stale-job", session_path="/tmp/stale.jsonl")
+    enqueue_session_job(
+        "stale-job", session_path="/tmp/stale.jsonl", repo_path="/tmp/project"
+    )
     # First claim picks up the pending job
     jobs = claim_session_jobs(limit=1, timeout_seconds=30)
     assert len(jobs) >= 1
@@ -198,7 +200,7 @@ def test_reindex_updates_content_hash():
 def test_changed_session_can_be_force_enqueued():
     """A done job can be re-enqueued with force=True (simulating hash change)."""
     _seed_session("force-test")
-    enqueue_session_job("force-test")
+    enqueue_session_job("force-test", repo_path="/tmp/project")
     jobs = claim_session_jobs(limit=1, run_ids=["force-test"])
     assert len(jobs) == 1
     from lerim.sessions.catalog import complete_session_job
@@ -206,9 +208,14 @@ def test_changed_session_can_be_force_enqueued():
     complete_session_job("force-test")
 
     # Without force, enqueue is rejected (job already done)
-    assert enqueue_session_job("force-test", force=False) is False
+    assert (
+        enqueue_session_job("force-test", force=False, repo_path="/tmp/project")
+        is False
+    )
 
     # With force, enqueue succeeds (simulating hash-change re-enqueue)
-    assert enqueue_session_job("force-test", force=True) is True
+    assert (
+        enqueue_session_job("force-test", force=True, repo_path="/tmp/project") is True
+    )
     jobs2 = claim_session_jobs(limit=1, run_ids=["force-test"])
     assert len(jobs2) == 1

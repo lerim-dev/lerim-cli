@@ -17,7 +17,10 @@ def _setup(tmp_path, monkeypatch):
 def test_queue_lifecycle_complete(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     enq = catalog.enqueue_session_job(
-        "run-1", agent_type="codex", session_path="/tmp/run-1.jsonl"
+        "run-1",
+        agent_type="codex",
+        session_path="/tmp/run-1.jsonl",
+        repo_path="/tmp/project",
     )
     assert enq is True
 
@@ -35,7 +38,7 @@ def test_queue_lifecycle_complete(tmp_path, monkeypatch):
 
 def test_queue_fail_to_dead_letter(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
-    catalog.enqueue_session_job("run-2", max_attempts=1)
+    catalog.enqueue_session_job("run-2", max_attempts=1, repo_path="/tmp/project")
     claimed = catalog.claim_session_jobs(limit=1)
     assert claimed[0]["run_id"] == "run-2"
 
@@ -50,7 +53,10 @@ def test_queue_fail_to_dead_letter(tmp_path, monkeypatch):
 def test_queue_heartbeat_updates_running_job(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     catalog.enqueue_session_job(
-        "run-3", agent_type="claude", session_path="/tmp/run-3.jsonl"
+        "run-3",
+        agent_type="claude",
+        session_path="/tmp/run-3.jsonl",
+        repo_path="/tmp/project",
     )
     claimed = catalog.claim_session_jobs(limit=1)
     assert claimed and claimed[0]["run_id"] == "run-3"
@@ -72,7 +78,7 @@ def test_queue_heartbeat_updates_running_job(tmp_path, monkeypatch):
 
 def test_queue_fail_marks_failed_before_dead_letter(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
-    catalog.enqueue_session_job("run-4", max_attempts=3)
+    catalog.enqueue_session_job("run-4", max_attempts=3, repo_path="/tmp/project")
     claimed = catalog.claim_session_jobs(limit=1)
     assert claimed and claimed[0]["run_id"] == "run-4"
 
@@ -92,9 +98,15 @@ def test_queue_fail_marks_failed_before_dead_letter(tmp_path, monkeypatch):
 def test_claim_oldest_first(tmp_path, monkeypatch):
     """Jobs with older start_time should be claimed first (chronological order)."""
     _setup(tmp_path, monkeypatch)
-    catalog.enqueue_session_job("old-run", start_time="2026-01-01T00:00:00+00:00")
-    catalog.enqueue_session_job("new-run", start_time="2026-02-20T12:00:00+00:00")
-    catalog.enqueue_session_job("mid-run", start_time="2026-01-15T00:00:00+00:00")
+    catalog.enqueue_session_job(
+        "old-run", start_time="2026-01-01T00:00:00+00:00", repo_path="/tmp/project"
+    )
+    catalog.enqueue_session_job(
+        "new-run", start_time="2026-02-20T12:00:00+00:00", repo_path="/tmp/project"
+    )
+    catalog.enqueue_session_job(
+        "mid-run", start_time="2026-01-15T00:00:00+00:00", repo_path="/tmp/project"
+    )
 
     claimed = catalog.claim_session_jobs(limit=1)
     assert len(claimed) == 1

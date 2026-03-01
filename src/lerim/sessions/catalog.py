@@ -269,6 +269,15 @@ def init_sessions_db() -> None:
             "UPDATE session_jobs SET status = ? WHERE status = 'completed'",
             (JOB_STATUS_DONE,),
         )
+        # Purge orphaned jobs that have no project match (NULL/empty
+        # repo_path).  These can never be processed and just clog the
+        # claim queue.
+        conn.execute(
+            "UPDATE session_jobs SET status = ? "
+            "WHERE (repo_path IS NULL OR repo_path = '') "
+            "AND status IN (?, ?)",
+            (JOB_STATUS_DONE, JOB_STATUS_PENDING, JOB_STATUS_FAILED),
+        )
 
         conn.execute(
             """
@@ -612,6 +621,8 @@ def enqueue_session_job(
     """Create or reset one queue job for session extraction."""
     if not run_id:
         return False
+    if not repo_path:
+        return False
     _ensure_sessions_db_initialized()
     now = _iso_now()
 
@@ -728,7 +739,12 @@ def claim_session_jobs(
                 (new_status, now_iso, now_iso, int(stale.get("id") or 0)),
             )
 
-        where_parts = ["status IN (?, ?)", "job_type = ?", "available_at <= ?"]
+        where_parts = [
+            "status IN (?, ?)",
+            "job_type = ?",
+            "available_at <= ?",
+            "repo_path IS NOT NULL AND repo_path != ''",
+        ]
         params: list[Any] = [JOB_STATUS_PENDING, JOB_STATUS_FAILED, job_type, now_iso]
         if run_ids:
             placeholders = ",".join("?" for _ in run_ids)
