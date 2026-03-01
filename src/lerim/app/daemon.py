@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from lerim.app.activity_log import log_activity
 from lerim.app.arg_utils import parse_duration_to_seconds
 from lerim.config.project_scope import match_session_project
 from lerim.config.settings import get_config, reload_config
@@ -385,6 +386,7 @@ def run_sync_once(
     window_end: datetime | None = None,
 ) -> tuple[int, SyncSummary]:
     """Run one sync cycle: index sessions, enqueue jobs, process extraction."""
+    t0 = time.monotonic()
     reload_config()
 
     started = _now_iso()
@@ -446,9 +448,7 @@ def run_sync_once(
                 )
                 indexed_sessions = len(details)
                 for item in details:
-                    match = match_session_project(
-                        item.repo_path, config.projects
-                    )
+                    match = match_session_project(item.repo_path, config.projects)
                     if match is None:
                         continue
                     _project_name, project_path = match
@@ -470,6 +470,7 @@ def run_sync_once(
         failed = 0
         learnings_new = 0
         learnings_updated = 0
+        projects: set[str] = set()
         claim_limit = max(max_sessions, 1)
 
         if no_extract:
@@ -479,13 +480,19 @@ def run_sync_once(
                 limit=claim_limit,
                 run_ids=[run_id] if run_id else None,
             )
+            for job in claimed:
+                rp = str(job.get("repo_path") or "").strip()
+                if rp:
+                    projects.add(Path(rp).name)
             target_run_ids = [
                 str(item.get("run_id") or "") for item in claimed if item.get("run_id")
             ]
             max_workers = get_config().sync_max_workers
-            extracted, failed, routing_skipped, learnings_new, learnings_updated = _process_claimed_jobs(
-                claimed,
-                max_workers=max_workers,
+            extracted, failed, routing_skipped, learnings_new, learnings_updated = (
+                _process_claimed_jobs(
+                    claimed,
+                    max_workers=max_workers,
+                )
             )
             skipped += routing_skipped
 
@@ -529,6 +536,19 @@ def run_sync_once(
                 "dry_run": dry_run,
             },
         )
+        if not dry_run and (extracted or learnings_new or learnings_updated):
+            parts = []
+            if learnings_new:
+                parts.append(f"{learnings_new} new")
+            if learnings_updated:
+                parts.append(f"{learnings_updated} updated")
+            parts.append(f"{extracted} sessions")
+            log_activity(
+                "sync",
+                ", ".join(sorted(projects)) or "global",
+                ", ".join(parts),
+                time.monotonic() - t0,
+            )
         return code, summary
     finally:
         if lock:
@@ -541,6 +561,7 @@ def run_maintain_once(
     dry_run: bool,
 ) -> tuple[int, dict]:
     """Run one maintain cycle with lock handling and service run record."""
+    t0 = time.monotonic()
     reload_config()
 
     started = _now_iso()
@@ -581,6 +602,15 @@ def run_maintain_once(
             trigger="manual",
             details=result,
         )
+        counts = (result.get("counts") or {}) if isinstance(result, dict) else {}
+        parts = []
+        for key in ("merged", "archived", "consolidated", "decayed"):
+            val = counts.get(key, 0)
+            if val:
+                parts.append(f"{val} {key}")
+        if parts:
+            project = Path.cwd().name
+            log_activity("maintain", project, ", ".join(parts), time.monotonic() - t0)
         return EXIT_OK, result
     except Exception as exc:
         _record_service_event(
