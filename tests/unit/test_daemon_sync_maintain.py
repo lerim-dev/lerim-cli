@@ -1,10 +1,11 @@
-"""Test daemon sync and maintain paths."""
+"""Test daemon sync and maintain paths, and activity log."""
 
 from __future__ import annotations
 
 import time
 
 from lerim.app import daemon
+from lerim.app.activity_log import ACTIVITY_LOG_PATH, log_activity
 from lerim.config.settings import reload_config
 from lerim.sessions import catalog
 from tests.helpers import make_config, write_test_config
@@ -209,3 +210,17 @@ def test_daemon_sync_runs_more_often_than_maintain(monkeypatch, tmp_path) -> Non
     assert sync_count > maintain_count, (
         f"sync ({sync_count}) should run more often than maintain ({maintain_count})"
     )
+
+
+def test_log_activity_appends_line(tmp_path, monkeypatch) -> None:
+    """log_activity writes one formatted line per call."""
+    log_file = tmp_path / "activity.log"
+    monkeypatch.setattr("lerim.app.activity_log.ACTIVITY_LOG_PATH", log_file)
+
+    log_activity("sync", "myproject", "3 new, 1 updated, 2 sessions", 4.2)
+    log_activity("maintain", "myproject", "2 archived, 1 merged", 6.15)
+
+    lines = log_file.read_text().splitlines()
+    assert len(lines) == 2
+    assert "| sync     | myproject | 3 new, 1 updated, 2 sessions | 4.2s" in lines[0]
+    assert "| maintain | myproject | 2 archived, 1 merged | 6.2s" in lines[1]

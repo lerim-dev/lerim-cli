@@ -9,7 +9,6 @@ from lerim.memory.memory_record import (
     MemoryRecord,
     MemoryType,
     canonical_memory_filename,
-    memory_write_schema_prompt,
     slugify,
 )
 
@@ -129,14 +128,3 @@ def test_memory_type_folders():
     assert MEMORY_TYPE_FOLDERS[MemoryType.decision] == "decisions"
     assert MEMORY_TYPE_FOLDERS[MemoryType.learning] == "learnings"
     assert MEMORY_TYPE_FOLDERS[MemoryType.summary] == "summaries"
-
-
-def test_memory_write_schema_prompt():
-    """memory_write_schema_prompt() returns non-empty string with field names."""
-    prompt = memory_write_schema_prompt()
-    assert len(prompt) > 0
-    assert "id" in prompt
-    assert "title" in prompt
-    assert "created" in prompt
-    assert "confidence" in prompt
-    assert "tags" in prompt

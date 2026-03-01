@@ -7,8 +7,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from lerim.memory.memory_record import memory_write_schema_prompt
-
 
 def build_maintain_artifact_paths(run_folder: Path) -> dict[str, Path]:
     """Return canonical workspace artifact paths for a maintain run folder."""
@@ -65,7 +63,6 @@ def build_maintain_prompt(
     artifact_json = json.dumps(
         {key: str(path) for key, path in artifact_paths.items()}, ensure_ascii=True
     )
-    schema_rules = memory_write_schema_prompt()
     access_section = _format_access_stats_section(
         access_stats,
         decay_days,
@@ -101,18 +98,21 @@ Instructions:
    - Keep the most comprehensive version as the primary.
    - Merge unique details from the secondary into the primary using edit.
    - Update the primary's "updated" timestamp to now.
-   - Archive the secondary by writing it to {memory_root}/archived/{{folder}}/ (where folder is "decisions" or "learnings") using write, then edit the original to mark as archived.
+   - Archive the secondary by copying it to {memory_root}/archived/{{folder}}/ (where folder is "decisions" or "learnings") using write(), then edit the original to mark as archived.
 
 4. ARCHIVE LOW-VALUE: Archive memories that are:
    - Very low confidence (< 0.3)
    - Trivial or obvious (e.g., "installed package X", "ran command Y" with no insight)
    - Superseded by a more complete memory covering the same ground
-   Use write to copy to archived/ folder, then edit original to mark archived.
+   Use write() to copy to archived/ folder, then edit original to mark archived.
 
 5. DECAY CHECK: Apply time-based decay using the access statistics below.
 {access_section}
 
-6. CONSOLIDATE: When you find 3+ small related memories about the same broader topic, consider combining them into one comprehensive memory file. Write the new consolidated memory via Write tool. Archive the originals.
+6. CONSOLIDATE: When you find 3+ small related memories about the same broader topic, combine them into one comprehensive memory using write_memory tool:
+   write_memory(primitive="decision"|"learning", title=..., body=..., confidence=0.0-1.0, tags=[...], kind=...)
+   kind is required for learnings: insight, procedure, friction, pitfall, or preference.
+   Archive the originals.
 
 7. REPORT: Write a JSON report to {artifact_paths["maintain_actions"]} with keys:
    - run_id: the run folder name
@@ -122,9 +122,10 @@ Instructions:
 
 Rules:
 - You are the only writer. Explore subagents are read-only.
-- Memory files use YAML frontmatter between --- delimiters.
-- {schema_rules}
-- When writing new/updated memory files, follow the same frontmatter schema.
+- ONLY read/write files under {memory_root}/ and {run_folder}/. NEVER access paths outside these directories.
+- Use write_memory() for creating new memory files (consolidation). Python builds markdown automatically.
+- Use edit() for modifying existing memory files (merge, timestamp updates).
+- Use write() ONLY for non-memory files (archived copies, JSON reports).
 - Do NOT touch {memory_root}/summaries/ — summaries are managed by the pipeline only.
 - Do NOT delete files. Always archive (soft-delete via mv to archived/).
 - Be conservative: when unsure whether to merge or archive, leave it unchanged.

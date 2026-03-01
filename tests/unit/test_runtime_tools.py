@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from pydantic_ai import ModelRetry
+
 from lerim.runtime.tools import (
     RuntimeToolContext,
     _memory_primitive_type,
@@ -15,6 +17,7 @@ from lerim.runtime.tools import (
     grep_files_tool,
     read_file_tool,
     write_file_tool,
+    write_memory_tool,
 )
 from lerim.memory.memory_record import MemoryType
 from tests.helpers import make_config
@@ -65,13 +68,14 @@ def test_read_boundary_allows_workspace(tmp_path):
 
 
 def test_read_boundary_denies_outside(tmp_path):
-    """read_file_tool raises for files outside allowed roots."""
+    """read_file_tool returns error string for files outside allowed roots."""
     ctx = _make_context(tmp_path)
     outside = tmp_path / "outside" / "secret.txt"
     outside.parent.mkdir(parents=True)
     outside.write_text("secret", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="outside allowed roots"):
-        read_file_tool(context=ctx, file_path=str(outside))
+    result = read_file_tool(context=ctx, file_path=str(outside))
+    assert "ERROR" in result
+    assert "outside allowed roots" in result
 
 
 def test_read_boundary_allows_extra_roots(tmp_path):
@@ -87,19 +91,31 @@ def test_read_boundary_allows_extra_roots(tmp_path):
 # -- Write boundary tests --
 
 
-def test_write_boundary_allows_memory_root(tmp_path):
-    """write_file_tool succeeds for files under memory_root."""
+def test_write_memory_tool_creates_decision(tmp_path):
+    """write_memory_tool creates a decision file from structured fields."""
     ctx = _make_context(tmp_path)
-    content = (
-        "---\ntitle: Test Decision\nconfidence: 0.9\ntags: [test]\n---\nDecision body."
-    )
-    result = write_file_tool(
+    result = write_memory_tool(
         context=ctx,
-        file_path=str(ctx.memory_root / "decisions" / "test.md"),
-        content=content,
+        primitive="decision",
+        title="Test Decision",
+        body="Decision body.",
+        confidence=0.9,
+        tags=["test"],
     )
     assert "file_path" in result
     assert result["primitive"] == "decision"
+    assert Path(result["file_path"]).exists()
+
+
+def test_write_file_tool_rejects_memory_path(tmp_path):
+    """write_file_tool raises ModelRetry for memory primitive paths, directing to write_memory."""
+    ctx = _make_context(tmp_path)
+    with pytest.raises(ModelRetry, match="write_memory"):
+        write_file_tool(
+            context=ctx,
+            file_path=str(ctx.memory_root / "decisions" / "test.md"),
+            content="---\ntitle: Test\n---\nbody",
+        )
 
 
 def test_write_boundary_allows_run_folder(tmp_path):
@@ -121,42 +137,47 @@ def test_write_boundary_denies_outside(tmp_path):
         write_file_tool(context=ctx, file_path=str(outside), content="bad")
 
 
-def test_write_normalizes_frontmatter(tmp_path):
-    """write_file_tool adds server-side fields (created, updated, source)."""
+def test_write_memory_adds_server_side_fields(tmp_path):
+    """write_memory_tool adds created, updated, source fields automatically."""
     ctx = _make_context(tmp_path)
-    content = "---\ntitle: My Decision\nid: my-decision\nconfidence: 0.85\ntags: [auth]\n---\nBody here."
-    result = write_file_tool(
+    result = write_memory_tool(
         context=ctx,
-        file_path=str(ctx.memory_root / "decisions" / "my-decision.md"),
-        content=content,
+        primitive="decision",
+        title="My Decision",
+        body="Body here.",
+        confidence=0.85,
+        tags=["auth"],
     )
     written = Path(result["file_path"]).read_text(encoding="utf-8")
     assert "created:" in written
     assert "source:" in written
 
 
-def test_write_preserves_existing_frontmatter(tmp_path):
-    """write_file_tool preserves user-provided frontmatter fields."""
+def test_write_memory_preserves_fields(tmp_path):
+    """write_memory_tool preserves confidence and tags in output."""
     ctx = _make_context(tmp_path)
-    content = "---\ntitle: Custom\nid: custom-id\nconfidence: 0.95\ntags: [custom]\n---\nCustom body."
-    result = write_file_tool(
+    result = write_memory_tool(
         context=ctx,
-        file_path=str(ctx.memory_root / "decisions" / "custom.md"),
-        content=content,
+        primitive="decision",
+        title="Custom",
+        body="Custom body.",
+        confidence=0.95,
+        tags=["custom"],
     )
     written = Path(result["file_path"]).read_text(encoding="utf-8")
-    assert "custom-id" in written
+    assert "custom" in written.lower()
     assert "0.95" in written
 
 
-def test_write_canonical_filename(tmp_path):
-    """write_file_tool renames to canonical YYYYMMDD-slug.md format."""
+def test_write_memory_canonical_filename(tmp_path):
+    """write_memory_tool uses canonical YYYYMMDD-slug.md format."""
     ctx = _make_context(tmp_path)
-    content = "---\ntitle: My Title\nconfidence: 0.8\ntags: []\n---\nBody."
-    result = write_file_tool(
+    result = write_memory_tool(
         context=ctx,
-        file_path=str(ctx.memory_root / "decisions" / "anything.md"),
-        content=content,
+        primitive="decision",
+        title="My Title",
+        body="Body.",
+        confidence=0.8,
     )
     filename = Path(result["file_path"]).name
     assert filename.endswith("-my-title.md")
@@ -218,12 +239,12 @@ def test_glob_within_boundary(tmp_path):
 
 
 def test_glob_outside_boundary(tmp_path):
-    """glob_files_tool raises for base_path outside allowed roots."""
+    """glob_files_tool returns empty list for base_path outside allowed roots."""
     ctx = _make_context(tmp_path)
     outside = tmp_path / "outside"
     outside.mkdir()
-    with pytest.raises(RuntimeError, match="outside allowed roots"):
-        glob_files_tool(context=ctx, pattern="*.md", base_path=str(outside))
+    result = glob_files_tool(context=ctx, pattern="*.md", base_path=str(outside))
+    assert result == []
 
 
 def test_grep_within_boundary(tmp_path):

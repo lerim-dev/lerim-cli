@@ -19,7 +19,7 @@ from lerim.runtime.prompts.maintain import (
     build_maintain_artifact_paths,
     build_maintain_prompt,
 )
-from lerim.runtime.tools import build_tool_context, read_file_tool, write_file_tool
+from lerim.runtime.tools import build_tool_context, read_file_tool, write_memory_tool
 from tests.helpers import make_config
 
 
@@ -154,17 +154,14 @@ class TestRuntimeToolAccessTracking:
     def test_write_tool_tracks_memory_write(self, tmp_path: Path) -> None:
         context = self._context(tmp_path)
         assert context.memory_root is not None
-        write_file_tool(
+        write_memory_tool(
             context=context,
-            file_path=str(context.memory_root / "learnings" / "draft.md"),
-            content=(
-                "---\n"
-                "title: Queue pattern\n"
-                "confidence: 0.8\n"
-                "tags: [queue]\n"
-                "---\n"
-                "Keep claim and heartbeat flow deterministic.\n"
-            ),
+            primitive="learning",
+            title="Queue pattern",
+            body="Keep claim and heartbeat flow deterministic.",
+            confidence=0.8,
+            tags=["queue"],
+            kind="insight",
         )
         stats = get_access_stats(
             context.config.memories_db_path, str(context.memory_root)

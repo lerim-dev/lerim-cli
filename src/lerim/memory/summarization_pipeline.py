@@ -247,10 +247,11 @@ def summarize_trace_from_session_file(
     if not session_file_path.exists() or not session_file_path.is_file():
         raise FileNotFoundError(f"session_file_missing:{session_file_path}")
     transcript = session_file_path.read_text(encoding="utf-8")
-    session_metadata = {**(metadata or {}), "raw_trace_path": str(session_file_path)}
+    meta = metadata or {}
+    meta.setdefault("raw_trace_path", str(session_file_path))
     return _summarize_trace(
         transcript,
-        metadata=session_metadata,
+        metadata=meta,
         metrics=metrics,
         guidance=guidance,
     )

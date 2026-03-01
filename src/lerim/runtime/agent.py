@@ -33,6 +33,7 @@ from lerim.runtime.tools import (
     run_extract_pipeline_tool,
     run_summarization_pipeline_tool,
     write_file_tool,
+    write_memory_tool,
 )
 
 logger = logging.getLogger("lerim.runtime")
@@ -44,6 +45,7 @@ SYNC_TOOLS = [
     "glob",
     "explore",
     "write",
+    "write_memory",
     "extract_pipeline",
     "summarize_pipeline",
 ]
@@ -53,6 +55,7 @@ MAINTAIN_TOOLS = [
     "glob",
     "explore",
     "write",
+    "write_memory",
     "edit",
 ]
 
@@ -309,11 +312,34 @@ Always use tools to read/write files and produce concise completion output."""
                 file_path: str,
                 content: str,
             ) -> dict[str, Any]:
-                """Write file content with boundary checks and normalization."""
+                """Write non-memory files (JSON reports, logs, archived copies). For memory files in decisions/ or learnings/, use write_memory instead."""
                 return write_file_tool(
                     context=ctx.deps,
                     file_path=file_path,
                     content=content,
+                )
+
+        if "write_memory" in allowed_tools:
+
+            @agent.tool
+            def write_memory(
+                ctx: RunContext[RuntimeToolContext],
+                primitive: str,
+                title: str,
+                body: str,
+                confidence: float = 0.8,
+                tags: list[str] | None = None,
+                kind: str | None = None,
+            ) -> dict[str, Any]:
+                """Write a structured memory record. Python builds the markdown — pass fields directly. primitive must be 'decision' or 'learning'. kind is required for learnings (insight/procedure/friction/pitfall/preference)."""
+                return write_memory_tool(
+                    context=ctx.deps,
+                    primitive=primitive,
+                    title=title,
+                    body=body,
+                    confidence=confidence,
+                    tags=tags,
+                    kind=kind,
                 )
 
         if "edit" in allowed_tools:
@@ -340,23 +366,11 @@ Always use tools to read/write files and produce concise completion output."""
             @agent.tool
             def extract_pipeline(
                 ctx: RunContext[RuntimeToolContext],
-                trace_path: str,
-                output_path: str,
-                metadata: Any | None = None,
-                metrics: Any | None = None,
                 guidance: str | None = None,
             ) -> dict[str, Any]:
-                """Run DSPy extraction pipeline and write JSON artifact.
-
-                metadata and metrics may be dicts or JSON strings.
-                guidance is optional natural language context from the lead agent.
-                """
+                """Run DSPy extraction pipeline on the session trace. Paths and metadata are handled automatically. Pass optional guidance about focus areas or dedupe hints."""
                 return run_extract_pipeline_tool(
                     context=ctx.deps,
-                    trace_path=trace_path,
-                    output_path=output_path,
-                    metadata=metadata,
-                    metrics=metrics,
                     guidance=guidance,
                 )
 
@@ -365,23 +379,11 @@ Always use tools to read/write files and produce concise completion output."""
             @agent.tool
             def summarize_pipeline(
                 ctx: RunContext[RuntimeToolContext],
-                trace_path: str,
-                output_path: str,
-                metadata: Any | None = None,
-                metrics: Any | None = None,
                 guidance: str | None = None,
             ) -> dict[str, Any]:
-                """Run DSPy summarization pipeline and write summary pointer artifact.
-
-                metadata and metrics may be dicts or JSON strings.
-                guidance is optional natural language context from the lead agent.
-                """
+                """Run DSPy summarization pipeline on the session trace. Paths and metadata are handled automatically. Pass optional guidance about focus areas."""
                 return run_summarization_pipeline_tool(
                     context=ctx.deps,
-                    trace_path=trace_path,
-                    output_path=output_path,
-                    metadata=metadata,
-                    metrics=metrics,
                     guidance=guidance,
                 )
 
@@ -526,6 +528,8 @@ Always use tools to read/write files and produce concise completion output."""
             extra_read_roots=extra_roots,
             run_id=run_folder.name,
             config=self.config,
+            trace_path=trace_file,
+            artifact_paths=artifact_paths,
         )
         response, _ = self._run_agent_once(
             prompt=prompt,

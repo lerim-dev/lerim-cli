@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import json
-import shlex
 from pathlib import Path
 from tempfile import TemporaryDirectory
-
-from lerim.memory.memory_record import memory_write_schema_prompt
 
 
 def build_sync_prompt(
@@ -19,24 +16,9 @@ def build_sync_prompt(
     metadata: dict[str, str],
 ) -> str:
     """Build lead-agent prompt for the memory write flow."""
-    metadata_json = json.dumps(metadata, ensure_ascii=True)
     artifact_json = json.dumps(
         {key: str(path) for key, path in artifact_paths.items()}, ensure_ascii=True
     )
-    extract_cmd = f"""\
-python3 -m lerim.memory.extract_pipeline \
---trace-path {shlex.quote(str(trace_file))} \
---output {shlex.quote(str(artifact_paths["extract"]))} \
---metadata-json {shlex.quote(metadata_json)} \
---metrics-json '{{}}'"""
-    summary_cmd = f"""\
-python3 -m lerim.memory.summarization_pipeline \
---trace-path {shlex.quote(str(trace_file))} \
---output {shlex.quote(str(artifact_paths["summary"]))} \
---memory-root {shlex.quote(str(memory_root))} \
---metadata-json {shlex.quote(metadata_json)} \
---metrics-json '{{}}'"""
-    schema_rules = memory_write_schema_prompt()
     return f"""\
 Run the Lerim agent-led memory write flow.
 
@@ -46,41 +28,38 @@ Inputs:
 - run_folder_path: {run_folder}
 - artifact_paths_json: {artifact_json}
 
-Checklist:
-- validate_inputs
-- PARALLEL: call extract_pipeline AND summarize_pipeline together in the SAME tool-call turn (they are independent — both read the raw trace)
-- optionally compose short guidance from trace metadata/context and pass it to both pipeline calls
-- explore for matching
-- decide_add_update_no_op
-- write memory files
-- write run decision report
+Steps (minimize tool turns — batch parallel calls aggressively):
 
-{schema_rules}
+1. EXTRACT + SUMMARIZE (one turn, parallel):
+   Call extract_pipeline() and summarize_pipeline() together in the SAME tool-call turn.
+   Paths, metadata, and output locations are handled automatically. Only pass optional guidance.
 
-Execution rules:
-- Do not inline or normalize trace content. Use only trace_path file access.
-- Use runtime pipeline tools — call BOTH in the SAME response turn so they run in parallel:
-  1) extract_pipeline(trace_path, output_path, metadata, metrics, guidance)
-  2) summarize_pipeline(trace_path, output_path, metadata, metrics, guidance)
-  (Equivalent reference commands: {extract_cmd} and {summary_cmd})
-- guidance is optional. If used, keep it concise and specific (trace shape, likely focus areas, and dedupe hints).
-- Read extract.json from artifact paths.
-- The summary pipeline writes the summary directly to memory_root/summaries/ via --memory-root. Do NOT write summary files yourself.
-- For candidate matching, use explore(query) to gather evidence.
-- You can call up to 4 explore() calls in the SAME tool-call turn for parallel execution when you have independent queries (e.g. one per extracted candidate).
-- Explorer subagent is read-only and returns evidence envelopes.
-- Lead agent is the only writer and final decider.
-- Deterministic decision policy for non-summary candidates:
-  - no_op when matched memory has exact same primitive + title + body.
-  - update when primitive matches and token-overlap score >= 0.72.
-  - add otherwise.
-- Write markdown memory files with YAML frontmatter in memory_root/decisions, memory_root/learnings using write tool.
-- If extract returns 0 candidates, write an empty JSONL file to subagents_log (explorer is skipped).
-- Write explorer outputs to {artifact_paths["subagents_log"]} as JSONL.
-- Write run report JSON to {artifact_paths["memory_actions"]} with keys: run_id, todos, actions, counts, written_memory_paths, trace_path.
-- Include overlap score evidence in actions when action is update/no_op.
-- counts keys must be: add, update, no_op.
-- Every written/updated file path must be absolute.
+2. READ EXTRACT RESULTS (one turn):
+   Read extract.json from artifact paths.
+
+3. EXPLORE (one turn, parallel):
+   Call up to 4 explore() calls in the SAME turn for candidate matching.
+   Explorer subagent is read-only. If 0 candidates, skip to step 5.
+
+4. WRITE MEMORIES (one turn, parallel):
+   Call ALL write_memory() calls in the SAME turn for every add/update candidate.
+   write_memory(primitive="decision"|"learning", title=..., body=..., confidence=0.0-1.0, tags=[...], kind=...)
+   kind is required for learnings: insight, procedure, friction, pitfall, or preference.
+   IMPORTANT: write_memory is the ONLY tool for creating memory files. write() will reject memory paths.
+   Decision policy:
+   - no_op: matched memory has exact same primitive + title + body.
+   - update: primitive matches and token-overlap score >= 0.72.
+   - add: otherwise.
+
+5. WRITE REPORTS (one turn, parallel):
+   Call write() for ALL of these in the SAME turn:
+   - Explorer outputs to {artifact_paths["subagents_log"]} as JSONL (empty file if no candidates).
+   - Run report JSON to {artifact_paths["memory_actions"]} with keys: run_id, todos, actions, counts, written_memory_paths, trace_path.
+     counts keys: add, update, no_op. Include overlap score evidence in actions when update/no_op.
+     Every file path must be absolute.
+   write() is ONLY for non-memory files (JSON artifacts, reports, logs).
+
+The summary pipeline writes directly to memory_root/summaries/. Do NOT write summary files yourself.
 
 Return one short plain-text completion line."""
 
@@ -111,5 +90,5 @@ if __name__ == "__main__":
             },
         )
         assert "artifact_paths_json" in prompt
-        assert "--memory-root" in prompt
+        assert "extract_pipeline" in prompt
         assert "Do NOT write summary files yourself" in prompt

@@ -87,31 +87,6 @@ def memory_folder(memory_type: MemoryType) -> str:
     return MEMORY_TYPE_FOLDERS[memory_type]
 
 
-def memory_write_schema_prompt() -> str:
-    """Return a prompt-ready description of memory file naming and frontmatter rules."""
-    lines = [
-        "Memory file write rules (strict):",
-        "- Filename format: {YYYYMMDD}-{slug}.md where slug is the slugified title.",
-        "- Every memory file must start with YAML frontmatter between --- delimiters.",
-        "- Required frontmatter fields per type:",
-    ]
-    for ptype, fields in MEMORY_FRONTMATTER_SCHEMA.items():
-        lines.append(f"  {ptype.value}: {', '.join(fields)}")
-    lines += [
-        "- Field rules:",
-        "  - id: slugified title (lowercase, hyphens, no special chars).",
-        "  - created/updated: ISO 8601 UTC (e.g. 2026-02-20T23:10:32Z).",
-        "  - source: the run_id from metadata.",
-        "  - confidence: float 0.0-1.0.",
-        "  - kind: one of insight, procedure, friction, pitfall, preference.",
-        "  - tags: list of group/cluster labels.",
-        "  - Do not add extra fields beyond the required set.",
-        "- Body follows the closing --- delimiter as plain text/markdown.",
-        "- Summaries are written directly by the summarization pipeline, not by the agent.",
-    ]
-    return "\n".join(lines)
-
-
 class MemoryRecord(MemoryCandidate):
     """On-disk memory record for decisions/learnings.
 

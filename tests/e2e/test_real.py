@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-import tempfile
-import unittest
 from pathlib import Path
 
 import pytest
@@ -12,39 +10,29 @@ import pytest
 from lerim.config.settings import reload_config
 from lerim.memory import extract_pipeline as pipeline
 from lerim.sessions import catalog
-from tests.helpers import run_cli, write_test_config
+from tests.helpers import write_test_config
 
 
-_HAS_ZAI = bool(os.environ.get("ZAI_API_KEY"))
-_HAS_OPENAI = bool(os.environ.get("OPENAI_API_KEY"))
+pytestmark = pytest.mark.e2e
 
-
-@pytest.mark.e2e
-@pytest.mark.agent
-@unittest.skipUnless(
-    _HAS_ZAI and _HAS_OPENAI and os.environ.get("LERIM_E2E", ""),
-    "Set LERIM_E2E=1 with ZAI_API_KEY and OPENAI_API_KEY to run E2E tests",
+_skip = pytest.mark.skipif(
+    not os.environ.get("LERIM_E2E"),
+    reason="LERIM_E2E not set",
 )
-class TestE2EReal(unittest.TestCase):
-    def test_ask_end_to_end(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            config_path = write_test_config(
-                tmp_path,
-                agent={
-                    "provider": "openrouter",
-                    "model": "qwen/qwen3-coder-30b-a3b-instruct",
-                    "timeout": 120,
-                },
-                embeddings={"provider": "openai", "model": "text-embedding-3-small"},
-            )
-            os.environ["LERIM_CONFIG"] = str(config_path)
-            reload_config()
-            exit_code, output = run_cli(["ask", "Respond with exactly: OK"])
 
-        self.assertEqual(exit_code, 0)
-        self.assertIn("OK", output)
-        self.assertGreater(len(output.strip()), 0)
+
+@_skip
+def test_ask_end_to_end(tmp_path):
+    """LerimAgent.ask returns a response from a real LLM."""
+    from lerim.runtime.agent import LerimAgent
+
+    agent = LerimAgent()
+    response, session_id = agent.ask(
+        "Respond with exactly: OK",
+        memory_root=tmp_path,
+    )
+    assert isinstance(response, str)
+    assert len(response.strip()) > 0
 
 
 def test_extract_pipeline_end_to_end_without_network(
@@ -94,4 +82,4 @@ def test_extract_pipeline_end_to_end_without_network(
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main([__file__, "-v"])

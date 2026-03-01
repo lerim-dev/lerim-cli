@@ -38,6 +38,7 @@ def test_sync_mode_uses_memory_write_toolset() -> None:
     built = agent._build_lead_agent("sync")
     tool_names = set(built._function_toolset.tools.keys())
     assert "write" in tool_names
+    assert "write_memory" in tool_names
     assert "extract_pipeline" in tool_names
     assert "summarize_pipeline" in tool_names
 
@@ -174,11 +175,6 @@ def test_sync_prompt_uses_trace_path_not_trace_content(tmp_path: Path) -> None:
 
     assert str(trace_path.resolve()) in prompt
     assert "NEVER_INLINE_THIS_TRACE_CONTENT" not in prompt
-    assert (
-        "extract_pipeline(trace_path, output_path, metadata, metrics, guidance)"
-        in prompt
-    )
-    assert (
-        "summarize_pipeline(trace_path, output_path, metadata, metrics, guidance)"
-        in prompt
-    )
+    assert "extract_pipeline" in prompt
+    assert "summarize_pipeline" in prompt
+    assert "write_memory" in prompt
