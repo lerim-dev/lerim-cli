@@ -71,7 +71,6 @@ def make_config(base: Path) -> Config:
         ),
         sync_window_days=7,
         sync_max_sessions=50,
-        sync_max_workers=4,
         tracing_enabled=False,
         tracing_include_httpx=False,
         tracing_include_content=True,

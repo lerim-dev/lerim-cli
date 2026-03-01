@@ -261,7 +261,6 @@ class Config:
     maintain_interval_minutes: int
     sync_window_days: int
     sync_max_sessions: int
-    sync_max_workers: int
 
     lead_role: LLMRoleConfig
     explorer_role: LLMRoleConfig
@@ -595,7 +594,6 @@ def load_config() -> Config:
         ),
         sync_window_days=_require_int(server, "sync_window_days", minimum=1),
         sync_max_sessions=_require_int(server, "sync_max_sessions", minimum=1),
-        sync_max_workers=_require_int(server, "sync_max_workers", minimum=1),
         lead_role=lead_role,
         explorer_role=explorer_role,
         extract_role=extract_role,

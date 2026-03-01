@@ -852,7 +852,6 @@ def _serialize_full_config(config: Config) -> dict[str, Any]:
             "maintain_interval_minutes": config.maintain_interval_minutes,
             "sync_window_days": config.sync_window_days,
             "sync_max_sessions": config.sync_max_sessions,
-            "sync_max_workers": config.sync_max_workers,
         },
         "memory": {
             "scope": config.memory_scope,

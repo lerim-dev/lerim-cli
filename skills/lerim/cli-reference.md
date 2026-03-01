@@ -176,8 +176,8 @@ lerim maintain --dry-run      # preview only, no writes
 
 Runs a continuous loop with independent sync and maintain intervals.
 Sync (hot path) runs frequently; maintain (cold path) runs less often.
-Sessions are processed in parallel using a thread pool (configurable
-via `sync_max_workers`, default 4).
+Sessions are processed sequentially in chronological order (oldest first)
+so that later sessions can update memories from earlier ones.
 
 ```bash
 lerim daemon                     # run forever (sync every 10 min, maintain every 60 min)

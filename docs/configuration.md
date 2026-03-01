@@ -78,7 +78,6 @@ sync_interval_minutes = 10          # sync hot path interval (default: 10)
 maintain_interval_minutes = 60      # maintain cold path interval (default: 60)
 sync_window_days = 7
 sync_max_sessions = 50
-sync_max_workers = 4
 ```
 
 ### Daemon intervals
