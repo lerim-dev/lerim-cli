@@ -296,16 +296,22 @@ Always use tools to read/write files and produce concise completion output."""
             async def explore(
                 ctx: RunContext[RuntimeToolContext],
                 query: str,
-            ) -> dict[str, Any]:
+            ) -> str:
                 """Delegate read-only evidence gathering to explorer subagent.
 
                 Async so PydanticAI can run multiple explore calls in parallel
                 when the LLM emits them in the same tool-call turn (max 4).
                 """
-                result = await get_explorer_agent().run(
-                    query, deps=ctx.deps, usage=ctx.usage
-                )
-                return result.output.model_dump()
+                try:
+                    result = await get_explorer_agent().run(
+                        query, deps=ctx.deps, usage=ctx.usage
+                    )
+                    return str(result.output or "")
+                except Exception as exc:
+                    from lerim.config.logging import logger
+
+                    logger.warning("explore subagent failed: {}", exc)
+                    return ""
 
         if "write" in allowed_tools:
 
@@ -675,17 +681,26 @@ Always use tools to read/write files and produce concise completion output."""
             if not isinstance(action, dict):
                 continue
             for path_key in ("source_path", "target_path"):
-                raw = str(action.get(path_key) or "").strip()
-                if not raw:
-                    continue
-                resolved = Path(raw).resolve()
-                if not (
-                    self._is_within(resolved, resolved_memory_root)
-                    or self._is_within(resolved, run_folder)
-                ):
-                    raise RuntimeError(
-                        f"maintain_action_path_outside_allowed_roots:{path_key}={resolved}"
-                    )
+                val = action.get(path_key)
+                # LLM may return a list of paths; normalise to flat
+                # list of strings so each is validated individually.
+                paths_raw: list[str] = (
+                    [str(v) for v in val]
+                    if isinstance(val, list)
+                    else [str(val or "").strip()]
+                )
+                for raw in paths_raw:
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    resolved = Path(raw).resolve()
+                    if not (
+                        self._is_within(resolved, resolved_memory_root)
+                        or self._is_within(resolved, run_folder)
+                    ):
+                        raise RuntimeError(
+                            f"maintain_action_path_outside_allowed_roots:{path_key}={resolved}"
+                        )
 
         payload = {
             "memory_root": str(resolved_memory_root),

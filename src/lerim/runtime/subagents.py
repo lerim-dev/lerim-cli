@@ -7,7 +7,6 @@ from tempfile import TemporaryDirectory
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.test import TestModel
 
-from lerim.runtime.contracts import ExplorerEnvelope
 from lerim.runtime.providers import build_orchestration_model
 from lerim.runtime.tools import (
     RuntimeToolContext,
@@ -18,11 +17,16 @@ from lerim.runtime.tools import (
 )
 
 
-def _build_explorer(model=None) -> Agent[RuntimeToolContext, ExplorerEnvelope]:
-    """Build read-only explorer subagent with glob/read/grep tools."""
-    agent = Agent[RuntimeToolContext, ExplorerEnvelope](
+def _build_explorer(model=None) -> Agent[RuntimeToolContext, str]:
+    """Build read-only explorer subagent with glob/read/grep tools.
+
+    Uses plain ``str`` output so the model can return free-form text
+    evidence instead of being forced into a structured schema that
+    causes repeated output-validation failures with some providers.
+    """
+    agent = Agent[RuntimeToolContext, str](
         model=model or build_orchestration_model("explorer"),
-        output_type=ExplorerEnvelope,
+        output_type=str,
         deps_type=RuntimeToolContext,
         name="lerim-explorer",
         instructions="""\
@@ -39,8 +43,8 @@ Search strategy:
 1. Use grep to find memories by keyword, title, or tag (e.g. grep pattern="sqlite" or grep pattern="tag:.*database").
 2. Use glob to list files when you need to scan a directory (e.g. glob pattern="decisions/*.md").
 3. Use read to get the full content of specific files found by grep/glob.
-Return structured evidence with file paths.""",
-        retries=1,
+Return evidence with file paths and relevant snippets as plain text.""",
+        retries=2,
     )
 
     @agent.tool
@@ -87,10 +91,10 @@ Return structured evidence with file paths.""",
     return agent
 
 
-_explorer_singleton: Agent[RuntimeToolContext, ExplorerEnvelope] | None = None
+_explorer_singleton: Agent[RuntimeToolContext, str] | None = None
 
 
-def get_explorer_agent() -> Agent[RuntimeToolContext, ExplorerEnvelope]:
+def get_explorer_agent() -> Agent[RuntimeToolContext, str]:
     """Return the module-level explorer singleton (lazy-init on first call)."""
     global _explorer_singleton
     if _explorer_singleton is None:

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from pydantic_ai.models.test import TestModel
 
-from lerim.runtime.contracts import ExplorerEnvelope
 from lerim.runtime.subagents import _build_explorer, get_explorer_agent
 
 
@@ -35,7 +34,7 @@ def test_explorer_singleton():
     assert a is b
 
 
-def test_explorer_output_schema():
-    """Explorer produces ExplorerEnvelope output."""
+def test_explorer_output_type_is_str():
+    """Explorer uses plain str output (no structured schema)."""
     explorer = _build_explorer(model=TestModel())
-    assert explorer.output_type is ExplorerEnvelope
+    assert explorer.output_type is str
