@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.54] - 2026-03-02
+
+### Added
+
+- **MiniMax provider support** — MiniMax Coding Plan (`https://api.minimax.io/v1`) now available as a provider. MiniMax-M2.5 is the new default model for all roles.
+- **Z.AI Coding Plan endpoint** — Z.AI provider now uses the Coding Plan API endpoint (`https://api.z.ai/api/coding/paas/v4`) for subscription-based pricing.
+- **FallbackModel chains** — All roles default to MiniMax (primary) with Z.AI fallback for cost-effective, resilient operation.
+
+### Changed
+
+- Default provider switched from OpenRouter to **MiniMax** across all four roles (lead, explorer, extract, summarize).
+- Default fallback models switched to **Z.AI** (glm-4.7 for lead/explorer, glm-4.5-air for extract/summarize).
+- Documentation enriched with Material for MkDocs components (admonitions, tabs, grids, steps) and restructured navigation.
+- Clarified that API keys are only required for providers you actually configure — no keys are universally mandatory.
+
 ## [0.1.53] - 2026-03-01
 
 ### Fixed

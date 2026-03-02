@@ -36,7 +36,7 @@ lerim --version
 You should see output like:
 
 ```
-lerim, version 0.1.53
+lerim, version 0.1.54
 ```
 
 </div>
