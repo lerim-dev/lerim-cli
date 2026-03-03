@@ -92,6 +92,35 @@ def test_build_dspy_lm_zai(tmp_path):
     assert isinstance(lm, dspy.LM)
 
 
+def test_build_dspy_lm_mlx(tmp_path):
+    """build_dspy_lm with mlx provider constructs 'openai/model' LM."""
+    import dspy
+    from dataclasses import replace
+    from lerim.config.settings import DSPyRoleConfig
+
+    cfg = make_config(tmp_path)
+    mlx_role = DSPyRoleConfig(
+        provider="mlx",
+        model="mlx-community/Qwen3.5-9B-4bit",
+        api_base="",
+        timeout_seconds=120,
+        max_window_tokens=300000,
+        window_overlap_tokens=5000,
+        openrouter_provider_order=(),
+    )
+    cfg = replace(cfg, extract_role=mlx_role)
+    lm = build_dspy_lm("extract", config=cfg)
+    assert isinstance(lm, dspy.LM)
+
+
+def test_api_key_mlx_returns_none(tmp_path):
+    """MLX provider does not require an API key."""
+    from lerim.runtime.providers import _api_key_for_provider
+
+    cfg = make_config(tmp_path)
+    assert _api_key_for_provider(cfg, "mlx") is None
+
+
 def test_build_orchestration_model_with_fallback(tmp_path):
     """build_orchestration_model with fallback_models returns FallbackModel."""
     from dataclasses import replace
@@ -148,7 +177,7 @@ def test_missing_api_key_raises(tmp_path):
 
 def test_list_provider_models():
     """list_provider_models returns non-empty list for known providers."""
-    for provider in ("zai", "openrouter", "openai", "ollama"):
+    for provider in ("zai", "openrouter", "openai", "ollama", "mlx", "minimax"):
         models = list_provider_models(provider)
         assert len(models) > 0, f"No models for {provider}"
     # Unknown provider returns empty

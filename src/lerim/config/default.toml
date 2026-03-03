@@ -71,6 +71,7 @@ zai = "https://api.z.ai/api/coding/paas/v4"
 openai = "https://api.openai.com/v1"
 openrouter = "https://openrouter.ai/api/v1"
 ollama = "http://127.0.0.1:11434"
+mlx = "http://127.0.0.1:8000/v1"
 
 [tracing]
 enabled = false                          # set true or LERIM_TRACING=1 to enable

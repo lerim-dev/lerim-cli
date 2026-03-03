@@ -110,6 +110,13 @@ def _build_single_orchestration_model(
             else ollama_base,
         )
         return OpenAIChatModel(model_name=model, provider=provider_obj)
+    if provider_name == "mlx":
+        mlx_base = api_base or _default_api_base("mlx", config)
+        provider_obj = OpenAIProvider(
+            api_key="mlx",
+            base_url=f"{mlx_base}/v1" if not mlx_base.endswith("/v1") else mlx_base,
+        )
+        return OpenAIChatModel(model_name=model, provider=provider_obj)
     if provider_name in {"zai", "openai", "minimax"}:
         provider_obj = OpenAIProvider(
             api_key=_api_key_for_provider(config, provider_name),
@@ -175,6 +182,14 @@ def _build_dspy_lm_for_provider(
             f"ollama_chat/{model}",
             api_key="ollama",
             api_base=api_base or _default_api_base("ollama"),
+            cache=False,
+            max_tokens=16000,
+        )
+    if provider == "mlx":
+        return dspy.LM(
+            f"openai/{model}",
+            api_key="mlx",
+            api_base=api_base or _default_api_base("mlx"),
             cache=False,
             max_tokens=16000,
         )
@@ -245,6 +260,11 @@ def list_provider_models(provider: str) -> list[str]:
         ],
         "openai": ["gpt-5-mini", "gpt-5"],
         "ollama": ["qwen3:8b", "qwen3:4b", "qwen3:14b"],
+        "mlx": [
+            "mlx-community/Qwen3.5-9B-4bit",
+            "mlx-community/Qwen3.5-27B-4bit",
+            "mlx-community/Qwen3.5-35B-A3B-4bit",
+        ],
     }
     return list(options.get(normalized, []))
 

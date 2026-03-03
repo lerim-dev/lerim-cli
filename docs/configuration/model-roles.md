@@ -146,6 +146,28 @@ No API key required. Make sure Ollama is running locally. You can override the
 ollama = "http://127.0.0.1:11434"
 ```
 
+### Use vllm-mlx (Apple Silicon local models)
+
+```toml
+[roles.extract]
+provider = "mlx"
+model = "mlx-community/Qwen3.5-4B-Instruct-4bit"
+```
+
+No API key required. Requires [vllm-mlx](https://github.com/vllm-project/vllm-mlx)
+running locally (`pip install vllm-mlx`). Start the server with:
+
+```bash
+vllm-mlx serve mlx-community/Qwen3.5-4B-Instruct-4bit --port 8000
+```
+
+Override the default base URL per-role or in `[providers]`:
+
+```toml
+[providers]
+mlx = "http://127.0.0.1:8000/v1"
+```
+
 !!! tip "Cost optimization"
     Use a cheaper/faster model for `extract` and `summarize` (high-volume DSPy
     tasks) and a more capable model for `lead` and `explorer` (orchestration
@@ -155,7 +177,7 @@ ollama = "http://127.0.0.1:11434"
 
 | Option | Applies to | Description |
 |--------|-----------|-------------|
-| `provider` | All roles | Backend: `minimax`, `zai`, `openrouter`, `openai`, `ollama` |
+| `provider` | All roles | Backend: `minimax`, `zai`, `openrouter`, `openai`, `ollama`, `mlx` |
 | `model` | All roles | Model identifier. For OpenRouter, use the full slug (e.g. `openai/gpt-5-nano`). |
 | `api_base` | All roles | Custom API endpoint. Empty string = use default from `[providers]`. |
 | `fallback_models` | All roles | Ordered fallback chain. Format: `"model-slug"` (inherits role provider) or `"provider:model-slug"`. |
@@ -191,6 +213,7 @@ Fallback format:
 | `openai` | `OPENAI_API_KEY` |
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `ollama` | *(none required)* |
+| `mlx` | *(none required)* |
 
 !!! warning "Missing keys"
     If the required API key for a role's provider is not set, Lerim raises an

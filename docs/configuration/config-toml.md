@@ -79,6 +79,7 @@ zai = "https://api.z.ai/api/coding/paas/v4"
 openai = "https://api.openai.com/v1"
 openrouter = "https://openrouter.ai/api/v1"
 ollama = "http://127.0.0.1:11434"
+mlx = "http://127.0.0.1:8000/v1"
 
 [tracing]
 enabled = false
@@ -164,7 +165,7 @@ for a full breakdown.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `provider` | string | `"minimax"` | Provider backend: `minimax`, `zai`, `openrouter`, `openai`, `ollama`. |
+| `provider` | string | `"minimax"` | Provider backend: `minimax`, `zai`, `openrouter`, `openai`, `ollama`, `mlx`. |
 | `model` | string | varies | Model identifier (e.g. `MiniMax-M2.5`). |
 | `api_base` | string | `""` | Custom API base URL. Empty = use provider default from `[providers]`. |
 | `fallback_models` | list | `[]` | Fallback model chain (format: `"model"` or `"provider:model"`). |
@@ -192,6 +193,7 @@ Default API base URLs per provider. Per-role `api_base` takes precedence over th
 | `openai` | string | `"https://api.openai.com/v1"` | OpenAI API base. |
 | `openrouter` | string | `"https://openrouter.ai/api/v1"` | OpenRouter API base. |
 | `ollama` | string | `"http://127.0.0.1:11434"` | Ollama local API base. |
+| `mlx` | string | `"http://127.0.0.1:8000"` | vllm-mlx local API base (Apple Silicon). |
 
 ### `[tracing]`
 

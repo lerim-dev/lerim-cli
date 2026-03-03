@@ -21,6 +21,7 @@ dependencies = [
     "openrouter>=0.6.0",
     "pydantic-ai>=1.61.0",
     "logfire[dspy]>=4.25.0",
+    "vllm-mlx>=0.2.1",
 ]
 
 [project.urls]
