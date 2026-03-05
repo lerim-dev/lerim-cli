@@ -87,6 +87,7 @@ def make_config(base: Path) -> Config:
             "ollama": "http://127.0.0.1:11434",
             "mlx": "http://127.0.0.1:8000/v1",
         },
+        auto_unload=True,
         agents={},
         projects={},
     )

@@ -77,6 +77,7 @@ openrouter = "https://openrouter.ai/api/v1"
 ollama = "http://127.0.0.1:11434"
 litellm_proxy = "http://127.0.0.1:4000"
 mlx = "http://127.0.0.1:8000/v1"
+auto_unload = true                     # unload Ollama models after each sync/maintain cycle to free RAM
 
 [tracing]
 enabled = false                          # set true or LERIM_TRACING=1 to enable

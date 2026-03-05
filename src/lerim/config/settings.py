@@ -280,6 +280,7 @@ class Config:
     minimax_api_key: str | None
 
     provider_api_bases: dict[str, str]
+    auto_unload: bool
 
     agents: dict[str, str]
     projects: dict[str, str]
@@ -384,6 +385,7 @@ class Config:
             "tracing_include_httpx": self.tracing_include_httpx,
             "tracing_include_content": self.tracing_include_content,
             "provider_api_bases": dict(self.provider_api_bases),
+            "auto_unload": self.auto_unload,
             "agents": dict(self.agents),
             "projects": dict(self.projects),
         }
@@ -619,6 +621,7 @@ def load_config() -> Config:
             if isinstance(toml_data.get("providers"), dict)
             else {}
         ),
+        auto_unload=bool((toml_data.get("providers") or {}).get("auto_unload", True)),
         agents=agents,
         projects=projects,
     )
