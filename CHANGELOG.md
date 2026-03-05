@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.60] - 2026-03-05
+
+### Added
+
+- **Ollama lifecycle management**: automatic model load/unload around sync and maintain cycles. Models are warm-loaded into GPU/RAM before each cycle and unloaded after (`keep_alive: 0`) to free 5-10 GB of memory between runs. Controlled by `auto_unload = true` in `[providers]`.
+- **LiteLLM proxy support**: new `litellm_proxy` provider base URL in `[providers]` for routing PydanticAI OpenAI-format calls through LiteLLM to Ollama's native API (enables thinking mode control).
+- **Eval framework**: four eval pipelines (`extraction`, `summarization`, `sync`, `maintain`) with LLM-as-judge scoring, config-driven model comparison, and `bench_ollama.sh` benchmarking script.
+- Eval configs for Ollama models (Qwen3.5 4B/9B, thinking/non-thinking) and MiniMax-M2.5 cloud baseline.
+- Synthetic eval traces and judge prompt templates for all four pipelines.
+- `evals/compare.py` for cross-config result comparison.
+- `lerim skill install` command to copy skill files into agent directories.
+
+### Fixed
+
+- **Docker networking**: generated `docker-compose.yml` now includes `extra_hosts: host.docker.internal:host-gateway` so containers can reach Ollama running on the host.
+
+### Changed
+
+- Evals folder reorganized: active configs moved to `evals/configs/`, stale MLX configs removed.
+- Default provider switched to MiniMax-M2.5 with Z.AI fallback.
+
 ## [0.1.53] - 2026-03-01
 
 ### Fixed
