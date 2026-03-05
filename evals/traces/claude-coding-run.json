@@ -1,0 +1,128 @@
+{
+  "schema_version": "0.1",
+  "run_id": "claude-run-001-a1b2c3d4",
+  "agent_type": "claude",
+  "status": "completed",
+  "started_at": "2026-01-24T14:30:00Z",
+  "ended_at": "2026-01-24T14:32:45Z",
+  "repo": {
+    "name": "example-project",
+    "path": "/home/user/projects/example-project",
+    "vcs": "git",
+    "branch": "main",
+    "commit": "abc123def456789012345678901234567890abcd"
+  },
+  "workspace": {
+    "workspace_id": "ws-local-dev",
+    "name": "Local Development",
+    "path": "/home/user/projects"
+  },
+  "messages": [
+    {
+      "message_id": "msg-001",
+      "role": "user",
+      "content": "Add input validation to the login form",
+      "timestamp": "2026-01-24T14:30:00Z"
+    },
+    {
+      "message_id": "msg-002",
+      "role": "assistant",
+      "content": "I'll add validation for email format and password requirements. Let me first read the current form implementation.",
+      "timestamp": "2026-01-24T14:30:05Z",
+      "model": "claude-3-opus-20240229",
+      "provider": "anthropic",
+      "usage": {
+        "input_tokens": 125,
+        "output_tokens": 42,
+        "total_tokens": 167,
+        "cost_usd": 0.008
+      }
+    },
+    {
+      "message_id": "msg-003",
+      "role": "assistant",
+      "content": "I've added email and password validation to the login form. The validation includes email format checking and password length requirements.",
+      "timestamp": "2026-01-24T14:32:30Z",
+      "model": "claude-3-opus-20240229",
+      "provider": "anthropic",
+      "usage": {
+        "input_tokens": 850,
+        "output_tokens": 320,
+        "total_tokens": 1170,
+        "cost_usd": 0.052
+      }
+    }
+  ],
+  "tool_calls": [
+    {
+      "call_id": "call-001",
+      "name": "Read",
+      "status": "completed",
+      "input": {
+        "file_path": "src/components/LoginForm.tsx"
+      },
+      "output": {
+        "content_length": 1250
+      },
+      "started_at": "2026-01-24T14:30:10Z",
+      "ended_at": "2026-01-24T14:30:11Z",
+      "duration_ms": 150
+    },
+    {
+      "call_id": "call-002",
+      "name": "Edit",
+      "status": "completed",
+      "input": {
+        "file_path": "src/components/LoginForm.tsx",
+        "old_string": "const handleSubmit",
+        "new_string": "const validateEmail = (email: string) => /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email);\n\nconst handleSubmit"
+      },
+      "started_at": "2026-01-24T14:31:00Z",
+      "ended_at": "2026-01-24T14:31:01Z",
+      "duration_ms": 200
+    },
+    {
+      "call_id": "call-003",
+      "name": "Bash",
+      "status": "completed",
+      "input": {
+        "command": "npm test -- --testPathPattern=LoginForm"
+      },
+      "output": {
+        "exit_code": 0
+      },
+      "started_at": "2026-01-24T14:32:00Z",
+      "ended_at": "2026-01-24T14:32:25Z",
+      "duration_ms": 25000
+    }
+  ],
+  "file_changes": [
+    {
+      "path": "src/components/LoginForm.tsx",
+      "change_type": "modified",
+      "summary": "Added email validation function and password length check",
+      "bytes_changed": 485,
+      "timestamp": "2026-01-24T14:31:01Z"
+    }
+  ],
+  "terminal_commands": [
+    {
+      "command": "npm test -- --testPathPattern=LoginForm",
+      "cwd": "/home/user/projects/example-project",
+      "exit_code": 0,
+      "stdout_snippet": "PASS src/components/LoginForm.test.tsx\n  ✓ validates email format (5ms)\n  ✓ validates password length (3ms)",
+      "started_at": "2026-01-24T14:32:00Z",
+      "ended_at": "2026-01-24T14:32:25Z",
+      "duration_ms": 25000
+    }
+  ],
+  "errors": [],
+  "usage": {
+    "input_tokens": 975,
+    "output_tokens": 362,
+    "total_tokens": 1337,
+    "cost_usd": 0.06,
+    "model": "claude-3-opus-20240229",
+    "provider": "anthropic"
+  }
+}

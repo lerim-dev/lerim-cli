@@ -1,0 +1,130 @@
+{
+  "schema_version": "0.1",
+  "run_id": "codex-run-001-e5f6g7h8",
+  "agent_type": "codex",
+  "status": "completed",
+  "started_at": "2026-01-24T10:15:30Z",
+  "ended_at": "2026-01-24T10:18:05Z",
+  "repo": {
+    "name": "backend-api",
+    "path": "/home/user/projects/backend-api",
+    "vcs": "git",
+    "branch": "feature/user-auth",
+    "commit": "def456abc789012345678901234567890defabc1"
+  },
+  "workspace": {
+    "workspace_id": "ws-codex-dev",
+    "name": "Codex Development",
+    "path": "/home/user/projects"
+  },
+  "messages": [
+    {
+      "message_id": "msg-c001",
+      "role": "user",
+      "content": "Add rate limiting middleware to the API endpoints",
+      "timestamp": "2026-01-24T10:15:31Z"
+    },
+    {
+      "message_id": "msg-c002",
+      "role": "assistant",
+      "content": "I'll implement rate limiting using a token bucket algorithm. First, let me check the existing middleware structure.",
+      "timestamp": "2026-01-24T10:15:45Z",
+      "model": "gpt-4-turbo",
+      "provider": "openai",
+      "usage": {
+        "input_tokens": 85,
+        "output_tokens": 38,
+        "total_tokens": 123,
+        "cost_usd": 0.004
+      }
+    },
+    {
+      "message_id": "msg-c003",
+      "role": "assistant",
+      "content": "I've added rate limiting middleware with configurable limits. The default is 100 requests per minute per IP. Tests are passing.",
+      "timestamp": "2026-01-24T10:17:50Z",
+      "model": "gpt-4-turbo",
+      "provider": "openai",
+      "usage": {
+        "input_tokens": 512,
+        "output_tokens": 842,
+        "total_tokens": 1354,
+        "cost_usd": 0.042
+      }
+    }
+  ],
+  "tool_calls": [
+    {
+      "call_id": "tc-c001",
+      "name": "shell",
+      "status": "completed",
+      "input": {
+        "command": "find src/middleware -name '*.py'"
+      },
+      "output": {
+        "files": ["auth.py", "logging.py"]
+      },
+      "started_at": "2026-01-24T10:15:50Z",
+      "ended_at": "2026-01-24T10:15:51Z",
+      "duration_ms": 500
+    },
+    {
+      "call_id": "tc-c002",
+      "name": "read_file",
+      "status": "completed",
+      "input": {
+        "path": "src/middleware/auth.py"
+      },
+      "started_at": "2026-01-24T10:16:00Z",
+      "ended_at": "2026-01-24T10:16:01Z",
+      "duration_ms": 100
+    },
+    {
+      "call_id": "tc-c003",
+      "name": "write_file",
+      "status": "completed",
+      "input": {
+        "path": "src/middleware/rate_limit.py"
+      },
+      "started_at": "2026-01-24T10:16:30Z",
+      "ended_at": "2026-01-24T10:16:32Z",
+      "duration_ms": 2000
+    }
+  ],
+  "file_changes": [
+    {
+      "path": "src/middleware/rate_limit.py",
+      "change_type": "added",
+      "summary": "Added rate limiting middleware with token bucket algorithm",
+      "bytes_changed": 1856,
+      "timestamp": "2026-01-24T10:16:32Z"
+    },
+    {
+      "path": "src/middleware/__init__.py",
+      "change_type": "modified",
+      "summary": "Export rate_limit middleware",
+      "bytes_changed": 45,
+      "timestamp": "2026-01-24T10:16:35Z"
+    }
+  ],
+  "terminal_commands": [
+    {
+      "command": "python -m pytest tests/middleware/ -v",
+      "cwd": "/home/user/projects/backend-api",
+      "exit_code": 0,
+      "stdout_snippet": "tests/middleware/test_rate_limit.py::test_allows_under_limit PASSED\ntests/middleware/test_rate_limit.py::test_blocks_over_limit PASSED",
+      "started_at": "2026-01-24T10:17:00Z",
+      "ended_at": "2026-01-24T10:17:45Z",
+      "duration_ms": 45000
+    }
+  ],
+  "errors": [],
+  "usage": {
+    "input_tokens": 597,
+    "output_tokens": 880,
+    "total_tokens": 1477,
+    "cost_usd": 0.046,
+    "model": "gpt-4-turbo",
+    "provider": "openai"
+  }
+}
