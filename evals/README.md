@@ -61,5 +61,3 @@ inference speed and memory usage across Ollama models:
 # Specific models, thinking off, 5 runs
 THINKING=off NUM_RUNS=5 ./evals/scripts/bench_ollama.sh qwen3.5:4b-q8_0 qwen3.5:9b-q8_0
 ```
-
-See [scripts/README.md](scripts/README.md) for full details.

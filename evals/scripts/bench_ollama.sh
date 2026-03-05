@@ -12,7 +12,7 @@ set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────────────
 OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
-PROMPT="${BENCH_PROMPT:-Write a Python function that implements binary search on a sorted list. Include docstring and type hints.}"
+PROMPT="${BENCH_PROMPT:-Explain quantum computing.}"
 NUM_RUNS="${NUM_RUNS:-3}"  # runs per model (results are averaged)
 THINKING="${THINKING:-off}"  # "on" or "off" — controls /think vs /no_think
 
