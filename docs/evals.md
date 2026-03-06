@@ -26,19 +26,16 @@ Key design choice: **no new dependencies or API keys required for judging**. The
 # 1. Place session trace files in evals/traces/
 cp path/to/session.jsonl evals/traces/
 
-# 2. Run any pipeline eval (uses default config)
-PYTHONPATH=. python evals/run_extraction.py
-PYTHONPATH=. python evals/run_summarization.py
-PYTHONPATH=. python evals/run_sync.py
-PYTHONPATH=. python evals/run_maintain.py
+# 2. Run any pipeline eval (--config is required)
+PYTHONPATH=. python evals/run_extraction.py --config evals/configs/eval_minimax_m25.toml
+PYTHONPATH=. python evals/run_summarization.py --config evals/configs/eval_minimax_m25.toml
+PYTHONPATH=. python evals/run_sync.py --config evals/configs/eval_minimax_m25.toml
+PYTHONPATH=. python evals/run_maintain.py --config evals/configs/eval_minimax_m25.toml
 
-# 3. Run with a specific model config
-PYTHONPATH=. python evals/run_extraction.py --config evals/configs/eval_ollama_9b_q8.toml
-
-# 4. Limit traces for faster runs (sync/maintain only)
+# 3. Limit traces for faster runs
 PYTHONPATH=. python evals/run_sync.py --config evals/configs/eval_ollama_9b_q8.toml --limit 1
 
-# 5. Compare results across runs
+# 4. Compare results across runs
 PYTHONPATH=. python evals/compare.py
 PYTHONPATH=. python evals/compare.py --pipeline sync
 ```
@@ -47,12 +44,12 @@ PYTHONPATH=. python evals/compare.py --pipeline sync
 
 ```
 evals/
-  eval_config.toml          # Default eval config (copy to configs/ to customize)
-  configs/                  # Model-specific eval configs
+  configs/                  # Model-specific eval configs (--config is required)
     eval_ollama_4b_q8_think_off.toml
     eval_ollama_4b_q8_think_on.toml
     eval_ollama_9b_q4.toml
     eval_ollama_9b_q8.toml
+    eval_ollama_35b_q4.toml
     eval_minimax_m25.toml
   run_extraction.py         # Extraction pipeline eval runner
   run_summarization.py      # Summarization pipeline eval runner
@@ -68,62 +65,81 @@ evals/
     maintain.md             # Maintain quality judge prompt
     golden_extraction.md    # Golden dataset creation prompt
     golden_summarization.md # Golden dataset creation prompt
-  traces/                   # Session trace files (.jsonl/.json) — eval inputs
+  traces/                   # Synthetic smoke-test traces (git-tracked, ships with repo)
   results/                  # Eval output JSONs (gitignored)
   scripts/                  # Standalone benchmark utilities
     bench_ollama.sh         # Compare tok/s and memory across Ollama models
+    bench_models.sh         # Multi-model benchmark with comparison
+  dataset/                  # Dataset pipeline (real traces, gitignored output)
+    build.py                # Pipeline entry point
+    config.toml             # Pipeline config
+    traces/                 # Real traces built by pipeline (gitignored)
 ```
+
+### Trace directories
+
+There are two trace directories — one synthetic, one real:
+
+| Directory | Contents | Tracked in git? | Default for runners? |
+|-----------|----------|-----------------|----------------------|
+| `evals/traces/` | 3 synthetic smoke-test traces that ship with the repo | Yes | Yes |
+| `evals/dataset/traces/` | Real session traces built by the dataset pipeline from your coding-agent sessions | No (gitignored) | No — pass `--traces-dir evals/dataset/traces/` |
+
+Use `evals/traces/` for quick smoke tests. Use `evals/dataset/traces/` for real benchmarking.
 
 ## Configuration
 
-Each eval run is controlled by a TOML config file. The config specifies:
+Each eval run is controlled by a TOML config file. The `--config` flag is **required** — there is no default config.
+
+The config specifies:
 
 - Which **judge agent** scores the output (Claude Code, Codex, or OpenCode)
-- Which **provider and model** runs the pipeline under test
+- Which **provider and model** runs each role (lead, explorer, extraction, summarization)
 - Whether **thinking mode** is enabled (relevant for reasoning models like Qwen 3.5)
+- **Timeout** in seconds for the judge and each role
 
-### Default config
+### Required sections
 
-`evals/eval_config.toml` is the default. All runners use it when no `--config` is specified.
+Every eval config must contain all 5 sections:
 
 ```toml
 [judge]
-agent = "claude"  # "claude" | "codex" | "opencode"
+agent = "claude"               # "claude" | "codex" | "opencode"
+timeout_seconds = 300
+
+[lead]
+provider = "ollama"
+model = "qwen3.5:9b-q8_0"
+thinking = false
+timeout_seconds = 300
+
+[explorer]
+provider = "ollama"
+model = "qwen3.5:9b-q8_0"
+thinking = false
+timeout_seconds = 180
 
 [extraction]
-provider = "minimax"
-model = "MiniMax-M2.5"
-thinking = true
+provider = "ollama"
+model = "qwen3.5:9b-q8_0"
+thinking = false
+timeout_seconds = 180
 
 [summarization]
-provider = "minimax"
-model = "MiniMax-M2.5"
-thinking = true
+provider = "ollama"
+model = "qwen3.5:9b-q8_0"
+thinking = false
+timeout_seconds = 180
 ```
+
+For single-model benchmarks, use the same provider/model for all 4 roles.
 
 ### Creating a new config
 
-Copy the default and change the model:
+Copy an existing config and change the model:
 
 ```bash
-cp evals/eval_config.toml evals/configs/eval_my_model.toml
-```
-
-Edit the provider, model, and thinking fields:
-
-```toml
-[judge]
-agent = "claude"
-
-[extraction]
-provider = "ollama"
-model = "qwen3.5:9b-q8_0"
-thinking = false
-
-[summarization]
-provider = "ollama"
-model = "qwen3.5:9b-q8_0"
-thinking = false
+cp evals/configs/eval_minimax_m25.toml evals/configs/eval_my_model.toml
 ```
 
 Supported providers: `ollama`, `minimax`, `openrouter`, `anthropic`, `openai`.
@@ -401,3 +417,176 @@ Golden datasets are the foundation for prompt optimization (DSPy MIPROv2), super
 | `evals/run_sync.py` | Sync eval runner — full agentic pipeline, isolated temp dirs per trace |
 | `evals/run_maintain.py` | Maintain eval runner — seeds memories via sync, then runs maintenance |
 | `evals/compare.py` | Loads all result JSONs, groups by pipeline, prints comparison table |
+
+## Dataset pipeline
+
+Build a personalized eval benchmark dataset from your real coding-agent session traces.
+
+### Overview
+
+The dataset pipeline scans sessions from your connected coding platforms, uses an LLM (via coding agent CLI) to assess quality and label topics, selects diverse traces optimized for benchmarking, and exports them for use with the eval runners.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Scan
+    Scan --> Assess: candidates collected
+    Assess --> Select: catalog.json written
+    Select --> Export: manifest.json written
+    Export --> [*]: traces/ ready
+
+    state Scan {
+        [*] --> ValidatePlatforms
+        ValidatePlatforms --> ScanSources: supported platforms confirmed
+        ScanSources --> ParseMetadata: JSONL files found
+    }
+
+    state Assess {
+        [*] --> BatchSessions
+        BatchSessions --> AgentLabel: send to coding agent
+        AgentLabel --> WriteCatalog: topic + type + quality scored
+    }
+
+    state Select {
+        [*] --> FilterQuality: min_messages, min_quality_score
+        FilterQuality --> AdaptDiversity: adjust targets to data
+        AdaptDiversity --> GreedySelect: optimize diversity + quality
+        GreedySelect --> WriteManifest
+    }
+
+    state Export {
+        [*] --> CopyTraces: platform_NNN.jsonl
+        CopyTraces --> VerifyFiles
+    }
+```
+
+### Quick start
+
+```bash
+# Build dataset using Claude as the assessment agent
+PYTHONPATH=. python evals/dataset/build.py --agent claude
+
+# Build with custom config and trace count
+PYTHONPATH=. python evals/dataset/build.py --agent claude --config evals/dataset/config.toml --count 50
+
+# Run evals against the dataset
+PYTHONPATH=. python evals/run_extraction.py --config evals/configs/eval_minimax_m25.toml --traces-dir evals/dataset/traces/
+PYTHONPATH=. python evals/run_sync.py --config evals/configs/eval_ollama_9b_q8.toml --traces-dir evals/dataset/traces/ --limit 5
+```
+
+### Directory structure
+
+```
+evals/dataset/
+  __init__.py               # Package init
+  build.py                  # Pipeline entry point
+  config.toml               # Default pipeline config
+  catalog.json              # Generated: all candidates with assessments (gitignored)
+  manifest.json             # Generated: selected traces metadata (gitignored)
+  traces/                   # Generated: copied trace files (gitignored)
+    claude_001.jsonl
+    codex_001.jsonl
+    opencode_001.jsonl
+    cursor_001.jsonl
+    ...
+```
+
+Only `build.py`, `config.toml`, and `__init__.py` are tracked in git. All generated output (`catalog.json`, `manifest.json`, `traces/`) is gitignored and private.
+
+### Configuration
+
+The pipeline is controlled by `evals/dataset/config.toml`:
+
+```toml
+[dataset]
+trace_count = 50
+agent = "claude"               # default coding agent CLI (overridable via --agent)
+
+# Which platforms to scan — add/remove entries for your setup
+[[sources]]
+platform = "claude"
+path = "~/.claude/projects/"
+
+[[sources]]
+platform = "codex"
+path = "~/.codex/archived_sessions/"
+
+[[sources]]
+platform = "opencode"
+path = "~/.lerim/cache/opencode/"
+
+[[sources]]
+platform = "cursor"
+path = "~/.lerim/cache/cursor/"
+
+[diversity]
+max_platform_share = 0.6      # No single platform > 60% (ignored if 1 platform)
+min_session_types = 4          # Minimum session type variety
+short_pct = 0.2                # <20 messages target share
+medium_pct = 0.5               # 20-80 messages target share
+long_pct = 0.3                 # 80+ messages target share
+
+[quality]
+min_messages = 5               # Minimum messages per trace
+min_quality_score = 3          # Minimum LLM quality score (1-5)
+```
+
+**Platform validation**: Each `[[sources]]` platform must be in the supported set (`claude`, `codex`, `opencode`, `cursor`). Unsupported platforms raise an error. Missing or empty paths are warned and skipped.
+
+**Diversity targets**: All diversity constraints are best-effort and adapt to available data. If only 1 platform is configured, platform balancing is skipped. Session type and length targets are soft goals, not hard requirements.
+
+### Pipeline phases
+
+| Phase | What it does |
+|-------|-------------|
+| **Scan** | Discovers JSONL session files from each configured `[[sources]]` entry. Parses platform-specific metadata: message count, first user messages, project info. |
+| **Assess** | Batches session snippets and sends them to the configured coding agent CLI for topic labeling, session type classification, and quality scoring (1-5). Writes `catalog.json`. |
+| **Select** | Filters candidates by `min_messages` and `min_quality_score`, then uses a greedy algorithm to select diverse traces optimizing for platform balance, session type variety, length distribution, and project coverage. Writes `manifest.json`. |
+| **Export** | Copies selected trace files to `evals/dataset/traces/` with standardized names (`{platform}_{NNN}.jsonl`). Files are copied as-is, no format conversion. |
+
+### Using `--traces-dir` with eval runners
+
+All four eval runners accept `--traces-dir` to override the default trace directory:
+
+```bash
+# Run extraction eval on real dataset traces
+PYTHONPATH=. python evals/run_extraction.py --config evals/configs/eval_minimax_m25.toml --traces-dir evals/dataset/traces/
+
+# Run sync eval with limit
+PYTHONPATH=. python evals/run_sync.py --config evals/configs/eval_minimax_m25.toml --traces-dir evals/dataset/traces/ --limit 5
+```
+
+When `--traces-dir` is not provided, runners use the default `evals/traces/` directory (the synthetic smoke-test traces).
+
+### Manifest format
+
+`manifest.json` describes the selected dataset:
+
+```json
+{
+  "version": 1,
+  "created": "2026-03-06T...",
+  "description": "50 real session traces for Lerim eval benchmark",
+  "agent_used": "claude",
+  "trace_count": 50,
+  "diversity_report": {
+    "platforms": {"claude": 20, "codex": 8, "opencode": 15, "cursor": 7},
+    "session_types": {"feature_implementation": 15, "debugging": 12, ...},
+    "length_categories": {"short": 10, "medium": 25, "long": 15},
+    "projects": ["lerim-cli", "finetune-test"]
+  },
+  "traces": [
+    {
+      "id": "claude_001",
+      "file": "traces/claude_001.jsonl",
+      "platform": "claude",
+      "project": "lerim-cli",
+      "session_type": "feature_implementation",
+      "message_count": 47,
+      "length_category": "medium",
+      "topic": "adding memory extraction pipeline",
+      "quality_score": 4,
+      "source_path": "~/.claude/projects/.../session.jsonl"
+    }
+  ]
+}
+```

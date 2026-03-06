@@ -4,7 +4,7 @@ Loads eval config, runs the extraction pipeline on each trace, performs
 deterministic schema checks, invokes an LLM judge for quality scoring,
 and saves aggregated results to evals/results/.
 
-Usage: python evals/run_extraction.py --config evals/eval_config.toml
+Usage: python evals/run_extraction.py --config evals/configs/eval_minimax_m25.toml [--traces-dir evals/dataset/traces/]
 """
 
 from __future__ import annotations
@@ -32,8 +32,19 @@ JUDGE_PROMPT = EVALS_DIR / "judge_prompts" / "extraction.md"
 
 
 def _configure_dspy_from_eval(config: dict) -> None:
-    """Override lerim DSPy config via environment for the extraction role."""
-    section = config.get("extraction", {})
+    """Override lerim DSPy config via environment for the extraction role.
+
+    Validates that all required role sections exist in the eval config.
+    """
+    REQUIRED_SECTIONS = ("lead", "explorer", "extraction", "summarization")
+    missing = [s for s in REQUIRED_SECTIONS if s not in config]
+    if missing:
+        raise ValueError(
+            f"Eval config missing required sections: {missing}. "
+            f"All of {REQUIRED_SECTIONS} are required."
+        )
+
+    section = config["extraction"]
     if section.get("provider"):
         os.environ["LERIM_EVAL_EXTRACT_PROVIDER"] = section["provider"]
     if section.get("model"):
@@ -42,20 +53,21 @@ def _configure_dspy_from_eval(config: dict) -> None:
     # Patch lerim config by writing a temporary override config
     from lerim.config.settings import reload_config, save_config_patch
 
-    patch = {
-        "roles": {
-            "extract": {
-                "provider": section.get("provider", "openrouter"),
-                "model": section.get("model", "qwen/qwen3-coder-30b-a3b-instruct"),
-                "thinking": section.get("thinking", True),
-            }
-        }
+    role_patch: dict = {
+        "provider": section.get("provider", "openrouter"),
+        "model": section.get("model", "qwen/qwen3-coder-30b-a3b-instruct"),
+        "thinking": section.get("thinking", True),
     }
+    if "timeout_seconds" in section:
+        role_patch["timeout_seconds"] = int(section["timeout_seconds"])
+    patch = {"roles": {"extract": role_patch}}
     save_config_patch(patch)
     reload_config()
 
 
-def run_extraction_eval(config_path: Path) -> dict:
+def run_extraction_eval(
+    config_path: Path, traces_dir: Path | None = None, limit: int = 0
+) -> dict:
     """Run extraction eval and return results dict."""
     with config_path.open("rb") as f:
         config = tomllib.load(f)
@@ -65,8 +77,14 @@ def run_extraction_eval(config_path: Path) -> dict:
     from lerim.memory.extract_pipeline import extract_memories_from_session_file
 
     judge_agent = config.get("judge", {}).get("agent", "claude")
-    traces = sorted(TRACES_DIR.glob("*.jsonl")) + sorted(TRACES_DIR.glob("*.json"))
+    judge_timeout = config.get("judge", {}).get("timeout_seconds", 300)
+    effective_traces_dir = traces_dir or TRACES_DIR
+    traces = sorted(effective_traces_dir.glob("*.jsonl")) + sorted(
+        effective_traces_dir.glob("*.json")
+    )
     traces = [t for t in traces if t.name != ".gitkeep"]
+    if limit and limit > 0:
+        traces = traces[:limit]
 
     if not traces:
         print("No traces found in evals/traces/. Add .jsonl or .json trace files.")
@@ -103,7 +121,7 @@ def run_extraction_eval(config_path: Path) -> dict:
         try:
             output_json = json.dumps(output, indent=2, ensure_ascii=False)
             prompt = build_judge_prompt(JUDGE_PROMPT, trace_path, output_json)
-            judge_result = invoke_judge(judge_agent, prompt)
+            judge_result = invoke_judge(judge_agent, prompt, timeout=judge_timeout)
             completeness = float(judge_result.get("completeness", 0))
             faithfulness = float(judge_result.get("faithfulness", 0))
             clarity = float(judge_result.get("clarity", 0))
@@ -191,8 +209,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run extraction eval")
     parser.add_argument(
         "--config",
-        default="evals/eval_config.toml",
+        required=True,
         help="Path to eval config TOML (see evals/configs/ for examples)",
     )
+    parser.add_argument("--limit", type=int, default=0, help="Max traces (0=all)")
+    parser.add_argument(
+        "--traces-dir",
+        default=None,
+        help="Override default traces directory (evals/traces/)",
+    )
     args = parser.parse_args()
-    run_extraction_eval(Path(args.config))
+    td = Path(args.traces_dir) if args.traces_dir else None
+    run_extraction_eval(Path(args.config), traces_dir=td, limit=args.limit)

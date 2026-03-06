@@ -3,7 +3,7 @@
 Instantiates a LerimAgent, calls agent.sync() on each trace with an
 isolated temporary memory_root, invokes an LLM judge, and saves results.
 
-Usage: PYTHONPATH=. python evals/run_sync.py --config evals/eval_4b_8bit.toml
+Usage: PYTHONPATH=. python evals/run_sync.py --config evals/configs/eval_minimax_m25.toml [--traces-dir evals/dataset/traces/]
 """
 
 from __future__ import annotations
@@ -28,26 +28,46 @@ JUDGE_PROMPT = EVALS_DIR / "judge_prompts" / "sync.md"
 
 
 def _configure_from_eval(config: dict) -> None:
-    """Override lerim config for all roles from eval TOML."""
+    """Override lerim config for all roles from eval TOML.
+
+    Reads [lead], [explorer], [extraction], [summarization] sections
+    independently.  All four are required.
+    """
     from lerim.config.settings import reload_config, save_config_patch
 
-    # Use extraction config for all roles (sync uses all of them)
-    section = config.get("extraction", {})
-    provider = section.get("provider", "mlx")
-    model = section.get("model", "mlx-community/Qwen3.5-4B-8bit")
-    thinking = section.get("thinking", True)
+    REQUIRED_SECTIONS = ("lead", "explorer", "extraction", "summarization")
+    missing = [s for s in REQUIRED_SECTIONS if s not in config]
+    if missing:
+        raise ValueError(
+            f"Eval config missing required sections: {missing}. "
+            f"All of {REQUIRED_SECTIONS} are required."
+        )
 
-    patch = {
-        "roles": {
-            role: {"provider": provider, "model": model, "thinking": thinking}
-            for role in ("lead", "explorer", "extract", "summarize")
-        }
+    section_to_role = {
+        "lead": "lead",
+        "explorer": "explorer",
+        "extraction": "extract",
+        "summarization": "summarize",
     }
-    save_config_patch(patch)
+    roles_patch: dict = {}
+    for section_name, role_name in section_to_role.items():
+        section = config[section_name]
+        role_patch: dict = {
+            "provider": section.get("provider", "openrouter"),
+            "model": section.get("model", "qwen/qwen3-coder-30b-a3b-instruct"),
+            "thinking": section.get("thinking", True),
+        }
+        if "timeout_seconds" in section:
+            role_patch["timeout_seconds"] = int(section["timeout_seconds"])
+        roles_patch[role_name] = role_patch
+
+    save_config_patch({"roles": roles_patch})
     reload_config()
 
 
-def run_sync_eval(config_path: Path, limit: int = 0) -> dict:
+def run_sync_eval(
+    config_path: Path, limit: int = 0, traces_dir: Path | None = None
+) -> dict:
     """Run sync eval on traces and return results dict. limit=0 means all."""
     with config_path.open("rb") as f:
         config = tomllib.load(f)
@@ -57,7 +77,11 @@ def run_sync_eval(config_path: Path, limit: int = 0) -> dict:
     from lerim.runtime.agent import LerimAgent
 
     judge_agent = config.get("judge", {}).get("agent", "claude")
-    traces = sorted(TRACES_DIR.glob("*.jsonl")) + sorted(TRACES_DIR.glob("*.json"))
+    judge_timeout = config.get("judge", {}).get("timeout_seconds", 300)
+    effective_traces_dir = traces_dir or TRACES_DIR
+    traces = sorted(effective_traces_dir.glob("*.jsonl")) + sorted(
+        effective_traces_dir.glob("*.json")
+    )
     traces = [t for t in traces if t.name != ".gitkeep"]
     if limit and limit > 0:
         traces = traces[:limit]
@@ -143,7 +167,7 @@ def run_sync_eval(config_path: Path, limit: int = 0) -> dict:
         # Judge scoring
         try:
             prompt = build_judge_prompt(JUDGE_PROMPT, trace_path, judge_payload)
-            judge_result = invoke_judge(judge_agent, prompt)
+            judge_result = invoke_judge(judge_agent, prompt, timeout=judge_timeout)
             completeness = float(judge_result.get("completeness", 0))
             faithfulness = float(judge_result.get("faithfulness", 0))
             coherence = float(judge_result.get("coherence", 0))
@@ -183,11 +207,14 @@ def run_sync_eval(config_path: Path, limit: int = 0) -> dict:
     }
     agg["schema_ok"] = round(sum(1 for t in per_trace if t.get("schema_ok")) / n, 3)
 
-    extraction_cfg = config.get("extraction", {})
+    roles_cfg = {
+        s: config.get(s, {})
+        for s in ("lead", "explorer", "extraction", "summarization")
+    }
     result = {
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "pipeline": "sync",
-        "config": extraction_cfg,
+        "config": roles_cfg,
         "judge": {"agent": judge_agent},
         "performance": {
             "total_wall_time_s": round(total_wall, 2),
@@ -240,9 +267,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run agentic sync eval")
     parser.add_argument(
         "--config",
-        default="evals/eval_config.toml",
+        required=True,
         help="Path to eval config TOML (see evals/configs/ for examples)",
     )
     parser.add_argument("--limit", type=int, default=0, help="Max traces (0=all)")
+    parser.add_argument(
+        "--traces-dir",
+        default=None,
+        help="Override default traces directory (evals/traces/)",
+    )
     args = parser.parse_args()
-    run_sync_eval(Path(args.config), limit=args.limit)
+    td = Path(args.traces_dir) if args.traces_dir else None
+    run_sync_eval(Path(args.config), limit=args.limit, traces_dir=td)

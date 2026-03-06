@@ -3,7 +3,7 @@
 Seeds a temporary memory_root by syncing all eval traces, then runs
 maintain on the resulting memories. Judges quality of maintenance actions.
 
-Usage: PYTHONPATH=. python evals/run_maintain.py --config evals/eval_4b_8bit.toml
+Usage: PYTHONPATH=. python evals/run_maintain.py --config evals/configs/eval_minimax_m25.toml [--traces-dir evals/dataset/traces/]
 """
 
 from __future__ import annotations
@@ -28,29 +28,56 @@ JUDGE_PROMPT = EVALS_DIR / "judge_prompts" / "maintain.md"
 
 
 def _configure_from_eval(config: dict) -> None:
-    """Override lerim config for all roles from eval TOML."""
+    """Override lerim config for all roles from eval TOML.
+
+    Reads [lead], [explorer], [extraction], [summarization] sections
+    independently.  All four are required.
+    """
     from lerim.config.settings import reload_config, save_config_patch
 
-    section = config.get("extraction", {})
-    provider = section.get("provider", "mlx")
-    model = section.get("model", "mlx-community/Qwen3.5-4B-8bit")
-    thinking = section.get("thinking", True)
+    REQUIRED_SECTIONS = ("lead", "explorer", "extraction", "summarization")
+    missing = [s for s in REQUIRED_SECTIONS if s not in config]
+    if missing:
+        raise ValueError(
+            f"Eval config missing required sections: {missing}. "
+            f"All of {REQUIRED_SECTIONS} are required."
+        )
 
-    patch = {
-        "roles": {
-            role: {"provider": provider, "model": model, "thinking": thinking}
-            for role in ("lead", "explorer", "extract", "summarize")
-        }
+    section_to_role = {
+        "lead": "lead",
+        "explorer": "explorer",
+        "extraction": "extract",
+        "summarization": "summarize",
     }
-    save_config_patch(patch)
+    roles_patch: dict = {}
+    for section_name, role_name in section_to_role.items():
+        section = config[section_name]
+        role_patch: dict = {
+            "provider": section.get("provider", "openrouter"),
+            "model": section.get("model", "qwen/qwen3-coder-30b-a3b-instruct"),
+            "thinking": section.get("thinking", True),
+        }
+        if "timeout_seconds" in section:
+            role_patch["timeout_seconds"] = int(section["timeout_seconds"])
+        roles_patch[role_name] = role_patch
+
+    save_config_patch({"roles": roles_patch})
     reload_config()
 
 
-def _seed_memories(memory_root: Path, workspace_root: Path, limit: int = 0) -> int:
+def _seed_memories(
+    memory_root: Path,
+    workspace_root: Path,
+    limit: int = 0,
+    traces_dir: Path | None = None,
+) -> int:
     """Sync eval traces to populate memory_root. Return count of synced traces."""
     from lerim.runtime.agent import LerimAgent
 
-    traces = sorted(TRACES_DIR.glob("*.jsonl")) + sorted(TRACES_DIR.glob("*.json"))
+    effective_traces_dir = traces_dir or TRACES_DIR
+    traces = sorted(effective_traces_dir.glob("*.jsonl")) + sorted(
+        effective_traces_dir.glob("*.json")
+    )
     traces = [t for t in traces if t.name != ".gitkeep"]
     if limit and limit > 0:
         traces = traces[:limit]
@@ -75,7 +102,9 @@ def _list_memory_files(memory_root: Path) -> list[str]:
     return [str(p) for p in sorted(memory_root.rglob("*.md"))]
 
 
-def run_maintain_eval(config_path: Path, limit: int = 0) -> dict:
+def run_maintain_eval(
+    config_path: Path, limit: int = 0, traces_dir: Path | None = None
+) -> dict:
     """Run maintain eval and return results dict. limit=0 means all traces."""
     with config_path.open("rb") as f:
         config = tomllib.load(f)
@@ -85,6 +114,7 @@ def run_maintain_eval(config_path: Path, limit: int = 0) -> dict:
     from lerim.runtime.agent import LerimAgent
 
     judge_agent = config.get("judge", {}).get("agent", "claude")
+    judge_timeout = config.get("judge", {}).get("timeout_seconds", 300)
 
     with tempfile.TemporaryDirectory(prefix="lerim_maintain_eval_") as tmpdir:
         memory_root = Path(tmpdir) / "memory"
@@ -100,7 +130,9 @@ def run_maintain_eval(config_path: Path, limit: int = 0) -> dict:
         # Phase 1: Seed memories via sync
         print("Phase 1: Seeding memories via sync...")
         seed_t0 = time.time()
-        seeded = _seed_memories(memory_root, workspace_root, limit=limit)
+        seeded = _seed_memories(
+            memory_root, workspace_root, limit=limit, traces_dir=traces_dir
+        )
         seed_time = time.time() - seed_t0
 
         memory_files_before = _list_memory_files(memory_root)
@@ -160,7 +192,7 @@ def run_maintain_eval(config_path: Path, limit: int = 0) -> dict:
                     Path("(maintain-eval-no-trace)"),
                     judge_payload,
                 )
-                judge_result = invoke_judge(judge_agent, prompt)
+                judge_result = invoke_judge(judge_agent, prompt, timeout=judge_timeout)
                 completeness = float(judge_result.get("completeness", 0))
                 faithfulness = float(judge_result.get("faithfulness", 0))
                 coherence = float(judge_result.get("coherence", 0))
@@ -173,11 +205,14 @@ def run_maintain_eval(config_path: Path, limit: int = 0) -> dict:
 
     total_wall = seed_time + wall_time
 
-    extraction_cfg = config.get("extraction", {})
+    roles_cfg = {
+        s: config.get(s, {})
+        for s in ("lead", "explorer", "extraction", "summarization")
+    }
     result_doc = {
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "pipeline": "maintain",
-        "config": extraction_cfg,
+        "config": roles_cfg,
         "judge": {"agent": judge_agent},
         "performance": {
             "seed_time_s": round(seed_time, 2),
@@ -232,11 +267,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run agentic maintain eval")
     parser.add_argument(
         "--config",
-        default="evals/eval_config.toml",
+        required=True,
         help="Path to eval config TOML (see evals/configs/ for examples)",
     )
     parser.add_argument(
         "--limit", type=int, default=0, help="Max traces to seed (0=all)"
     )
+    parser.add_argument(
+        "--traces-dir",
+        default=None,
+        help="Override default traces directory (evals/traces/)",
+    )
     args = parser.parse_args()
-    run_maintain_eval(Path(args.config), limit=args.limit)
+    td = Path(args.traces_dir) if args.traces_dir else None
+    run_maintain_eval(Path(args.config), limit=args.limit, traces_dir=td)

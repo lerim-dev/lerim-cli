@@ -56,3 +56,8 @@ AGENTS.md
 CLAUDE.md 
 .mcp.json
 
+
+# Eval dataset (real traces — private, never committed)
+evals/dataset/catalog.json
+evals/dataset/manifest.json
+evals/dataset/traces/

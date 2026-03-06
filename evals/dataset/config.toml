@@ -1,0 +1,42 @@
+# Dataset creation pipeline configuration.
+#
+# Controls which platforms to scan, diversity targets, quality thresholds,
+# and the coding agent used for LLM-based assessment.
+
+[dataset]
+trace_count = 50
+agent = "claude"               # coding agent CLI for LLM tasks (claude/codex/opencode)
+
+# Which platforms to scan. Each entry specifies a platform name and source path.
+# Platform must be supported by Lerim (see `lerim.adapters.registry.KNOWN_PLATFORMS`).
+# Remove or comment out entries for platforms you don't use.
+
+[[sources]]
+platform = "claude"
+path = "~/.claude/projects/"
+
+[[sources]]
+platform = "codex"
+path = "~/.codex/archived_sessions/"
+
+[[sources]]
+platform = "opencode"
+path = "~/.lerim/cache/opencode/"
+
+[[sources]]
+platform = "cursor"
+path = "~/.lerim/cache/cursor/"
+
+[diversity]
+# All targets are best-effort, adapted to available data.
+# If only 1 platform is configured, platform balancing is skipped.
+max_platform_share = 0.6      # No single platform > 60% of corpus (ignored if 1 platform)
+min_session_types = 4          # Capped at number of types actually found
+# Length distribution (soft targets)
+short_pct = 0.2                # <20 messages
+medium_pct = 0.5               # 20-80 messages
+long_pct = 0.3                 # 80+ messages
+
+[quality]
+min_messages = 5               # Hard filter: skip sessions with fewer messages
+min_quality_score = 3          # Hard filter: skip sessions scoring below this (1-5 scale)
