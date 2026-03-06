@@ -16,11 +16,12 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 import dspy
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from lerim.config.logging import logger
 from lerim.config.settings import get_config
 from lerim.memory.schemas import MemoryCandidate
-from lerim.memory.utils import configure_dspy_lm, window_transcript
+from lerim.memory.utils import configure_dspy_lm, window_transcript, window_transcript_jsonl
 from lerim.runtime.cost_tracker import capture_dspy_cost
 from lerim.sessions import catalog as session_db
 
@@ -83,6 +84,24 @@ class MemoryMergeSignature(dspy.Signature):
     primitives: list[MemoryCandidate] = dspy.OutputField(desc="Deduplicated final list")
 
 
+def _process_window(extractor, window, meta, met, guid, wi, total, lm):
+    """Process one extraction window in its own thread."""
+    with dspy.context(lm=lm):
+        w_start = time.time()
+        result = extractor(transcript=window, metadata=meta, metrics=met, guidance=guid)
+        candidates = []
+        primitives = getattr(result, "primitives", [])
+        if isinstance(primitives, list):
+            for item in primitives:
+                if isinstance(item, MemoryCandidate):
+                    candidates.append(item.model_dump(mode="json", exclude_none=True))
+                elif isinstance(item, dict):
+                    candidates.append(item)
+        elapsed = time.time() - w_start
+        logger.info("  Window {}/{}: done ({:.1f}s, {} candidates)", wi, total, elapsed, len(candidates))
+        return candidates
+
+
 def _extract_candidates(
     transcript: str,
     *,
@@ -96,7 +115,10 @@ def _extract_candidates(
     config = get_config()
     max_tokens = config.extract_role.max_window_tokens
     overlap_tokens = config.extract_role.window_overlap_tokens
-    windows = window_transcript(transcript, max_tokens, overlap_tokens)
+    if "\n{" in transcript:
+        windows = window_transcript_jsonl(transcript, max_tokens, overlap_tokens)
+    else:
+        windows = window_transcript(transcript, max_tokens, overlap_tokens)
     logger.info("Extraction: {} window(s), max_tokens={}", len(windows), max_tokens)
     lm = configure_dspy_lm("extract")
     meta = metadata or {}
@@ -106,34 +128,28 @@ def _extract_candidates(
     all_candidates: list[dict[str, Any]] = []
     extractor = dspy.Refine(
         dspy.ChainOfThought(MemoryExtractSignature),
-        N=1,
+        N=2,
         reward_fn=_extraction_reward,
         threshold=1.0,
     )
     history_start = len(lm.history)
-    with dspy.context(lm=lm):
-        for wi, window in enumerate(windows, 1):
-            logger.info("  Window {}/{}: extracting...", wi, len(windows))
-            w_start = time.time()
-            result = extractor(
-                transcript=window, metadata=meta, metrics=met, guidance=guid
-            )
-            window_count = 0
-            primitives = getattr(result, "primitives", [])
-            if isinstance(primitives, list):
-                for item in primitives:
-                    if isinstance(item, MemoryCandidate):
-                        all_candidates.append(
-                            item.model_dump(mode="json", exclude_none=True)
-                        )
-                        window_count += 1
-                    elif isinstance(item, dict):
-                        all_candidates.append(item)
-                        window_count += 1
-            logger.info(
-                "  Window {}/{}: done ({:.1f}s, {} candidates)",
-                wi, len(windows), time.time() - w_start, window_count,
-            )
+    max_workers = min(config.extract_role.max_workers, len(windows))
+    if max_workers <= 1:
+        with dspy.context(lm=lm):
+            for wi, window in enumerate(windows, 1):
+                logger.info("  Window {}/{}: extracting...", wi, len(windows))
+                all_candidates.extend(
+                    _process_window(extractor, window, meta, met, guid, wi, len(windows), lm)
+                )
+    else:
+        logger.info("Processing {} windows with {} workers", len(windows), max_workers)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(_process_window, extractor, window, meta, met, guid, wi, len(windows), lm): wi
+                for wi, window in enumerate(windows, 1)
+            }
+            for future in as_completed(futures):
+                all_candidates.extend(future.result())
 
     if not all_candidates:
         capture_dspy_cost(lm, history_start)
@@ -148,7 +164,7 @@ def _extract_candidates(
     logger.info("Merging {} candidates from {} windows...", len(all_candidates), len(windows))
     merger = dspy.Refine(
         dspy.ChainOfThought(MemoryMergeSignature),
-        N=1,
+        N=2,
         reward_fn=_extraction_reward,
         threshold=1.0,
     )

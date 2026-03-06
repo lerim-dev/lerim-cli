@@ -20,12 +20,13 @@ from typing import Any
 
 import dspy
 import frontmatter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydantic import BaseModel, Field
 
 from lerim.config.logging import logger
 from lerim.memory.memory_record import slugify
 from lerim.config.settings import get_config, reload_config
-from lerim.memory.utils import configure_dspy_lm, window_transcript
+from lerim.memory.utils import configure_dspy_lm, window_transcript, window_transcript_jsonl
 from lerim.runtime.cost_tracker import capture_dspy_cost
 from lerim.sessions import catalog as session_db
 
@@ -152,6 +153,25 @@ class TraceSummaryMergeSignature(dspy.Signature):
     )
 
 
+def _process_summary_window(window_summarizer, window, meta, i, total_windows, lm):
+    """Process one summarization window in its own thread."""
+    with dspy.context(lm=lm):
+        wi = i + 1
+        logger.info("  Window {}/{}: summarizing...", wi, total_windows)
+        w_start = time.time()
+        partial_result = window_summarizer(
+            transcript=window, metadata=meta, window_index=i, total_windows=total_windows,
+        )
+        partial = getattr(partial_result, "partial", None)
+        result = None
+        if isinstance(partial, PartialSummary):
+            result = partial.model_dump(mode="json")
+        elif isinstance(partial, dict):
+            result = partial
+        logger.info("  Window {}/{}: done ({:.1f}s)", wi, total_windows, time.time() - w_start)
+        return result
+
+
 def _summarize_trace(
     transcript: str,
     *,
@@ -165,7 +185,10 @@ def _summarize_trace(
     config = get_config()
     max_tokens = config.summarize_role.max_window_tokens
     overlap_tokens = config.summarize_role.window_overlap_tokens
-    windows = window_transcript(transcript, max_tokens, overlap_tokens)
+    if "\n{" in transcript:
+        windows = window_transcript_jsonl(transcript, max_tokens, overlap_tokens)
+    else:
+        windows = window_transcript(transcript, max_tokens, overlap_tokens)
     logger.info("Summarization: {} window(s), max_tokens={}", len(windows), max_tokens)
     lm = configure_dspy_lm("summarize")
     meta = metadata or {}
@@ -180,7 +203,7 @@ def _summarize_trace(
             w_start = time.time()
             summarizer = dspy.Refine(
                 dspy.ChainOfThought(TraceSummarySignature),
-                N=1,
+                N=2,
                 reward_fn=_summarization_reward,
                 threshold=1.0,
             )
@@ -192,28 +215,33 @@ def _summarize_trace(
             # Multiple windows: partial summaries then merge
             partials: list[dict] = []
             window_summarizer = dspy.ChainOfThought(WindowSummarySignature)
-            for i, window in enumerate(windows):
-                wi = i + 1
-                logger.info("  Window {}/{}: summarizing...", wi, len(windows))
-                w_start = time.time()
-                partial_result = window_summarizer(
-                    transcript=window,
-                    metadata=meta,
-                    window_index=i,
-                    total_windows=len(windows),
-                )
-                partial = getattr(partial_result, "partial", None)
-                if isinstance(partial, PartialSummary):
-                    partials.append(partial.model_dump(mode="json"))
-                elif isinstance(partial, dict):
-                    partials.append(partial)
-                logger.info(
-                    "  Window {}/{}: done ({:.1f}s)", wi, len(windows), time.time() - w_start,
-                )
+            max_workers = min(config.summarize_role.max_workers, len(windows))
+            if max_workers <= 1:
+                with dspy.context(lm=lm):
+                    for i, window in enumerate(windows):
+                        result = _process_summary_window(
+                            window_summarizer, window, meta, i, len(windows), lm
+                        )
+                        if result is not None:
+                            partials.append(result)
+            else:
+                logger.info("Processing {} windows with {} workers", len(windows), max_workers)
+                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    futures = {
+                        pool.submit(
+                            _process_summary_window,
+                            window_summarizer, window, meta, i, len(windows), lm,
+                        ): i
+                        for i, window in enumerate(windows)
+                    }
+                    for future in as_completed(futures):
+                        result = future.result()
+                        if result is not None:
+                            partials.append(result)
             logger.info("Merging {} partial summaries...", len(partials))
             merge_summarizer = dspy.Refine(
                 dspy.ChainOfThought(TraceSummaryMergeSignature),
-                N=1,
+                N=2,
                 reward_fn=_summarization_reward,
                 threshold=1.0,
             )

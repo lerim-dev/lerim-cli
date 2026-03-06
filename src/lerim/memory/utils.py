@@ -61,6 +61,47 @@ def window_transcript(
     return windows
 
 
+def window_transcript_jsonl(
+    text: str,
+    max_tokens: int,
+    overlap_tokens: int,
+) -> list[str]:
+    """Split JSONL text into windows on line boundaries with token-estimated sizing.
+
+    Falls back to character-based windowing if text has no newlines.
+    """
+    max_chars = max_tokens * 7 // 2
+    overlap_chars = overlap_tokens * 7 // 2
+    if len(text) <= max_chars:
+        return [text]
+
+    lines = text.split("\n")
+    windows: list[str] = []
+    current_lines: list[str] = []
+    current_chars = 0
+
+    for line in lines:
+        line_chars = len(line) + 1  # +1 for newline
+        if current_chars + line_chars > max_chars and current_lines:
+            windows.append("\n".join(current_lines))
+            # Carry overlap: keep last N lines that fit in overlap budget
+            overlap_lines: list[str] = []
+            overlap_size = 0
+            for prev_line in reversed(current_lines):
+                if overlap_size + len(prev_line) + 1 > overlap_chars:
+                    break
+                overlap_lines.insert(0, prev_line)
+                overlap_size += len(prev_line) + 1
+            current_lines = overlap_lines
+            current_chars = overlap_size
+        current_lines.append(line)
+        current_chars += line_chars
+
+    if current_lines:
+        windows.append("\n".join(current_lines))
+    return windows if windows else [text]
+
+
 if __name__ == "__main__":
     """Run direct smoke check for config-based DSPy setup and windowing."""
     config = get_config()
