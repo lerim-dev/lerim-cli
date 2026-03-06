@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Ollama lifecycle management**: automatic model load/unload around sync and maintain cycles. Models are warm-loaded into GPU/RAM before each cycle and unloaded after (`keep_alive: 0`) to free 5-10 GB of memory between runs. Controlled by `auto_unload = true` in `[providers]`.
 - **LiteLLM proxy support**: new `litellm_proxy` provider base URL in `[providers]` for routing PydanticAI OpenAI-format calls through LiteLLM to Ollama's native API (enables thinking mode control).
-- **Eval framework**: four eval pipelines (`extraction`, `summarization`, `sync`, `maintain`) with LLM-as-judge scoring, config-driven model comparison, and `bench_ollama.sh` benchmarking script.
+- **Eval framework**: four eval pipelines (`extraction`, `summarization`, `sync`, `maintain`) with LLM-as-judge scoring, config-driven model comparison, and `bench_models.sh` multi-model benchmarking script.
 - Eval configs for Ollama models (Qwen3.5 4B/9B, thinking/non-thinking) and MiniMax-M2.5 cloud baseline.
 - Synthetic eval traces and judge prompt templates for all four pipelines.
 - `evals/compare.py` for cross-config result comparison.

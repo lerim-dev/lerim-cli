@@ -1,17 +1,16 @@
 # Evaluation Framework
 
-Last updated: 2026-03-05
+Last updated: 2026-03-06
 
 ## Overview
 
-Lerim includes an evaluation framework for measuring the quality of its four core pipelines:
+Lerim includes an evaluation framework for measuring the quality of its core pipelines:
 
 | Pipeline | What it does | Runner |
 |----------|-------------|--------|
 | **Extraction** | Extracts memory candidates (decisions, learnings) from a coding session trace using DSPy | `run_extraction.py` |
 | **Summarization** | Produces a structured session summary from a trace using DSPy | `run_summarization.py` |
-| **Sync** | Full agentic pipeline — orchestrates extraction, summarization, dedup, and memory writes using PydanticAI + DSPy | `run_sync.py` |
-| **Maintain** | Seeds memories via sync, then runs maintenance (merge, archive, consolidate) using PydanticAI + DSPy | `run_maintain.py` |
+| **Lifecycle** | Sequential syncs with periodic maintains — tests realistic memory accumulation, dedup, update, merge, archive, and consolidation | `run_lifecycle.py` |
 
 Each eval combines two scoring layers:
 
@@ -19,6 +18,10 @@ Each eval combines two scoring layers:
 2. **LLM-as-judge scoring** — a coding agent CLI (Claude Code, Codex, or OpenCode) reads the original trace and the pipeline output, then scores quality on three dimensions
 
 Key design choice: **no new dependencies or API keys required for judging**. The judge uses coding agent CLIs that developers already have installed, leveraging existing subscriptions.
+
+### Eval isolation
+
+All eval runners build isolated `Config` objects in memory via `build_eval_config()`. They never read from or write to `~/.lerim/`, `<repo>/.lerim/`, or any path outside `evals/` and temp dirs. This prevents eval runs from corrupting real user data.
 
 ## Quick start
 
@@ -29,15 +32,14 @@ cp path/to/session.jsonl evals/traces/
 # 2. Run any pipeline eval (--config is required)
 PYTHONPATH=. python evals/run_extraction.py --config evals/configs/eval_minimax_m25.toml
 PYTHONPATH=. python evals/run_summarization.py --config evals/configs/eval_minimax_m25.toml
-PYTHONPATH=. python evals/run_sync.py --config evals/configs/eval_minimax_m25.toml
-PYTHONPATH=. python evals/run_maintain.py --config evals/configs/eval_minimax_m25.toml
+PYTHONPATH=. python evals/run_lifecycle.py --config evals/configs/eval_minimax_m25.toml --limit 5 --maintain-every 3
 
 # 3. Limit traces for faster runs
-PYTHONPATH=. python evals/run_sync.py --config evals/configs/eval_ollama_9b_q8.toml --limit 1
+PYTHONPATH=. python evals/run_extraction.py --config evals/configs/eval_ollama_9b_q8.toml --limit 1
 
 # 4. Compare results across runs
 PYTHONPATH=. python evals/compare.py
-PYTHONPATH=. python evals/compare.py --pipeline sync
+PYTHONPATH=. python evals/compare.py --pipeline lifecycle
 ```
 
 ## Directory structure
@@ -53,22 +55,20 @@ evals/
     eval_minimax_m25.toml
   run_extraction.py         # Extraction pipeline eval runner
   run_summarization.py      # Summarization pipeline eval runner
-  run_sync.py               # Full agentic sync eval runner
-  run_maintain.py           # Memory maintenance eval runner
+  run_lifecycle.py          # Lifecycle eval runner (sequential syncs + periodic maintains)
   scores.py                 # EvalScore dataclass + deterministic checks
   judge.py                  # Coding agent CLI judge wrapper
   compare.py                # Cross-run comparison table
   judge_prompts/            # LLM judge prompt templates
     extraction.md           # Extraction quality judge prompt
     summarization.md        # Summarization quality judge prompt
-    sync.md                 # Sync quality judge prompt
-    maintain.md             # Maintain quality judge prompt
+    lifecycle_sync.md       # Lifecycle sync judge prompt
+    lifecycle_maintain.md   # Lifecycle maintain judge prompt
     golden_extraction.md    # Golden dataset creation prompt
     golden_summarization.md # Golden dataset creation prompt
   traces/                   # Synthetic smoke-test traces (git-tracked, ships with repo)
   results/                  # Eval output JSONs (gitignored)
   scripts/                  # Standalone benchmark utilities
-    bench_ollama.sh         # Compare tok/s and memory across Ollama models
     bench_models.sh         # Multi-model benchmark with comparison
   dataset/                  # Dataset pipeline (real traces, gitignored output)
     build.py                # Pipeline entry point
@@ -190,19 +190,13 @@ Fast, free, reproducible checks that run before the judge.
 | `fields_present` | Required frontmatter fields (`title`, `description`, `user_intent`, `session_narrative`, `coding_agent`) are all non-empty |
 | `word_limits` | `user_intent` <= 150 words, `session_narrative` <= 200 words |
 
-**Sync checks:**
+**Lifecycle checks:**
 
 | Check | What it validates |
 |-------|-------------------|
-| `schema_ok` | All three artifacts (extraction, summary, memory_actions) are present and non-null |
-| `has_candidates` | Extraction produced at least one candidate |
-
-**Maintain checks:**
-
-| Check | What it validates |
-|-------|-------------------|
-| `success` | Maintain pipeline completed without error |
-| `memory_files_before/after` | Memory file counts before and after maintenance |
+| `schema_ok` | Sync artifacts (extraction, summary, memory_actions) are present |
+| Memory accumulation | Memory file count grows across syncs |
+| Maintain actions | Memory count changes after maintain (merge/archive) |
 
 ### LLM judge scoring
 
@@ -216,7 +210,7 @@ The judge is a coding agent CLI invoked via subprocess. It reads the original tr
 
 **Composite score** = completeness x 0.4 + faithfulness x 0.35 + clarity x 0.25
 
-The third dimension is called "clarity" for extraction/summarization and "coherence" for sync/maintain, but the weight is the same.
+The third dimension is called "clarity" for extraction/summarization and "coherence" for lifecycle sync/maintain, but the weight is the same.
 
 ### How the judge works
 
@@ -228,7 +222,7 @@ The judge wrapper (`evals/judge.py`) supports three coding agent CLIs:
 | `codex` | `codex exec <prompt> --json --ephemeral` |
 | `opencode` | `opencode run <prompt> --format json` |
 
-The prompt is assembled from a template in `judge_prompts/` with the trace path and pipeline output injected. The judge reads the original trace, compares it against the pipeline output, and returns structured JSON with scores and reasoning.
+For extraction/summarization evals, the prompt includes the pipeline output directly. For lifecycle evals, the judge receives file paths and uses Read/search tools to investigate strategically — avoiding loading entire files into context.
 
 ### Ship thresholds
 
@@ -236,10 +230,10 @@ The prompt is assembled from a template in `judge_prompts/` with the trace path 
 |----------|---------------------|
 | Extraction | >= 0.70 |
 | Summarization | >= 0.65 |
-| Sync | >= 0.60 |
-| Maintain | >= 0.60 |
+| Lifecycle (sync) | >= 0.60 |
+| Lifecycle (maintain) | >= 0.60 |
 
-## The four pipeline evals in detail
+## The pipeline evals in detail
 
 ### Extraction eval (`run_extraction.py`)
 
@@ -265,33 +259,50 @@ Tests the DSPy summarization pipeline in isolation. For each trace:
 PYTHONPATH=. python evals/run_summarization.py --config evals/configs/eval_ollama_9b_q8.toml
 ```
 
-### Sync eval (`run_sync.py`)
+### Lifecycle eval (`run_lifecycle.py`)
 
-Tests the full agentic sync pipeline. This is the most important eval — it exercises the entire system end-to-end. For each trace:
+Tests the full system end-to-end with realistic memory accumulation. This is the most important eval — it exercises sync, extraction, summarization, dedup, update, maintain, merge, archive, and consolidation in sequence.
 
-1. Creates an isolated temp directory with `memory/` and `workspace/` subdirs
-2. Instantiates `LerimAgent` and calls `agent.sync(trace_path, memory_root, workspace_root)`
-3. The agent orchestrates: extraction (DSPy) -> summarization (DSPy) -> dedup check -> memory file writes (PydanticAI)
-4. Collects all artifacts (extract.json, summary.json, memory_actions.json)
-5. Sends the combined artifacts + trace path to the judge
+**Flow:**
+
+1. Creates a shared isolated temp directory with full memory tree
+2. Sorts traces chronologically (parses first-line timestamp, falls back to file mtime)
+3. Sequential loop: for each trace, runs `agent.sync()` with the shared memory root
+4. After every N syncs (controlled by `--maintain-every`), runs `agent.maintain()`
+5. Each sync and maintain is independently judge-scored
+6. Final maintain runs if there were syncs since last maintain
+7. Aggregates scores and saves results
+
+**What it tests:**
+
+| Capability | How |
+|-----------|-----|
+| Extraction quality (DSPy) | Inside sync pipeline |
+| Summarization quality (DSPy) | Inside sync pipeline |
+| Memory write correctness | Judge checks written files |
+| Dedup / no_op decisions | Later syncs see earlier memories |
+| Update decisions | Similar traces trigger updates |
+| Explorer candidate matching | Explorer searches growing memory |
+| Merge duplicates | Maintain merges overlapping |
+| Archive low-value | Maintain archives stale/trivial |
+| Consolidate 3+ related | Maintain consolidates related |
+| Post-maintain sync quality | Syncs after maintain see cleaned state |
+
+**CLI flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config` | (required) | Path to eval config TOML |
+| `--traces-dir` | `evals/traces/` | Override traces directory |
+| `--limit` | 20 | Max traces to process |
+| `--maintain-every` | 5 | Run maintain after every N syncs |
 
 ```bash
-PYTHONPATH=. python evals/run_sync.py --config evals/configs/eval_ollama_9b_q8.toml --limit 1
-```
+# Quick smoke test
+PYTHONPATH=. python evals/run_lifecycle.py --config evals/configs/eval_minimax_m25.toml --limit 2 --maintain-every 2
 
-The `--limit` flag restricts how many traces to process (useful for expensive models).
-
-### Maintain eval (`run_maintain.py`)
-
-Tests memory maintenance quality. This eval has two phases:
-
-1. **Seed phase**: syncs traces to populate a temp memory directory (reuses the sync pipeline)
-2. **Maintain phase**: runs `agent.maintain(memory_root, workspace_root)` on the populated memories — the agent reviews existing memories and decides what to merge, archive, consolidate, or leave unchanged
-
-The judge scores whether maintenance actions were reasonable.
-
-```bash
-PYTHONPATH=. python evals/run_maintain.py --config evals/configs/eval_minimax_m25.toml --limit 1
+# Full benchmark
+PYTHONPATH=. python evals/run_lifecycle.py --config evals/configs/eval_minimax_m25.toml --traces-dir evals/dataset/traces/ --limit 20 --maintain-every 5
 ```
 
 ## Result format
@@ -301,11 +312,10 @@ Results are saved as JSON in `evals/results/` (gitignored). Each file is timesta
 ```
 evals/results/extraction_20260305_141043.json
 evals/results/summarization_20260305_142834.json
-evals/results/sync_20260305_162754.json
-evals/results/maintain_20260305_171326.json
+evals/results/lifecycle_20260306_162754.json
 ```
 
-Result structure (extraction example):
+### Extraction/summarization result structure
 
 ```json
 {
@@ -329,6 +339,36 @@ Result structure (extraction example):
 }
 ```
 
+### Lifecycle result structure
+
+```json
+{
+  "timestamp": "2026-03-06T...",
+  "pipeline": "lifecycle",
+  "config": {
+    "lead": {...}, "explorer": {...},
+    "extraction": {...}, "summarization": {...}
+  },
+  "judge": {"agent": "claude"},
+  "performance": {
+    "total_wall_time_s": 1234,
+    "trace_count": 20,
+    "sync_count": 20,
+    "maintain_count": 4,
+    "maintain_every": 5,
+    "avg_sync_time_s": 45.2,
+    "avg_maintain_time_s": 120.3
+  },
+  "scores": {
+    "sync_composite": 0.72,
+    "maintain_composite": 0.68,
+    "overall_composite": 0.71
+  },
+  "sync_scores": [...],
+  "maintain_scores": [...]
+}
+```
+
 ## Comparison table
 
 `compare.py` reads all result files, groups by pipeline, and prints a side-by-side table:
@@ -336,7 +376,16 @@ Result structure (extraction example):
 ```bash
 PYTHONPATH=. python evals/compare.py
 PYTHONPATH=. python evals/compare.py --pipeline extraction
-PYTHONPATH=. python evals/compare.py --pipeline sync
+PYTHONPATH=. python evals/compare.py --pipeline lifecycle
+```
+
+Lifecycle comparison output:
+
+```
+Pipeline: lifecycle
+Config                                  sync  maint  overall    time
+----------------------------------------------------------------------
+MiniMax-M2.5 (minimax)                  0.72   0.68     0.71   1234s
 ```
 
 ## Thinking mode and local models
@@ -366,29 +415,29 @@ Ollama model loading and unloading via the `auto_unload` lifecycle. Evals bypass
 this — they assume Ollama is running and the model is available for the duration
 of the eval run.
 
-## Benchmarking local models
+## Multi-model benchmark script
 
-Before running pipeline evals with a local model, use `evals/scripts/bench_ollama.sh` to compare raw inference speed and memory usage across Ollama models. This helps pick the right model/quantization for your hardware.
+`evals/scripts/bench_models.sh` runs extraction, summarization, and lifecycle evals across all configs (or a subset), then prints a comparison table. This is the primary way to benchmark multiple models end-to-end.
 
 ```bash
-# Default model set (Qwen 3.5 variants + GLM)
-./evals/scripts/bench_ollama.sh
+# Run all configs in evals/configs/
+./evals/scripts/bench_models.sh
 
-# Specific models, thinking off, 5 averaged runs
-THINKING=off NUM_RUNS=5 ./evals/scripts/bench_ollama.sh qwen3.5:4b-q8_0 qwen3.5:9b-q8_0
+# Run specific configs
+./evals/scripts/bench_models.sh evals/configs/eval_minimax_m25.toml evals/configs/eval_ollama_9b_q8.toml
 
-# Custom prompt
-BENCH_PROMPT="Explain quantum computing" THINKING=off ./evals/scripts/bench_ollama.sh
+# Customize: 3 traces, only extraction, use real dataset, clean results first
+LIMIT=3 PIPELINES=extraction TRACES_DIR=evals/dataset/traces CLEAN=1 ./evals/scripts/bench_models.sh
 ```
 
-The script measures per-model:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TRACES_DIR` | auto (`evals/dataset/traces/` if exists, else `evals/traces/`) | Traces directory |
+| `LIMIT` | `5` | Max traces per eval run |
+| `PIPELINES` | `extraction summarization lifecycle` | Space-separated pipelines to run |
+| `CLEAN` | `0` | Set to `1` to clear `evals/results/` before running |
 
-- **Gen tok/s** — generation (decode) throughput, including thinking tokens
-- **Prompt tok/s** — prompt evaluation (prefill) throughput
-- **Memory** — Ollama RSS, system RAM delta from loading, VRAM/GPU offload %
-- **Model info** — parameter count, quantization level, context length
-
-Models are unloaded between runs for clean memory baselines. A warm-up run loads the model before timed runs start. See `evals/scripts/README.md` for the full environment variable reference.
+The script auto-detects traces: if `evals/dataset/traces/` has JSONL files it uses those (real traces), otherwise falls back to `evals/traces/` (synthetic). Override with `TRACES_DIR`.
 
 ## Golden datasets
 
@@ -414,8 +463,7 @@ Golden datasets are the foundation for prompt optimization (DSPy MIPROv2), super
 | `evals/judge.py` | `invoke_judge()` subprocess wrapper, `build_judge_prompt()` template injection, output parsing |
 | `evals/run_extraction.py` | Extraction eval runner — configures DSPy, runs pipeline, scores, saves results |
 | `evals/run_summarization.py` | Summarization eval runner — same flow for summarization pipeline |
-| `evals/run_sync.py` | Sync eval runner — full agentic pipeline, isolated temp dirs per trace |
-| `evals/run_maintain.py` | Maintain eval runner — seeds memories via sync, then runs maintenance |
+| `evals/run_lifecycle.py` | Lifecycle eval runner — sequential syncs + periodic maintains with judge scoring |
 | `evals/compare.py` | Loads all result JSONs, groups by pipeline, prints comparison table |
 
 ## Dataset pipeline
@@ -470,7 +518,7 @@ PYTHONPATH=. python evals/dataset/build.py --agent claude --config evals/dataset
 
 # Run evals against the dataset
 PYTHONPATH=. python evals/run_extraction.py --config evals/configs/eval_minimax_m25.toml --traces-dir evals/dataset/traces/
-PYTHONPATH=. python evals/run_sync.py --config evals/configs/eval_ollama_9b_q8.toml --traces-dir evals/dataset/traces/ --limit 5
+PYTHONPATH=. python evals/run_lifecycle.py --config evals/configs/eval_minimax_m25.toml --traces-dir evals/dataset/traces/ --limit 10 --maintain-every 5
 ```
 
 ### Directory structure
@@ -545,14 +593,14 @@ min_quality_score = 3          # Minimum LLM quality score (1-5)
 
 ### Using `--traces-dir` with eval runners
 
-All four eval runners accept `--traces-dir` to override the default trace directory:
+All eval runners accept `--traces-dir` to override the default trace directory:
 
 ```bash
 # Run extraction eval on real dataset traces
 PYTHONPATH=. python evals/run_extraction.py --config evals/configs/eval_minimax_m25.toml --traces-dir evals/dataset/traces/
 
-# Run sync eval with limit
-PYTHONPATH=. python evals/run_sync.py --config evals/configs/eval_minimax_m25.toml --traces-dir evals/dataset/traces/ --limit 5
+# Run lifecycle eval with limit
+PYTHONPATH=. python evals/run_lifecycle.py --config evals/configs/eval_minimax_m25.toml --traces-dir evals/dataset/traces/ --limit 10
 ```
 
 When `--traces-dir` is not provided, runners use the default `evals/traces/` directory (the synthetic smoke-test traces).
