@@ -23,7 +23,6 @@ from typing import Any
 
 from lerim.adapters.base import SessionRecord, ViewerMessage, ViewerSession
 from lerim.adapters.common import (
-    compute_file_hash,
     in_window,
     load_jsonl_dict_lines,
     parse_timestamp,
@@ -190,14 +189,13 @@ def iter_sessions(
     traces_dir: Path | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
-    known_run_hashes: dict[str, str] | None = None,
+    known_run_ids: set[str] | None = None,
     cache_dir: Path | None = None,
 ) -> list[SessionRecord]:
     """Enumerate Cursor sessions, export as JSONL, and build session records.
 
     Groups ``bubbleId`` rows by composerId, writes each session as a JSONL
-    file in *cache_dir*, computes a content hash, and skips sessions whose
-    hash is unchanged since the last sync.
+    file in *cache_dir*, and skips sessions already indexed by ID.
     """
     root = traces_dir or default_path()
     if root is None or not root.exists():
@@ -243,18 +241,16 @@ WHERE key LIKE 'bubbleId:%' ORDER BY key"""
             if not in_window(started_at, start, end):
                 continue
 
+            # ID-based skip (before export to avoid wasted work)
+            if known_run_ids and cid in known_run_ids:
+                continue
+
             # Export JSONL: metadata first line, then bubbles
             jsonl_path = out_dir / f"{cid}.jsonl"
             with jsonl_path.open("w", encoding="utf-8") as fh:
                 fh.write(json.dumps(metadata) + "\n")
                 for bubble in bubble_list:
                     fh.write(json.dumps(bubble) + "\n")
-
-            # Hash-based change detection
-            file_hash = compute_file_hash(jsonl_path)
-            if known_run_hashes and cid in known_run_hashes:
-                if known_run_hashes[cid] == file_hash:
-                    continue
 
             message_count = sum(1 for b in bubble_list if b.get("type") in (1, 2))
             tool_count = sum(1 for b in bubble_list if b.get("type") not in (1, 2))
@@ -277,7 +273,6 @@ WHERE key LIKE 'bubbleId:%' ORDER BY key"""
                     message_count=message_count,
                     tool_call_count=tool_count,
                     summaries=summaries,
-                    content_hash=file_hash,
                 )
             )
 

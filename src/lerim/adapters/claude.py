@@ -6,14 +6,43 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import json
+
 from lerim.adapters.base import SessionRecord, ViewerMessage, ViewerSession
 from lerim.adapters.common import (
-    compute_file_hash,
     count_non_empty_files,
     in_window,
     load_jsonl_dict_lines,
     parse_timestamp,
 )
+
+
+def compact_trace(raw_text: str) -> str:
+    """Remove non-conversational noise from Claude trace JSONL.
+
+    Drops: progress, file-history-snapshot, queue-operation, pr-link lines.
+    Keeps: user, assistant, system, summary lines (full content, no truncation).
+    """
+    drop_types = {"progress", "file-history-snapshot", "queue-operation", "pr-link"}
+    kept: list[str] = []
+    for line in raw_text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            kept.append(line)
+            continue
+        if obj.get("type") in drop_types:
+            continue
+        kept.append(line)
+    return "\n".join(kept) + "\n"
+
+
+def _default_cache_dir() -> Path:
+    """Return the default cache directory for compacted Claude JSONL files."""
+    return Path("~/.lerim/cache/claude").expanduser()
 
 
 def default_path() -> Path | None:
@@ -154,20 +183,21 @@ def iter_sessions(
     traces_dir: Path | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
-    known_run_hashes: dict[str, str] | None = None,
+    known_run_ids: set[str] | None = None,
 ) -> list[SessionRecord]:
-    """Enumerate Claude sessions, skipping those whose content hash is unchanged."""
+    """Enumerate Claude sessions, skipping those already indexed by ID."""
     base = traces_dir or default_path()
     if base is None or not base.exists():
         return []
 
+    cache_dir = _default_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
     records: list[SessionRecord] = []
     for path in base.rglob("*.jsonl"):
         run_id = path.stem
-        file_hash = compute_file_hash(path)
-        if known_run_hashes and run_id in known_run_hashes:
-            if known_run_hashes[run_id] == file_hash:
-                continue
+        if known_run_ids and run_id in known_run_ids:
+            continue
 
         entries = load_jsonl_dict_lines(path)
         if not entries:
@@ -221,11 +251,17 @@ def iter_sessions(
 
         if not in_window(started_at, start, end):
             continue
+
+        # Compact and export to cache
+        compacted = compact_trace(path.read_text(encoding="utf-8"))
+        cache_path = cache_dir / f"{run_id}.jsonl"
+        cache_path.write_text(compacted, encoding="utf-8")
+
         records.append(
             SessionRecord(
                 run_id=run_id,
                 agent_type="claude",
-                session_path=str(path),
+                session_path=str(cache_path),
                 start_time=started_at.isoformat() if started_at else None,
                 repo_path=cwd,
                 repo_name=repo_name,
@@ -234,7 +270,6 @@ def iter_sessions(
                 error_count=errors,
                 total_tokens=total_tokens,
                 summaries=summaries[:5],
-                content_hash=file_hash,
             )
         )
 

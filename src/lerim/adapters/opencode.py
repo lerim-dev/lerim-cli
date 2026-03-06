@@ -22,7 +22,6 @@ from typing import Any
 
 from lerim.adapters.base import SessionRecord, ViewerMessage, ViewerSession
 from lerim.adapters.common import (
-    compute_file_hash,
     in_window,
     load_jsonl_dict_lines,
     parse_timestamp,
@@ -326,14 +325,13 @@ def iter_sessions(
     traces_dir: Path | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
-    known_run_hashes: dict[str, str] | None = None,
+    known_run_ids: set[str] | None = None,
     cache_dir: Path | None = None,
 ) -> list[SessionRecord]:
     """Enumerate OpenCode sessions, export as JSONL, and build session records.
 
     Reads sessions from the SQLite database, exports each as a JSONL cache
-    file in *cache_dir*, computes a content hash, and skips sessions whose
-    hash is unchanged since the last sync.
+    file in *cache_dir*, and skips sessions already indexed by ID.
     """
     root = traces_dir or default_path()
     if root is None or not root.exists():
@@ -362,16 +360,16 @@ ORDER BY time_created"""
         if not in_window(start_dt, start, end):
             continue
 
+        # ID-based skip (before DB read to avoid wasted work)
+        if known_run_ids and sess_id in known_run_ids:
+            continue
+
         session = _read_session_db(db_path, session_id=sess_id)
         if session is None:
             continue
 
-        # Export to JSONL cache file and compute hash
+        # Export to JSONL cache file
         jsonl_path = _export_session_jsonl(session, out_dir)
-        file_hash = compute_file_hash(jsonl_path)
-        if known_run_hashes and sess_id in known_run_hashes:
-            if known_run_hashes[sess_id] == file_hash:
-                continue
 
         summaries: list[str] = []
         for msg in session.messages:
@@ -396,7 +394,6 @@ ORDER BY time_created"""
                 tool_call_count=tool_calls,
                 total_tokens=session.total_input_tokens + session.total_output_tokens,
                 summaries=summaries,
-                content_hash=file_hash,
             )
         )
 

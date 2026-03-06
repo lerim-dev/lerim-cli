@@ -52,7 +52,6 @@ class SessionRecord:
     error_count: int = 0
     total_tokens: int = 0
     summaries: list[str] = field(default_factory=list)
-    content_hash: str | None = None
 
 
 class Adapter(Protocol):
@@ -69,7 +68,7 @@ class Adapter(Protocol):
         traces_dir: Path | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
-        known_run_hashes: dict[str, str] | None = None,
+        known_run_ids: set[str] | None = None,
     ) -> list[SessionRecord]:
         """List normalized session summaries in the selected time window."""
 
