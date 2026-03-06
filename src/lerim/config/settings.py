@@ -627,8 +627,23 @@ def load_config() -> Config:
     )
 
 
+_CONFIG_OVERRIDE: Config | None = None
+
+
+def set_config_override(config: Config | None) -> None:
+    """Set a process-wide config override. Used by eval runners for isolation.
+
+    When set, get_config() returns this instead of the cached load_config().
+    Call set_config_override(None) to clear.
+    """
+    global _CONFIG_OVERRIDE
+    _CONFIG_OVERRIDE = config
+
+
 def get_config() -> Config:
-    """Return cached effective configuration."""
+    """Return config override if set, otherwise cached config."""
+    if _CONFIG_OVERRIDE is not None:
+        return _CONFIG_OVERRIDE
     return load_config()
 
 
@@ -697,6 +712,141 @@ def _write_config_full(data: dict[str, Any]) -> Config:
     _toml_write_dict(lines, data, prefix="")
     user_path.write_text("".join(lines), encoding="utf-8")
     return reload_config()
+
+
+def build_eval_config(
+    roles_override: dict[str, dict[str, Any]], temp_data_dir: Path
+) -> Config:
+    """Build an isolated Config for eval runners without any disk side effects.
+
+    Reads base TOML layers (read-only) and env API keys, deep-merges
+    roles_override into the roles section, and returns a Config with all paths
+    pointing to temp_data_dir. Does NOT call ensure_user_config_exists(),
+    ensure_memory_paths(), _ensure_project_config_exists(), or
+    save_config_patch().
+    """
+    load_dotenv()
+    toml_data, _sources = _load_layers()
+
+    data = toml_data.get("data", {})
+    memory = toml_data.get("memory", {})
+    decay = memory.get("decay", {}) if isinstance(memory.get("decay", {}), dict) else {}
+    server = toml_data.get("server", {})
+    roles = (
+        toml_data.get("roles", {})
+        if isinstance(toml_data.get("roles", {}), dict)
+        else {}
+    )
+    tracing = (
+        toml_data.get("tracing", {})
+        if isinstance(toml_data.get("tracing", {}), dict)
+        else {}
+    )
+
+    # Deep-merge roles_override into roles section
+    for role_name, overrides in roles_override.items():
+        existing = (
+            roles.get(role_name, {})
+            if isinstance(roles.get(role_name, {}), dict)
+            else {}
+        )
+        roles[role_name] = _deep_merge(existing, overrides)
+
+    lead_role = _build_llm_role(
+        roles.get("lead", {}) if isinstance(roles.get("lead", {}), dict) else {},
+        default_provider="openrouter",
+        default_model="qwen/qwen3-coder-30b-a3b-instruct",
+    )
+    explorer_role = _build_llm_role(
+        roles.get("explorer", {})
+        if isinstance(roles.get("explorer", {}), dict)
+        else {},
+        default_provider=lead_role.provider,
+        default_model=lead_role.model,
+    )
+    extract_role = _build_dspy_role(
+        roles.get("extract", {}) if isinstance(roles.get("extract", {}), dict) else {},
+        default_provider="ollama",
+        default_model="qwen3:8b",
+    )
+    summarize_role = _build_dspy_role(
+        roles.get("summarize", {})
+        if isinstance(roles.get("summarize", {}), dict)
+        else {},
+        default_provider=extract_role.provider,
+        default_model=extract_role.model,
+    )
+
+    port = _require_int(server, "port", minimum=1)
+    if port > 65535:
+        port = 8765
+
+    agents_raw = toml_data.get("agents", {})
+    agents = _parse_string_table(agents_raw if isinstance(agents_raw, dict) else {})
+    projects_raw = toml_data.get("projects", {})
+    projects = _parse_string_table(
+        projects_raw if isinstance(projects_raw, dict) else {}
+    )
+
+    memory_scope = (
+        _to_non_empty_string(memory.get("scope")).lower() or "project_fallback_global"
+    )
+
+    return Config(
+        data_dir=temp_data_dir,
+        global_data_dir=temp_data_dir,
+        memory_dir=temp_data_dir / "memory",
+        index_dir=temp_data_dir / "index",
+        memories_db_path=temp_data_dir / "index" / "memories.sqlite3",
+        graph_db_path=temp_data_dir / "index" / "graph.sqlite3",
+        sessions_db_path=temp_data_dir / "index" / "sessions.sqlite3",
+        platforms_path=temp_data_dir / "platforms.json",
+        memory_scope=memory_scope,
+        memory_project_dir_name=_to_non_empty_string(memory.get("project_dir_name"))
+        or ".lerim",
+        decay_enabled=bool(decay.get("enabled", True)),
+        decay_days=_require_int(decay, "decay_days", minimum=30),
+        decay_min_confidence_floor=_require_float(
+            decay, "min_confidence_floor", minimum=0.0, maximum=1.0
+        ),
+        decay_archive_threshold=_require_float(
+            decay, "archive_threshold", minimum=0.0, maximum=1.0
+        ),
+        decay_recent_access_grace_days=_require_int(
+            decay, "recent_access_grace_days", minimum=0
+        ),
+        server_host=_to_non_empty_string(server.get("host")) or "127.0.0.1",
+        server_port=port,
+        sync_interval_minutes=_require_int(server, "sync_interval_minutes", minimum=1),
+        maintain_interval_minutes=_require_int(
+            server, "maintain_interval_minutes", minimum=1
+        ),
+        sync_window_days=_require_int(server, "sync_window_days", minimum=1),
+        sync_max_sessions=_require_int(server, "sync_max_sessions", minimum=1),
+        lead_role=lead_role,
+        explorer_role=explorer_role,
+        extract_role=extract_role,
+        summarize_role=summarize_role,
+        tracing_enabled=bool(tracing.get("enabled", False))
+        or os.getenv("LERIM_TRACING", "").strip().lower() in ("1", "true", "yes", "on"),
+        tracing_include_httpx=bool(tracing.get("include_httpx", False)),
+        tracing_include_content=bool(tracing.get("include_content", True)),
+        anthropic_api_key=_to_non_empty_string(os.environ.get("ANTHROPIC_API_KEY"))
+        or None,
+        openai_api_key=_to_non_empty_string(os.environ.get("OPENAI_API_KEY")) or None,
+        zai_api_key=_to_non_empty_string(os.environ.get("ZAI_API_KEY")) or None,
+        openrouter_api_key=_to_non_empty_string(os.environ.get("OPENROUTER_API_KEY"))
+        or None,
+        minimax_api_key=_to_non_empty_string(os.environ.get("MINIMAX_API_KEY")) or None,
+        provider_api_bases=_parse_string_table(
+            toml_data.get("providers", {})
+            if isinstance(toml_data.get("providers"), dict)
+            else {}
+        ),
+        auto_unload=bool((toml_data.get("providers") or {}).get("auto_unload", True)),
+        agents=agents,
+        projects=projects,
+    )
 
 
 if __name__ == "__main__":
