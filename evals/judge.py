@@ -9,7 +9,42 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import threading
+import time
 from pathlib import Path
+
+from lerim.config.logging import logger
+
+
+def _run_with_heartbeat(
+    cmd: list[str], timeout: int, interval: int = 30
+) -> subprocess.CompletedProcess:
+    """Run a subprocess with periodic heartbeat logs.
+
+    Uses Popen + a daemon thread that logs every ``interval`` seconds
+    so long-running judge calls don't appear stuck.
+    """
+    stop = threading.Event()
+    start = time.time()
+
+    def _heartbeat():
+        while not stop.wait(interval):
+            logger.info("  Judge still running... ({:.0f}s elapsed)", time.time() - start)
+
+    t = threading.Thread(target=_heartbeat, daemon=True)
+    t.start()
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+            raise subprocess.TimeoutExpired(cmd, timeout, output=stdout, stderr=stderr)
+        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+    finally:
+        stop.set()
+        t.join(timeout=2)
 
 
 def invoke_judge(agent: str, prompt: str, timeout: int = 120) -> dict:
@@ -23,7 +58,7 @@ def invoke_judge(agent: str, prompt: str, timeout: int = 120) -> dict:
     else:
         raise ValueError(f"Unknown judge agent: {agent}")
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    result = _run_with_heartbeat(cmd, timeout)
     if result.returncode != 0:
         raise RuntimeError(f"Judge {agent} failed: {result.stderr[:500]}")
     return _parse_agent_output(agent, result.stdout)

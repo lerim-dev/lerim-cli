@@ -1,8 +1,11 @@
 # Lerim Evals
 
-Evaluation framework for Lerim's four pipelines: extraction, summarization,
-sync (full agentic), and maintain (memory maintenance). Combines deterministic
+Evaluation framework for Lerim's pipelines: extraction, summarization,
+and lifecycle (full agentic sync + maintain). Combines deterministic
 schema checks with LLM-as-judge scoring using coding agent CLIs.
+
+All eval runners are isolated — they never read from or write to
+`~/.lerim/` or `<repo>/.lerim/`.
 
 See [docs/evals.md](../docs/evals.md) for the full reference.
 
@@ -15,13 +18,12 @@ PYTHONPATH=. python evals/run_extraction.py --config evals/configs/eval_minimax_
 # Run with a local model config
 PYTHONPATH=. python evals/run_extraction.py --config evals/configs/eval_ollama_9b_q8.toml
 
-# Run sync/maintain with trace limit
-PYTHONPATH=. python evals/run_sync.py --config evals/configs/eval_ollama_9b_q8.toml --limit 1
-PYTHONPATH=. python evals/run_maintain.py --config evals/configs/eval_minimax_m25.toml --limit 1
+# Run lifecycle eval (sequential syncs + periodic maintains)
+PYTHONPATH=. python evals/run_lifecycle.py --config evals/configs/eval_minimax_m25.toml --limit 5 --maintain-every 3
 
 # Compare results across runs
 PYTHONPATH=. python evals/compare.py
-PYTHONPATH=. python evals/compare.py --pipeline extraction
+PYTHONPATH=. python evals/compare.py --pipeline lifecycle
 ```
 
 ## Directory structure
@@ -37,8 +39,7 @@ evals/
     eval_minimax_m25.toml
   run_extraction.py         # Extraction pipeline eval runner
   run_summarization.py      # Summarization pipeline eval runner
-  run_sync.py               # Full agentic sync eval runner
-  run_maintain.py           # Memory maintenance eval runner
+  run_lifecycle.py          # Lifecycle eval runner (sequential syncs + periodic maintains)
   scores.py                 # EvalScore dataclass + deterministic checks
   judge.py                  # Coding agent CLI judge wrapper
   compare.py                # Cross-run comparison table
@@ -46,7 +47,6 @@ evals/
   traces/                   # Synthetic smoke-test traces (git-tracked, ships with repo)
   results/                  # Eval output JSONs (gitignored)
   scripts/                  # Standalone benchmark utilities
-    bench_ollama.sh         # Compare tok/s and memory across Ollama models
     bench_models.sh         # Multi-model benchmark with comparison
 ```
 
@@ -57,18 +57,30 @@ evals/
 | `evals/traces/` | 3 synthetic smoke-test traces | Yes | Yes |
 | `evals/dataset/traces/` | Real traces from your coding-agent sessions | No (gitignored) | No — use `--traces-dir` |
 
-## Benchmarking local models
+## Multi-model benchmark
 
-Before running pipeline evals, use `scripts/bench_ollama.sh` to compare raw
-inference speed and memory usage across Ollama models:
+`bench_models.sh` runs extraction, summarization, and lifecycle evals across
+all configs (or a subset), then prints a comparison table:
 
 ```bash
-# Default model set
-./evals/scripts/bench_ollama.sh
+# Run all configs in evals/configs/
+./evals/scripts/bench_models.sh
 
-# Specific models, thinking off, 5 runs
-THINKING=off NUM_RUNS=5 ./evals/scripts/bench_ollama.sh qwen3.5:4b-q8_0 qwen3.5:9b-q8_0
+# Run specific configs
+./evals/scripts/bench_models.sh evals/configs/eval_minimax_m25.toml evals/configs/eval_ollama_9b_q8.toml
+
+# Customize: 3 traces, only extraction, use real dataset, clean results first
+LIMIT=3 PIPELINES=extraction TRACES_DIR=evals/dataset/traces CLEAN=1 ./evals/scripts/bench_models.sh
 ```
+
+Environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TRACES_DIR` | auto (`evals/dataset/traces/` if exists, else `evals/traces/`) | Traces directory |
+| `LIMIT` | `5` | Max traces per eval run |
+| `PIPELINES` | `extraction summarization lifecycle` | Space-separated pipelines to run |
+| `CLEAN` | `0` | Set to `1` to clear `evals/results/` before running |
 
 ## Dataset pipeline
 
@@ -80,7 +92,7 @@ PYTHONPATH=. python evals/dataset/build.py --agent claude
 
 # Run evals against the dataset
 PYTHONPATH=. python evals/run_extraction.py --config evals/configs/eval_minimax_m25.toml --traces-dir evals/dataset/traces/
-PYTHONPATH=. python evals/run_sync.py --config evals/configs/eval_minimax_m25.toml --traces-dir evals/dataset/traces/ --limit 5
+PYTHONPATH=. python evals/run_lifecycle.py --config evals/configs/eval_minimax_m25.toml --traces-dir evals/dataset/traces/ --limit 10
 ```
 
 The pipeline scans sessions from platforms configured in `evals/dataset/config.toml`,

@@ -3,7 +3,7 @@
 Reads all JSON result files from evals/results/, groups by pipeline,
 and prints a comparison table showing scores, timings, and config info.
 
-Usage: python evals/compare.py [--pipeline extraction|summarization]
+Usage: python evals/compare.py [--pipeline extraction|summarization|lifecycle]
 """
 
 from __future__ import annotations
@@ -18,8 +18,16 @@ RESULTS_DIR = Path(__file__).parent / "results"
 
 def _model_label(config: dict) -> str:
     """Build a short label from config model name and provider."""
-    model = config.get("model", "unknown")
-    provider = config.get("provider", "")
+    # Lifecycle configs are nested dicts {lead: {...}, extraction: {...}, ...}
+    # Single-pipeline configs are flat {model: ..., provider: ...}
+    if "model" in config:
+        model = config.get("model", "unknown")
+        provider = config.get("provider", "")
+    else:
+        # Try extraction section first, then lead
+        section = config.get("extraction", config.get("lead", {}))
+        model = section.get("model", "unknown")
+        provider = section.get("provider", "")
     short_model = model.split("/")[-1] if "/" in model else model
     return f"{short_model} ({provider})" if provider else short_model
 
@@ -55,29 +63,49 @@ def compare_results(pipeline_filter: str | None = None) -> None:
 
     for pipeline, runs in sorted(groups.items()):
         print(f"\nPipeline: {pipeline}")
-        is_extraction = pipeline == "extraction"
 
-        if is_extraction:
+        if pipeline == "lifecycle":
+            header = (
+                f"{'Config':<40} {'sync':>6} {'maint':>6} {'overall':>7} {'time':>7}"
+            )
+            print(header)
+            print("-" * len(header))
+            for run in runs:
+                label = _model_label(run.get("config", {}))
+                scores = run.get("scores", {})
+                perf = run.get("performance", {})
+                total_time = perf.get("total_wall_time_s", 0)
+                print(
+                    f"{label:<40} {scores.get('sync_composite', 0):>6.2f} "
+                    f"{scores.get('maintain_composite', 0):>6.2f} "
+                    f"{scores.get('overall_composite', 0):>7.2f} "
+                    f"{total_time:>6.0f}s"
+                )
+        elif pipeline == "extraction":
             header = f"{'Config':<40} {'schema':>6} {'compl':>6} {'faith':>6} {'clar':>6} {'COMP':>6} {'time/t':>7}"
-        else:
-            header = f"{'Config':<40} {'fields':>6} {'limits':>6} {'compl':>6} {'faith':>6} {'clar':>6} {'COMP':>6} {'time/t':>7}"
-        print(header)
-        print("-" * len(header))
-
-        for run in runs:
-            label = _model_label(run.get("config", {}))
-            scores = run.get("scores", {})
-            perf = run.get("performance", {})
-            avg_time = perf.get("avg_time_per_trace_s", 0)
-
-            if is_extraction:
+            print(header)
+            print("-" * len(header))
+            for run in runs:
+                label = _model_label(run.get("config", {}))
+                scores = run.get("scores", {})
+                perf = run.get("performance", {})
+                avg_time = perf.get("avg_time_per_trace_s", 0)
                 print(
                     f"{label:<40} {scores.get('schema_ok', 0):>6.2f} "
                     f"{scores.get('completeness', 0):>6.2f} {scores.get('faithfulness', 0):>6.2f} "
                     f"{scores.get('clarity', 0):>6.2f} {scores.get('composite', 0):>6.2f} "
                     f"{avg_time:>6.1f}s"
                 )
-            else:
+        else:
+            # Summarization or unknown
+            header = f"{'Config':<40} {'fields':>6} {'limits':>6} {'compl':>6} {'faith':>6} {'clar':>6} {'COMP':>6} {'time/t':>7}"
+            print(header)
+            print("-" * len(header))
+            for run in runs:
+                label = _model_label(run.get("config", {}))
+                scores = run.get("scores", {})
+                perf = run.get("performance", {})
+                avg_time = perf.get("avg_time_per_trace_s", 0)
                 print(
                     f"{label:<40} {scores.get('fields_present', 0):>6.2f} "
                     f"{scores.get('word_limits', 0):>6.2f} {scores.get('completeness', 0):>6.2f} "
@@ -92,7 +120,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compare eval results")
     parser.add_argument(
         "--pipeline",
-        choices=["extraction", "summarization", "sync", "maintain"],
+        choices=["extraction", "summarization", "lifecycle"],
         help="Filter by pipeline",
     )
     args = parser.parse_args()

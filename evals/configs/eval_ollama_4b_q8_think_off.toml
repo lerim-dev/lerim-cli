@@ -1,28 +1,28 @@
 # Eval config — Ollama Qwen3.5 4B Q8_0 with thinking OFF.
 [judge]
 agent = "claude"
-timeout_seconds = 1000
+timeout_seconds = 2000
 
 [lead]
 provider = "ollama"
 model = "qwen3.5:4b-q8_0"
 thinking = false
-timeout_seconds = 300
+timeout_seconds = 2000
 
 [explorer]
 provider = "ollama"
 model = "qwen3.5:4b-q8_0"
 thinking = false
-timeout_seconds = 180
+timeout_seconds = 2000
 
 [extraction]
 provider = "ollama"
 model = "qwen3.5:4b-q8_0"
 thinking = false
-timeout_seconds = 180
+timeout_seconds = 2000
 
 [summarization]
 provider = "ollama"
 model = "qwen3.5:4b-q8_0"
 thinking = false
-timeout_seconds = 180
+timeout_seconds = 2000

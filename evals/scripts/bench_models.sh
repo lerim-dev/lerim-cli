@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Benchmark Lerim pipelines across multiple model configs.
 #
-# Runs extraction and summarization evals for each config, then prints
-# a comparison table. Results accumulate in evals/results/.
+# Runs pipeline evals for each config, then prints a comparison table.
+# Results accumulate in evals/results/.
 #
 # Usage:
 #   ./evals/scripts/bench_models.sh                              # all configs in evals/configs/
@@ -11,9 +11,8 @@
 # Environment variables:
 #   TRACES_DIR    Override traces directory (default: evals/dataset/traces/ if exists, else evals/traces/)
 #   LIMIT         Max traces per eval run (default: 5)
-#   PIPELINES     Space-separated pipelines to run (default: "extraction summarization")
+#   PIPELINES     Space-separated pipelines to run (default: "extraction summarization lifecycle")
 #   CLEAN         Set to 1 to clear evals/results/ before running
-#   JUDGE_TIMEOUT Override judge timeout in seconds (overrides config value)
 
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -21,7 +20,7 @@ cd "$(git rev-parse --show-toplevel)"
 # --- Configuration -----------------------------------------------------------
 
 LIMIT="${LIMIT:-5}"
-PIPELINES="${PIPELINES:-extraction summarization}"
+PIPELINES="${PIPELINES:-extraction summarization lifecycle}"
 CLEAN="${CLEAN:-0}"
 
 # Auto-detect traces directory
@@ -87,7 +86,7 @@ for config in "${configs[@]}"; do
             continue
         fi
 
-        PYTHONPATH=. python3 "$runner" \
+        PYTHONUNBUFFERED=1 PYTHONPATH=. python3 "$runner" \
             --config "$config" \
             --traces-dir "$traces_dir" \
             --limit "$LIMIT" \

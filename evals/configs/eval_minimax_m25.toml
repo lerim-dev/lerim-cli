@@ -1,24 +1,24 @@
 # Eval config — MiniMax M2.5 cloud baseline.
 [judge]
 agent = "claude"
-timeout_seconds = 300
+timeout_seconds = 2000
 
 [lead]
 provider = "minimax"
 model = "MiniMax-M2.5"
-timeout_seconds = 300
+timeout_seconds = 2000
 
 [explorer]
 provider = "minimax"
 model = "MiniMax-M2.5"
-timeout_seconds = 180
+timeout_seconds = 2000
 
 [extraction]
 provider = "minimax"
 model = "MiniMax-M2.5"
-timeout_seconds = 180
+timeout_seconds = 2000
 
 [summarization]
 provider = "minimax"
 model = "MiniMax-M2.5"
-timeout_seconds = 180
+timeout_seconds = 2000
