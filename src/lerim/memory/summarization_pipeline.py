@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -21,6 +22,7 @@ import dspy
 import frontmatter
 from pydantic import BaseModel, Field
 
+from lerim.config.logging import logger
 from lerim.memory.memory_record import slugify
 from lerim.config.settings import get_config, reload_config
 from lerim.memory.utils import configure_dspy_lm, window_transcript
@@ -164,6 +166,7 @@ def _summarize_trace(
     max_tokens = config.summarize_role.max_window_tokens
     overlap_tokens = config.summarize_role.window_overlap_tokens
     windows = window_transcript(transcript, max_tokens, overlap_tokens)
+    logger.info("Summarization: {} window(s), max_tokens={}", len(windows), max_tokens)
     lm = configure_dspy_lm("summarize")
     meta = metadata or {}
     met = metrics or {}
@@ -173,6 +176,8 @@ def _summarize_trace(
     with dspy.context(lm=lm):
         if len(windows) == 1:
             # Single window: direct summarization
+            logger.info("  Window 1/1: summarizing...")
+            w_start = time.time()
             summarizer = dspy.Refine(
                 dspy.ChainOfThought(TraceSummarySignature),
                 N=1,
@@ -182,11 +187,15 @@ def _summarize_trace(
             result = summarizer(
                 transcript=windows[0], metadata=meta, metrics=met, guidance=guid
             )
+            logger.info("  Window 1/1: done ({:.1f}s)", time.time() - w_start)
         else:
             # Multiple windows: partial summaries then merge
             partials: list[dict] = []
             window_summarizer = dspy.ChainOfThought(WindowSummarySignature)
             for i, window in enumerate(windows):
+                wi = i + 1
+                logger.info("  Window {}/{}: summarizing...", wi, len(windows))
+                w_start = time.time()
                 partial_result = window_summarizer(
                     transcript=window,
                     metadata=meta,
@@ -198,6 +207,10 @@ def _summarize_trace(
                     partials.append(partial.model_dump(mode="json"))
                 elif isinstance(partial, dict):
                     partials.append(partial)
+                logger.info(
+                    "  Window {}/{}: done ({:.1f}s)", wi, len(windows), time.time() - w_start,
+                )
+            logger.info("Merging {} partial summaries...", len(partials))
             merge_summarizer = dspy.Refine(
                 dspy.ChainOfThought(TraceSummaryMergeSignature),
                 N=1,
@@ -210,6 +223,7 @@ def _summarize_trace(
                 metrics=met,
                 guidance=guid,
             )
+            logger.info("Merge done")
     capture_dspy_cost(lm, history_start)
 
     payload = getattr(result, "summary_payload", None)

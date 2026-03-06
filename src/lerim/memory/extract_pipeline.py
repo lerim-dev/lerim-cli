@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from typing import Any
 
 import dspy
 
+from lerim.config.logging import logger
 from lerim.config.settings import get_config
 from lerim.memory.schemas import MemoryCandidate
 from lerim.memory.utils import configure_dspy_lm, window_transcript
@@ -95,6 +97,7 @@ def _extract_candidates(
     max_tokens = config.extract_role.max_window_tokens
     overlap_tokens = config.extract_role.window_overlap_tokens
     windows = window_transcript(transcript, max_tokens, overlap_tokens)
+    logger.info("Extraction: {} window(s), max_tokens={}", len(windows), max_tokens)
     lm = configure_dspy_lm("extract")
     meta = metadata or {}
     met = metrics or {}
@@ -109,10 +112,13 @@ def _extract_candidates(
     )
     history_start = len(lm.history)
     with dspy.context(lm=lm):
-        for window in windows:
+        for wi, window in enumerate(windows, 1):
+            logger.info("  Window {}/{}: extracting...", wi, len(windows))
+            w_start = time.time()
             result = extractor(
                 transcript=window, metadata=meta, metrics=met, guidance=guid
             )
+            window_count = 0
             primitives = getattr(result, "primitives", [])
             if isinstance(primitives, list):
                 for item in primitives:
@@ -120,8 +126,14 @@ def _extract_candidates(
                         all_candidates.append(
                             item.model_dump(mode="json", exclude_none=True)
                         )
+                        window_count += 1
                     elif isinstance(item, dict):
                         all_candidates.append(item)
+                        window_count += 1
+            logger.info(
+                "  Window {}/{}: done ({:.1f}s, {} candidates)",
+                wi, len(windows), time.time() - w_start, window_count,
+            )
 
     if not all_candidates:
         capture_dspy_cost(lm, history_start)
@@ -133,6 +145,7 @@ def _extract_candidates(
         return all_candidates
 
     # Multiple windows: merge and deduplicate
+    logger.info("Merging {} candidates from {} windows...", len(all_candidates), len(windows))
     merger = dspy.Refine(
         dspy.ChainOfThought(MemoryMergeSignature),
         N=1,
@@ -143,6 +156,7 @@ def _extract_candidates(
         merge_result = merger(candidates=all_candidates, metadata=meta)
     capture_dspy_cost(lm, history_start)
     merged = getattr(merge_result, "primitives", [])
+    logger.info("Merge done: {} merged candidates", len(merged) if isinstance(merged, list) else 0)
     if not isinstance(merged, list):
         return all_candidates
     return [
