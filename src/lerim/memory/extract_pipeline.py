@@ -113,13 +113,13 @@ def _extract_candidates(
     if not transcript.strip():
         return []
     config = get_config()
-    max_tokens = config.extract_role.max_window_tokens
+    max_window_tokens = config.extract_role.max_window_tokens
     overlap_tokens = config.extract_role.window_overlap_tokens
     if "\n{" in transcript:
-        windows = window_transcript_jsonl(transcript, max_tokens, overlap_tokens)
+        windows = window_transcript_jsonl(transcript, max_window_tokens, overlap_tokens)
     else:
-        windows = window_transcript(transcript, max_tokens, overlap_tokens)
-    logger.info("Extraction: {} window(s), max_tokens={}", len(windows), max_tokens)
+        windows = window_transcript(transcript, max_window_tokens, overlap_tokens)
+    logger.info("Extraction: {} window(s), max_window_tokens={}", len(windows), max_window_tokens)
     lm = configure_dspy_lm("extract")
     meta = metadata or {}
     met = metrics or {}

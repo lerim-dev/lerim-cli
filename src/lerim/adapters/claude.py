@@ -21,9 +21,12 @@ def compact_trace(raw_text: str) -> str:
     """Remove non-conversational noise from Claude trace JSONL.
 
     Drops: progress, file-history-snapshot, queue-operation, pr-link lines.
-    Keeps: user, assistant, system, summary lines (full content, no truncation).
+    Strips: metadata fields not needed for extraction (parentUuid, toolUseResult, etc.).
+    Truncates: oversized tool_result content blocks (> 50K chars).
     """
     drop_types = {"progress", "file-history-snapshot", "queue-operation", "pr-link"}
+    keep_fields = {"type", "message", "timestamp"}
+    tool_result_max_chars = 50_000
     kept: list[str] = []
     for line in raw_text.split("\n"):
         stripped = line.strip()
@@ -36,7 +39,33 @@ def compact_trace(raw_text: str) -> str:
             continue
         if obj.get("type") in drop_types:
             continue
-        kept.append(line)
+        # Strip to only conversation-relevant fields
+        obj = {k: v for k, v in obj.items() if k in keep_fields}
+        # Truncate oversized tool_result content
+        msg = obj.get("message")
+        if isinstance(msg, dict):
+            content = msg.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "tool_result":
+                        inner = block.get("content", "")
+                        if isinstance(inner, str) and len(inner) > tool_result_max_chars:
+                            block["content"] = inner[:tool_result_max_chars] + "\n[truncated]"
+                        elif isinstance(inner, list):
+                            total = 0
+                            for sub in inner:
+                                if not isinstance(sub, dict):
+                                    continue
+                                text = sub.get("text", "")
+                                remaining = tool_result_max_chars - total
+                                if remaining <= 0:
+                                    sub["text"] = "[truncated]"
+                                elif len(text) > remaining:
+                                    sub["text"] = text[:remaining] + "\n[truncated]"
+                                total += len(sub.get("text", ""))
+        kept.append(json.dumps(obj, ensure_ascii=False))
     return "\n".join(kept) + "\n"
 
 

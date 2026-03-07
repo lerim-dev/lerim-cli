@@ -183,13 +183,13 @@ def _summarize_trace(
     if not transcript.strip():
         raise RuntimeError("session_trace_empty")
     config = get_config()
-    max_tokens = config.summarize_role.max_window_tokens
+    max_window_tokens = config.summarize_role.max_window_tokens
     overlap_tokens = config.summarize_role.window_overlap_tokens
     if "\n{" in transcript:
-        windows = window_transcript_jsonl(transcript, max_tokens, overlap_tokens)
+        windows = window_transcript_jsonl(transcript, max_window_tokens, overlap_tokens)
     else:
-        windows = window_transcript(transcript, max_tokens, overlap_tokens)
-    logger.info("Summarization: {} window(s), max_tokens={}", len(windows), max_tokens)
+        windows = window_transcript(transcript, max_window_tokens, overlap_tokens)
+    logger.info("Summarization: {} window(s), max_window_tokens={}", len(windows), max_window_tokens)
     lm = configure_dspy_lm("summarize")
     meta = metadata or {}
     met = metrics or {}

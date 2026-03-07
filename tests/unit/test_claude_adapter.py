@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from lerim.adapters.claude import (
+    compact_trace,
     count_sessions,
     default_path,
     find_session_path,
@@ -241,3 +242,128 @@ def test_default_path():
     result = default_path()
     assert result is not None
     assert str(result).endswith(".claude/projects")
+
+
+# --- compact_trace tests ---
+
+
+def test_compact_trace_drops_noise_types():
+    """compact_trace drops progress/file-history-snapshot/queue-operation/pr-link lines."""
+    lines = [
+        json.dumps({"type": "progress", "data": "loading"}),
+        json.dumps({"type": "user", "message": {"content": "hi"}, "timestamp": "t1"}),
+        json.dumps({"type": "file-history-snapshot", "files": []}),
+        json.dumps({"type": "queue-operation", "op": "enqueue"}),
+        json.dumps({"type": "pr-link", "url": "https://example.com"}),
+        json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "hello"}]}, "timestamp": "t2"}),
+    ]
+    result = compact_trace("\n".join(lines) + "\n")
+    parsed = [json.loads(l) for l in result.strip().split("\n")]
+    assert len(parsed) == 2
+    assert parsed[0]["type"] == "user"
+    assert parsed[1]["type"] == "assistant"
+
+
+def test_compact_trace_strips_metadata_fields():
+    """compact_trace keeps only type/message/timestamp, strips everything else."""
+    entry = {
+        "type": "user",
+        "message": {"content": "hello"},
+        "timestamp": "2026-01-01T00:00:00Z",
+        "parentUuid": "abc",
+        "isSidechain": False,
+        "userType": "external",
+        "cwd": "/home/user",
+        "sessionId": "s1",
+        "version": "1.0",
+        "gitBranch": "main",
+        "slug": "test",
+        "uuid": "xyz",
+        "requestId": "r1",
+        "toolUseResult": "x" * 5_000_000,
+        "planContent": "some plan",
+        "sourceToolAssistantUUID": "a1",
+    }
+    result = compact_trace(json.dumps(entry) + "\n")
+    parsed = json.loads(result.strip())
+    assert set(parsed.keys()) == {"type", "message", "timestamp"}
+    assert parsed["message"]["content"] == "hello"
+
+
+def test_compact_trace_truncates_tool_result_string():
+    """compact_trace truncates oversized tool_result content (string form)."""
+    big_content = "x" * 100_000
+    entry = {
+        "type": "user",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "t1",
+                    "content": big_content,
+                }
+            ]
+        },
+        "timestamp": "t1",
+    }
+    result = compact_trace(json.dumps(entry) + "\n")
+    parsed = json.loads(result.strip())
+    inner = parsed["message"]["content"][0]["content"]
+    assert len(inner) <= 50_001 + len("\n[truncated]")
+    assert inner.endswith("\n[truncated]")
+
+
+def test_compact_trace_truncates_tool_result_list():
+    """compact_trace truncates oversized tool_result content (list-of-dicts form)."""
+    entry = {
+        "type": "user",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "t1",
+                    "content": [
+                        {"type": "text", "text": "a" * 40_000},
+                        {"type": "text", "text": "b" * 40_000},
+                    ],
+                }
+            ]
+        },
+        "timestamp": "t1",
+    }
+    result = compact_trace(json.dumps(entry) + "\n")
+    parsed = json.loads(result.strip())
+    blocks = parsed["message"]["content"][0]["content"]
+    total_text = sum(len(b["text"]) for b in blocks)
+    # Total should be capped around 50K
+    assert total_text <= 50_001 + len("\n[truncated]")
+
+
+def test_compact_trace_preserves_small_tool_results():
+    """compact_trace does not truncate tool_result content under the limit."""
+    small_content = "result data"
+    entry = {
+        "type": "user",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "t1",
+                    "content": small_content,
+                }
+            ]
+        },
+        "timestamp": "t1",
+    }
+    result = compact_trace(json.dumps(entry) + "\n")
+    parsed = json.loads(result.strip())
+    assert parsed["message"]["content"][0]["content"] == small_content
+
+
+def test_compact_trace_keeps_malformed_lines():
+    """compact_trace preserves non-JSON lines as-is."""
+    raw = "not-json\n" + json.dumps({"type": "user", "message": {"content": "hi"}, "timestamp": "t"}) + "\n"
+    result = compact_trace(raw)
+    lines = [l for l in result.strip().split("\n") if l.strip()]
+    assert lines[0] == "not-json"
+    assert json.loads(lines[1])["type"] == "user"
