@@ -68,10 +68,15 @@ def window_transcript_jsonl(
 ) -> list[str]:
     """Split JSONL text into windows on line boundaries with token-estimated sizing.
 
-    Falls back to character-based windowing if text has no newlines.
+    Uses a tighter token ratio (2.5 chars/token) than plain-text windowing
+    because JSON has more short tokens ({, ", :, keys). Reserves headroom
+    for DSPy prompt overhead (signature, metadata, output schema).
     """
-    max_chars = max_tokens * 7 // 2
-    overlap_chars = overlap_tokens * 7 // 2
+    prompt_headroom_tokens = 5000
+    effective_tokens = max(max_tokens - prompt_headroom_tokens, max_tokens // 2)
+    # JSON-aware ratio: ~2.5 chars per token (tighter than 3.5 for prose)
+    max_chars = effective_tokens * 5 // 2
+    overlap_chars = overlap_tokens * 5 // 2
     if len(text) <= max_chars:
         return [text]
 
@@ -82,6 +87,24 @@ def window_transcript_jsonl(
 
     for line in lines:
         line_chars = len(line) + 1  # +1 for newline
+
+        # Oversized single line: split it character-level
+        if line_chars > max_chars:
+            # Flush current window first
+            if current_lines:
+                windows.append("\n".join(current_lines))
+                current_lines = []
+                current_chars = 0
+            # Split the oversized line into char-level chunks
+            step = max_chars - overlap_chars
+            if step <= 0:
+                step = max_chars
+            pos = 0
+            while pos < len(line):
+                windows.append(line[pos : pos + max_chars])
+                pos += step
+            continue
+
         if current_chars + line_chars > max_chars and current_lines:
             windows.append("\n".join(current_lines))
             # Carry overlap: keep last N lines that fit in overlap budget

@@ -104,6 +104,7 @@ Fast, deterministic tests with no LLM calls and no network. External state (conf
 | `test_index_html.py` | Dashboard index.html serving |
 | `test_trace_summarization_pipeline.py` | Trace summarization pipeline contracts |
 | `test_eval_scores.py` | Eval scoring utilities, schema checks, judge output parsing, prompt building |
+| `test_utils_windowing.py` | Transcript windowing: JSON ratio, oversized line splitting, prompt headroom, overlap carry |
 
 ### Smoke (`pytest tests/smoke/`)
 
