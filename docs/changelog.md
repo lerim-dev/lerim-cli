@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.56] - 2026-03-06
+
+### Added
+
+- **Trace compaction** — Claude and Codex adapters now strip noise lines (progress updates, file snapshots, context dumps) before extraction. Claude traces see ~80% size reduction, Codex ~65%. Compacted traces are cached in `~/.lerim/cache/{claude,codex}/`.
+- **Parallel window processing** — DSPy extraction and summarization pipelines process transcript windows in parallel via `ThreadPoolExecutor`. Controlled by `max_workers` in `[roles.extract]` and `[roles.summarize]` (default: 4, set 1 for local/Ollama models).
+- **JSONL-boundary windowing** — transcript windows now split on line boundaries instead of mid-JSON, preventing corrupt JSON objects at window edges.
+- **`max_explorers` config** — new field on `[roles.explorer]` (default: 4) controls how many parallel explorer subagents the lead dispatches per tool-call turn. Set to 1 for local/Ollama models.
+- **`max_workers` config** — new field on `[roles.extract]` and `[roles.summarize]` (default: 4) for parallel window processing.
+- **`thinking` config** — `thinking` field (default: true) now documented for all four roles. Controls model reasoning mode.
+- One-time trace compaction script (`evals/scripts/compact_traces.py`) for pre-compacting eval dataset traces.
+
+### Changed
+
+- **ID-based session skip** — session discovery now uses run ID membership check instead of SHA-256 content hashing. Faster discovery, no file reads for known sessions. `content_hash` field removed from `SessionRecord`.
+- DSPy extraction and summarization pipelines now use `Refine(N=2)`, giving the model a second attempt on validation failure.
+- Eval configs updated with `max_workers` and `max_explorers` settings (Ollama configs use 1 for both).
+
 ## [0.1.55] - 2026-03-02
 
 ### Added
