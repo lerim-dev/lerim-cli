@@ -70,6 +70,7 @@ evals/
   results/                  # Eval output JSONs (gitignored)
   scripts/                  # Standalone benchmark utilities
     bench_models.sh         # Multi-model benchmark with comparison
+    compact_traces.py       # Trace compaction — strips noise lines from Claude/Codex traces
   dataset/                  # Dataset pipeline (real traces, gitignored output)
     build.py                # Pipeline entry point
     config.toml             # Pipeline config
@@ -118,18 +119,21 @@ provider = "ollama"
 model = "qwen3.5:9b-q8_0"
 thinking = false
 timeout_seconds = 180
+max_explorers = 1
 
 [extraction]
 provider = "ollama"
 model = "qwen3.5:9b-q8_0"
 thinking = false
 timeout_seconds = 180
+max_workers = 1
 
 [summarization]
 provider = "ollama"
 model = "qwen3.5:9b-q8_0"
 thinking = false
 timeout_seconds = 180
+max_workers = 1
 ```
 
 For single-model benchmarks, use the same provider/model for all 4 roles.
@@ -414,6 +418,36 @@ Note: In production (`lerim serve` / `lerim up`), Lerim automatically manages
 Ollama model loading and unloading via the `auto_unload` lifecycle. Evals bypass
 this — they assume Ollama is running and the model is available for the duration
 of the eval run.
+
+## Parallelism and resource controls
+
+Two config fields control parallel processing. Both default to `4` and should be set to `1` for local/Ollama models to avoid RAM contention:
+
+- **`max_workers`** (`extract`, `summarize` roles) — controls the number of parallel threads used by the DSPy extraction and summarization pipelines when processing transcript windows via `ThreadPoolExecutor`. Each window is processed independently, so higher values speed up multi-window transcripts on API-backed models.
+- **`max_explorers`** (`explorer` role) — controls how many parallel explorer subagents the lead agent can dispatch per tool-call turn.
+
+```toml
+# Ollama: single-threaded to avoid RAM contention
+[extraction]
+max_workers = 1
+
+[summarization]
+max_workers = 1
+
+[explorer]
+max_explorers = 1
+```
+
+## Trace compaction
+
+Eval dataset traces are pre-compacted by `evals/scripts/compact_traces.py` to remove noise lines that do not contribute to extraction or summarization quality. Compacted traces are exported to `~/.lerim/cache/{claude,codex}/`.
+
+| Platform | Lines dropped | Typical reduction |
+|----------|--------------|-------------------|
+| Claude | `progress`, `file-history-snapshot`, `queue-operation`, `pr-link` | ~80% |
+| Codex | `turn_context`, `base_instructions` | ~65% |
+
+Compaction improves eval speed and reduces token cost without affecting pipeline quality — the dropped lines are structural noise, not user/assistant content.
 
 ## Multi-model benchmark script
 
