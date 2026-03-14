@@ -175,19 +175,19 @@ run_integration() {
   export LERIM_INTEGRATION=1
   export LERIM_LLM_INTEGRATION=1
   export LERIM_EMBEDDINGS_INTEGRATION=1
-  run_pytest_allow_empty tests/integration/ -n auto
+  run_pytest_allow_empty tests/integration/ -n 4
 }
 
 run_e2e() {
   print_section "End-to-end tests"
   export LERIM_E2E=1
-  run_pytest_allow_empty tests/e2e/ -n auto
+  run_pytest_allow_empty tests/e2e/ -n 4
 }
 
 run_smoke() {
   print_section "Smoke tests"
   export LERIM_SMOKE=1
-  run_pytest_allow_empty tests/smoke/ -n auto
+  run_pytest_allow_empty tests/smoke/ -n 4
 }
 
 run_lint() {
