@@ -75,7 +75,7 @@ ruff check src/ tests/
 
 ## Coding style
 
-Full rules are in [docs/simple-coding-rules.md](../simple-coding-rules.md).
+Full rules are in `docs/simple-coding-rules.md` in the repo.
 The short version:
 
 | Rule | Description |
@@ -113,10 +113,8 @@ Open a [GitHub issue](https://github.com/lerim-dev/lerim-cli/issues) with:
 
     ---
 
-    Add support for a new coding agent platform. This is the most common
-    contribution.
-
-    [:octicons-arrow-right-24: Adding Adapters guide](adding-adapters.md)
+    Add support for a new coding agent platform. See existing adapters in
+    `src/lerim/adapters/` as a reference.
 
 -   :material-bug-outline: **Bug fixes**
 

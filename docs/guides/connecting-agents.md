@@ -88,5 +88,6 @@ flowchart LR
 
 ## Adding a new adapter
 
-Want to add support for another coding agent? See the
-[Adding Adapters](../contributing/adding-adapters.md) guide.
+Want to add support for another coding agent? See `src/lerim/adapters/` for
+existing examples and the [Contributing guide](../contributing/getting-started.md)
+for setup instructions.

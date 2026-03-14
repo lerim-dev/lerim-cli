@@ -1,14 +1,10 @@
 # How It Works
 
-Lerim is the **continual learning and context graph layer** for AI coding agents. It watches your agent sessions, extracts decisions and learnings, connects them into a structured context graph, and makes that intelligence available to every agent on every session.
-
-This page explains the architecture, data flow, deployment model, and security boundaries.
+Lerim is the **continual learning layer** for AI coding agents. It watches your agent sessions, extracts decisions and learnings, and makes that knowledge available to every agent on every future session.
 
 ---
 
-## Architecture overview
-
-Lerim is built around four core principles:
+## Core principles
 
 <div class="grid cards" markdown>
 
@@ -16,25 +12,25 @@ Lerim is built around four core principles:
 
     ---
 
-    Memories are plain markdown files with YAML frontmatter. No database required — files are the canonical store. Humans and agents can read them directly.
+    Memories are plain markdown files with YAML frontmatter. No database required -- files are the canonical store. Humans and agents can read them directly.
 
--   :material-database-off:{ .lg .middle } **No database required**
-
-    ---
-
-    Default search mode is `files` — scan markdown directly. SQLite is used only for session indexing and job queuing, not for memory storage.
-
--   :material-folder-account:{ .lg .middle } **Project-scoped by default**
+-   :material-folder-account:{ .lg .middle } **Project-scoped**
 
     ---
 
-    Each project gets its own `.lerim/` directory. Memories are isolated per-repo. Global fallback is configured but not yet active.
+    Each project gets its own `.lerim/` directory. Memories are isolated per-repo so different projects don't mix.
 
 -   :material-transit-connection-variant:{ .lg .middle } **Agent-agnostic**
 
     ---
 
-    Works with any coding agent that produces session traces. Platform adapters normalize different session formats into a common pipeline. New agents are added via the adapter protocol.
+    Works with any coding agent that produces session traces. Platform adapters normalize different formats into a common pipeline.
+
+-   :material-refresh:{ .lg .middle } **Self-maintaining**
+
+    ---
+
+    Memories are automatically refined over time -- duplicates merged, stale entries archived, related learnings consolidated.
 
 </div>
 
@@ -46,7 +42,7 @@ Lerim has two runtime paths that work together: **sync** (hot path) and **mainta
 
 ```mermaid
 flowchart TD
-    A["Agent sessions\n(any supported coding agent)"] --> B["Adapters\n(normalize to SessionRecord)"]
+    A["Agent sessions\n(any supported coding agent)"] --> B["Adapters\n(normalize to common format)"]
     B --> C["Session catalog\n(index + job queue)"]
     C --> D["Sync path\n(extract memories)"]
     D --> E["Project memory\n(.lerim/memory/)"]
@@ -57,106 +53,50 @@ flowchart TD
 
 ---
 
-## Sync path
+## Sync path (hot)
 
-The sync path processes new agent sessions: reads transcript archives, extracts decision and learning candidates via DSPy, deduplicates against existing knowledge, and writes new entries to the project's knowledge store.
+The sync path processes new agent sessions and turns them into memories.
 
 ![Sync path](../assets/sync.png)
 
-### Steps
-
-1. **Discover sessions** — Platform adapters scan configured session directories for new sessions within the time window (default: last 7 days).
-2. **Index** — New sessions are written to the session catalog (`sessions.sqlite3`) with metadata (run ID, agent type, repo path, timestamps, message counts).
-3. **Enqueue** — Sessions matching a registered project are enqueued as jobs. Sessions without a project match are indexed but not extracted.
-4. **Claim** — The daemon claims pending jobs in chronological order (oldest-first) so later sessions can correctly update memories created by earlier ones.
-5. **Read transcript** — All adapters compact traces on first discovery: removing noise lines (progress updates, context snapshots), stripping tool output content (replaced with size descriptors), and clearing thinking/reasoning blocks. Compacted traces are cached in `~/.lerim/cache/`. This typically reduces trace size by 40-90%.
-6. **Extract candidates (DSPy)** — The compacted transcript is split into overlapping windows if needed (configurable via `max_window_tokens` and `window_overlap_tokens`). Most compacted traces fit in a single window. Each window is processed by `dspy.ChainOfThought` with `MemoryExtractSignature`. Candidates from all windows are concatenated (no merge step — deduplication is handled downstream by maintain).
-7. **Deduplicate** — The lead agent compares extracted candidates against existing memories using read-only tools. It decides `add`, `update`, or `no-op` for each candidate.
-8. **Write memories** — New memories are written via the `write_memory` tool (structured fields → markdown). Updated memories are edited in place. All writes are boundary-checked.
-9. **Write summary** — An episodic summary of the session is generated via the summarization pipeline and written to `memory/summaries/YYYYMMDD/HHMMSS/{slug}.md`.
-10. **Record artifacts** — Run evidence (`extract.json`, `summary.json`, `memory_actions.json`, logs) is stored in the workspace folder.
+1. **Discover** -- adapters scan session directories for new sessions within the time window (default: last 7 days)
+2. **Index** -- new sessions are cataloged with metadata (agent type, repo path, timestamps)
+3. **Compact** -- traces are compacted by stripping tool outputs and reasoning blocks (typically 40-90% size reduction), cached in `~/.lerim/cache/`
+4. **Extract** -- DSPy pipelines extract decision and learning candidates from the compacted transcript
+5. **Deduplicate** -- the lead agent compares candidates against existing memories and decides: add, update, or skip
+6. **Write** -- new memories are written as markdown files to `.lerim/memory/`
+7. **Summarize** -- an episodic summary of the session is generated and saved
 
 ---
 
-## Maintain path
+## Maintain path (cold)
 
-The maintain path runs offline refinement over stored knowledge: merges duplicates, archives low-value entries, consolidates related learnings, and applies time-based decay to keep the context graph clean.
+The maintain path refines existing memories offline.
 
 ![Maintain path](../assets/maintain.png)
 
-### Steps
-
-1. **Scan** — The maintain agent reads all active memories in the project's `memory/` directory using read-only tools.
-2. **Merge duplicates** — Identifies memories covering the same concept and merges them into a single, stronger entry.
-3. **Archive low-value** — Memories with effective confidence below the archive threshold (default: 0.2) are soft-deleted to `memory/archived/`.
-4. **Consolidate** — Related memories that complement each other are combined into consolidated entries.
-5. **Apply decay** — Time-based confidence decay is applied. Memories not accessed within the decay period (default: 180 days) lose effective confidence, with a floor of 0.1.
-6. **Report** — Maintain actions (`merged`, `archived`, `consolidated`, `decayed`) are recorded in `maintain_actions.json` and the activity log.
-
-!!! info "Project iteration"
-    Maintain runs independently for each registered project. It iterates over all entries in `config.projects`, creating a separate agent instance per project's memory root.
-
----
-
-## Agent orchestration
-
-Lerim uses a two-agent architecture powered by PydanticAI, with DSPy pipelines called as tools.
-
-```mermaid
-flowchart LR
-    Lead["Lead Agent\n(PydanticAI)"] -->|delegates read tasks| Explorer["Explorer Subagent\n(read-only)"]
-    Lead -->|calls as tools| DSPy["DSPy Pipelines\n(extract + summarize)"]
-    Lead -->|writes via| Tools["Runtime Tools\n(write_memory, write, edit)"]
-    Tools -->|boundary check| Memory["Project Memory\n(.lerim/memory/)"]
-```
-
-### Lead agent
-
-The lead agent (PydanticAI) orchestrates all flows — sync, maintain, and chat. It is the **only component allowed to write** memory files.
-
-| Capability | Tools |
-|------------|-------|
-| Read | `read`, `glob`, `grep` |
-| Write | `write`, `write_memory`, `edit` |
-| Extraction | `extract_pipeline`, `summarize_pipeline` |
-| Delegation | `explore` (invokes explorer subagent) |
-
-### Explorer subagent
-
-A read-only agent delegated from the lead for candidate gathering and memory search:
-
-- **Tools**: `read`, `glob`, `grep` only
-- **Cannot write** — no write or edit tools are registered
-- The lead agent can dispatch up to `max_explorers` (default: 4) explore calls in a single turn for parallel evidence gathering. Set to 1 for local/Ollama models.
-
-### DSPy pipelines
-
-Called as tools from the lead agent:
-
-| Pipeline | Signature | Purpose |
-|----------|-----------|---------|
-| Extraction | `MemoryExtractSignature` | Transcript → windowed ChainOfThought → per-window candidates → merge → structured memory candidates |
-| Summarization | `TraceSummarySignature` | Transcript → windowed ChainOfThought → partial summaries → merge → structured summary with frontmatter |
-
-Both use `dspy.ChainOfThought` with transcript windowing. Large transcripts are split into overlapping windows, processed independently, then merged in a final ChainOfThought call.
+1. **Scan** -- reads all active memories in the project
+2. **Merge duplicates** -- combines memories covering the same concept
+3. **Archive low-value** -- soft-deletes memories with low effective confidence
+4. **Consolidate** -- combines related memories into richer entries
+5. **Apply decay** -- reduces confidence of memories not accessed recently
 
 ---
 
 ## Deployment model
 
-Lerim runs as a **single process** (`lerim serve`) that provides the daemon loop, HTTP API, and dashboard. Typically this runs inside a Docker container via `lerim up`, but can also be started directly for development.
+Lerim runs as a **single process** (`lerim serve`) that provides the daemon loop, HTTP API, and dashboard. Typically this runs inside a Docker container via `lerim up`, but can also be started directly.
 
 Service commands (`ask`, `sync`, `maintain`, `status`) are thin HTTP clients that forward requests to the server.
 
 ```
 CLI / clients                       lerim serve (Docker or direct)
-─────────────                       ──────────────────────────────
-lerim ask "q"   ──HTTP POST──►     /api/ask
-lerim sync      ──HTTP POST──►     /api/sync
-lerim maintain  ──HTTP POST──►     /api/maintain
-lerim status    ──HTTP GET───►     /api/status
-skills (curl)   ──HTTP───────►     /api/*
-browser         ──HTTP───────►     dashboard UI (port 8765)
+-----                               --------
+lerim ask "q"   --HTTP POST-->      /api/ask
+lerim sync      --HTTP POST-->      /api/sync
+lerim maintain  --HTTP POST-->      /api/maintain
+lerim status    --HTTP GET--->      /api/status
+browser         --HTTP-------->     dashboard UI (port 8765)
 
 lerim init        (host only, no server needed)
 lerim project add (host only, no server needed)
@@ -187,95 +127,26 @@ lerim up/down     (host only, manages Docker)
 
 ### Per-project: `<repo>/.lerim/`
 
-Each registered project stores its own memories and run artifacts:
-
 ```text
 <repo>/.lerim/
-├── config.toml                          # project overrides
 ├── memory/
-│   ├── decisions/
-│   │   └── <slug>.md                    # decision memory files
-│   ├── learnings/
-│   │   └── <slug>.md                    # learning memory files
-│   ├── summaries/
-│   │   └── YYYYMMDD/
-│   │       └── HHMMSS/
-│   │           └── <slug>.md            # session summaries
-│   └── archived/
-│       ├── decisions/
-│       │   └── <slug>.md                # soft-deleted decisions
-│       └── learnings/
-│           └── <slug>.md                # soft-deleted learnings
-├── workspace/
-│   ├── sync-<YYYYMMDD-HHMMSS>-<shortid>/
-│   │   ├── extract.json                 # extraction results
-│   │   ├── summary.json                 # summarization results
-│   │   ├── memory_actions.json          # add/update/no-op decisions
-│   │   ├── agent.log                    # lead agent log
-│   │   ├── subagents.log               # explorer subagent log
-│   │   └── session.log                  # session processing log
-│   └── maintain-<YYYYMMDD-HHMMSS>-<shortid>/
-│       ├── maintain_actions.json        # merge/archive/consolidate actions
-│       ├── agent.log                    # lead agent log
-│       └── subagents.log               # explorer subagent log
-├── meta/
-│   └── traces/
-│       └── sessions/                    # reserved
-└── index/
-    └── memories.sqlite3                 # memory access tracker (decay/archiving)
+│   ├── decisions/*.md           # decision memory files
+│   ├── learnings/*.md           # learning memory files
+│   ├── summaries/YYYYMMDD/      # session summaries
+│   └── archived/                # soft-deleted memories
+└── workspace/                   # run artifacts (logs, extraction results)
 ```
 
 ### Global: `~/.lerim/`
 
-Shared across all projects:
-
 ```text
 ~/.lerim/
-├── config.toml                          # user global configuration
-├── index/
-│   └── sessions.sqlite3                 # session catalog, FTS index, job queue, service run log
-├── cache/                               # session trace caches per platform
-│   ├── claude/
-│   ├── codex/
-│   ├── cursor/
-│   └── opencode/
-├── activity.log                         # append-only activity log
-├── docker-compose.yml                   # generated by lerim up
-└── platforms.json                       # platform detection cache
+├── config.toml                  # user global configuration
+├── index/sessions.sqlite3       # session catalog + job queue
+├── cache/                       # compacted trace caches per platform
+├── activity.log                 # append-only activity log
+└── platforms.json               # platform detection cache
 ```
-
----
-
-## Scope resolution
-
-Config precedence (low to high priority):
-
-| Priority | Source | Description |
-|----------|--------|-------------|
-| 1 (lowest) | `src/lerim/config/default.toml` | Shipped with the package — all defaults |
-| 2 | `~/.lerim/config.toml` | User global overrides |
-| 3 | `<repo>/.lerim/config.toml` | Project-specific overrides |
-| 4 (highest) | `LERIM_CONFIG` env var | Explicit path override (for CI/tests) |
-
-API keys come from environment variables only: `MINIMAX_API_KEY`, `ZAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, optional `ANTHROPIC_API_KEY`.
-
----
-
-## Security boundaries
-
-Lerim enforces strict write boundaries to prevent accidental data corruption:
-
-| Boundary | Enforcement |
-|----------|-------------|
-| **Write boundary** | Runtime tools deny `write` and `edit` outside `memory_root` and workspace roots |
-| **`write_memory` tool** | Memory files (decisions/learnings) can only be created via `write_memory`, which accepts structured fields and builds markdown in Python — the LLM never assembles frontmatter directly |
-| **`write` rejection** | The `write` tool rejects memory primitive paths with `ModelRetry`, directing the LLM to use `write_memory` instead |
-| **No shell** | All file operations use Python tools — no shell or subprocess calls |
-| **Read-only subagent** | Explorer subagent has `read`, `glob`, `grep` only — no write capability |
-| **Localhost-only API** | HTTP API binds to `127.0.0.1` by default — no auth needed because it is not network-exposed |
-
-!!! warning "Write boundary"
-    The lead agent is the only component allowed to persist or delete memory records. All writes are boundary-checked at the tool level to ensure they stay inside `memory_root` and the current run's workspace folder.
 
 ---
 
@@ -287,7 +158,7 @@ Lerim enforces strict write boundaries to prevent accidental data corruption:
 
     ---
 
-    Learn about primitives, frontmatter, lifecycle, and decay.
+    Learn about memory primitives, lifecycle, and decay.
 
     [:octicons-arrow-right-24: Memory model](memory-model.md)
 
@@ -303,7 +174,7 @@ Lerim enforces strict write boundaries to prevent accidental data corruption:
 
     ---
 
-    Deep dive into the sync and maintain pipelines.
+    More on the sync and maintain pipelines.
 
     [:octicons-arrow-right-24: Sync & maintain](sync-maintain.md)
 

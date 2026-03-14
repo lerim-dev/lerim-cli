@@ -96,6 +96,15 @@ lerim sync [options]
   <p class="param-desc">Preview mode, no writes.</p>
 </div>
 
+<div class="param-field">
+  <div class="param-header">
+    <span class="param-name">--ignore-lock</span>
+    <span class="param-type">boolean</span>
+    <span class="param-badge default">default: off</span>
+  </div>
+  <p class="param-desc">Skip the writer lock check. Use with caution -- only when you know no other sync/maintain is running.</p>
+</div>
+
 ## Examples
 
 ### Default sync
@@ -153,14 +162,6 @@ Duration format: `<number><unit>` where unit is:
 | `d` | Days |
 
 Special value `all` scans all sessions ever recorded.
-
-## How it works
-
-1. Platform adapters discover sessions within the time window
-2. New sessions are indexed in `~/.lerim/index/sessions.sqlite3`
-3. Sessions are enqueued for extraction
-4. The lead agent processes each session: reads the transcript, runs DSPy extraction, deduplicates, and writes memories
-5. Run artifacts are saved to `<repo>/.lerim/workspace/sync-*/`
 
 ## Related commands
 

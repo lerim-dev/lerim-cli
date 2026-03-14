@@ -145,9 +145,7 @@ flowchart TD
 ---
 
 !!! tip "PRs welcome"
-    Want support for another coding agent? Adding an adapter is the easiest contribution path — clear interface, isolated scope. See the [Contributing guide](../contributing/getting-started.md) for step-by-step instructions on adding a new platform adapter.
-
-    Adapters live in `src/lerim/adapters/`. Start by reading an existing one (e.g., `codex.py` or `claude.py`) as a reference, then implement the 5-method protocol.
+    Want support for another coding agent? Adding an adapter is the easiest contribution path -- clear interface, isolated scope. Adapters live in `src/lerim/adapters/`. Start by reading an existing one (e.g., `codex.py` or `claude.py`) as a reference, then implement the 5-method protocol. See the [Contributing guide](../contributing/getting-started.md) for setup instructions.
 
 ---
 

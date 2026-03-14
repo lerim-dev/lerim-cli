@@ -121,11 +121,5 @@ nav:
     - Connecting Agents: guides/connecting-agents.md
     - Dashboard: guides/dashboard.md
     - Querying Memories: guides/querying-memories.md
-  - Architecture: architecture/overview.md
-  - Evaluation: evals.md
-  - Development:
-    - Contributing: contributing/getting-started.md
-    - Adding Adapters: contributing/adding-adapters.md
-    - Coding Rules: simple-coding-rules.md
-    - Linting: linting.md
+  - Contributing: contributing/getting-started.md
   - Changelog: changelog.md

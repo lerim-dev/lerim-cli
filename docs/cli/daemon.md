@@ -12,7 +12,7 @@ The daemon runs sync (hot path) and maintain (cold path) on independent schedule
 ## Syntax
 
 ```bash
-lerim daemon [--once] [--poll-seconds N]
+lerim daemon [--once] [--max-sessions N] [--poll-seconds N]
 ```
 
 ## Parameters
@@ -24,6 +24,15 @@ lerim daemon [--once] [--poll-seconds N]
     <span class="param-badge default">default: off</span>
   </div>
   <p class="param-desc">Run one sync + maintain cycle and exit. Useful for cron jobs or CI.</p>
+</div>
+
+<div class="param-field">
+  <div class="param-header">
+    <span class="param-name">--max-sessions</span>
+    <span class="param-type">integer</span>
+    <span class="param-badge default">default: from config</span>
+  </div>
+  <p class="param-desc">Maximum sessions to extract per sync cycle. Overrides <code>sync_max_sessions</code> from config.</p>
 </div>
 
 <div class="param-field">

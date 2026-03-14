@@ -107,5 +107,4 @@ thin CLI, skills, and external agents. Key endpoints:
 | `GET` | `/api/memories` | List memories |
 | `GET` | `/api/search` | Search memories |
 
-See the [Architecture Overview](../architecture/overview.md#http-api) for the
-full endpoint table.
+The full API is served by `lerim serve` (or `lerim up` via Docker) on `http://localhost:8765`.

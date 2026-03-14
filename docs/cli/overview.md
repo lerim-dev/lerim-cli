@@ -4,8 +4,8 @@ Global flags, exit codes, and common patterns for Lerim CLI.
 
 The Lerim CLI is the primary interface for managing Lerim's continual learning layer. Commands fall into two categories:
 
-- **Host-only commands** run locally and never require a running server: `init`, `project`, `up`, `down`, `logs`, `connect`
-- **Service commands** are HTTP clients that require a running Lerim server started via `lerim up` or `lerim serve`: `ask`, `sync`, `maintain`, `status`, `memory`, `daemon`
+- **Host-only commands** run locally and never require a running server: `init`, `project`, `up`, `down`, `logs`, `connect`, `memory add`, `memory reset`, `skill install`
+- **Service commands** are HTTP clients that require a running Lerim server started via `lerim up` or `lerim serve`: `ask`, `sync`, `maintain`, `status`, `memory search`, `memory list`
 
 ## Installation
 
@@ -85,6 +85,10 @@ Lerim commands return standard exit codes:
 - `lerim memory list` — List stored memory files
 - `lerim memory add` — Manually create a memory
 - `lerim memory reset` — Destructive wipe of memory data
+
+### Skills
+
+- `lerim skill install` — Install Lerim skill files for coding agents
 
 ### Runtime status
 
@@ -174,7 +178,6 @@ API keys come from environment variables:
 - `ZAI_API_KEY` (default fallback)
 - `OPENROUTER_API_KEY`
 - `OPENAI_API_KEY`
-- `ANTHROPIC_API_KEY`
 
 Only the keys for providers you configure in `[roles.*]` are needed.
 

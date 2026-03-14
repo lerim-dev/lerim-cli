@@ -76,13 +76,13 @@ No proprietary format. No database lock-in. Just markdown files that both humans
 
     [:octicons-arrow-right-24: CLI Reference](cli/overview.md)
 
--   :material-sitemap:{ .lg .middle } **Architecture**
+-   :material-sitemap:{ .lg .middle } **How It Works**
 
     ---
 
     How Lerim works under the hood
 
-    [:octicons-arrow-right-24: Architecture](architecture/overview.md)
+    [:octicons-arrow-right-24: How it works](concepts/how-it-works.md)
 
 </div>
 

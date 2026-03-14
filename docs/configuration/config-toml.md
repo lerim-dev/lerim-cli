@@ -213,7 +213,8 @@ Default API base URLs per provider. Per-role `api_base` takes precedence over th
 | `openai` | string | `"https://api.openai.com/v1"` | OpenAI API base. |
 | `openrouter` | string | `"https://openrouter.ai/api/v1"` | OpenRouter API base. |
 | `ollama` | string | `"http://127.0.0.1:11434"` | Ollama local API base. Use `http://host.docker.internal:11434` inside Docker. |
-| `mlx` | string | `"http://127.0.0.1:8000"` | vllm-mlx local API base (Apple Silicon). |
+| `litellm_proxy` | string | `"http://127.0.0.1:4000"` | LiteLLM proxy base (used for Ollama think-off routing). |
+| `mlx` | string | `"http://127.0.0.1:8000/v1"` | vllm-mlx local API base (Apple Silicon). |
 | `auto_unload` | bool | `true` | Unload Ollama models from RAM after each sync/maintain cycle. Set `false` to keep models loaded between cycles. |
 
 ### `[tracing]`

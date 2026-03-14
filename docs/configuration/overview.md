@@ -33,7 +33,6 @@ API keys are **never** stored in TOML files. They come from environment variable
 | `ZAI_API_KEY` | Z.AI | When any role uses `provider = "zai"` (default fallback) |
 | `OPENROUTER_API_KEY` | OpenRouter | When any role uses `provider = "openrouter"` |
 | `OPENAI_API_KEY` | OpenAI | When any role uses `provider = "openai"` |
-| `ANTHROPIC_API_KEY` | Anthropic | When any role uses `provider = "anthropic"` |
 
 !!! info "Only set what you use"
     You only need API keys for the providers referenced in your `[roles.*]` config. Switch providers freely — just set the matching key.

@@ -193,22 +193,22 @@ mlx = "http://127.0.0.1:8000/v1"
     tasks) and a more capable model for `lead` and `explorer` (orchestration
     and reasoning).
 
-## Provider-specific options
+## Common options
 
-| Option | Applies to | Description |
-|--------|-----------|-------------|
-| `provider` | All roles | Backend: `minimax`, `zai`, `openrouter`, `openai`, `ollama`, `mlx` |
-| `model` | All roles | Model identifier. For OpenRouter, use the full slug (e.g. `openai/gpt-5-nano`). |
-| `api_base` | All roles | Custom API endpoint. Empty string = use default from `[providers]`. |
-| `fallback_models` | All roles | Ordered fallback chain. Format: `"model-slug"` (inherits role provider) or `"provider:model-slug"`. |
-| `timeout_seconds` | All roles | HTTP request timeout in seconds. |
-| `max_iterations` | `lead`, `explorer` | Max agent tool-call loop iterations. |
-| `max_window_tokens` | `extract`, `summarize` | Max tokens per transcript window for DSPy processing. |
-| `window_overlap_tokens` | `extract`, `summarize` | Token overlap between consecutive windows. |
-| `openrouter_provider_order` | All roles | OpenRouter-specific: preferred provider ordering (e.g. `["Fireworks", "Together"]`). |
-| `thinking` | All roles | Enable model thinking/reasoning (default: `true`, set `false` for non-reasoning models). |
-| `max_explorers` | `explorer` | Max parallel explorer subagents the lead dispatches per turn (default: `4`, set `1` for local models). |
-| `max_workers` | `extract`, `summarize` | Parallel window processing threads (default: `4`, set `1` for local/Ollama models to avoid RAM contention). |
+All roles share these configuration keys:
+
+| Option | Description |
+|--------|-------------|
+| `provider` | Backend: `minimax`, `zai`, `openrouter`, `openai`, `ollama`, `mlx` |
+| `model` | Model identifier (for OpenRouter, use the full slug e.g. `anthropic/claude-sonnet-4-5-20250929`) |
+| `api_base` | Custom API endpoint. Empty = use default from `[providers]` |
+| `fallback_models` | Ordered fallback chain: `"model"` (same provider) or `"provider:model"` |
+| `timeout_seconds` | HTTP request timeout in seconds |
+| `thinking` | Enable model reasoning (default: `true`, set `false` for non-reasoning models) |
+
+**Orchestration roles** (`lead`, `explorer`) also have: `max_iterations`, `max_explorers` (explorer only, default: 4).
+
+**DSPy roles** (`extract`, `summarize`) also have: `max_window_tokens`, `window_overlap_tokens`, `max_workers` (default: 4, set 1 for local models).
 
 ## Fallback models
 
@@ -221,8 +221,6 @@ model = "MiniMax-M2.5"
 fallback_models = ["zai:glm-4.5-air", "openai:gpt-4.1-mini"]
 ```
 
-Fallback format:
-
 - `"model-slug"` -- uses the same provider as the role
 - `"provider:model-slug"` -- uses a different provider (requires that provider's API key)
 
@@ -234,7 +232,6 @@ Fallback format:
 | `zai` | `ZAI_API_KEY` |
 | `openrouter` | `OPENROUTER_API_KEY` |
 | `openai` | `OPENAI_API_KEY` |
-| `anthropic` | `ANTHROPIC_API_KEY` |
 | `ollama` | *(none required)* |
 | `mlx` | *(none required)* |
 
