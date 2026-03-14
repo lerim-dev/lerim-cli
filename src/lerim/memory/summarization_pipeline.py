@@ -24,14 +24,14 @@ from typing import Any
 
 import dspy
 import frontmatter
-from dspy.adapters.xml_adapter import XMLAdapter
 from pydantic import BaseModel, Field
 
 from lerim.config.logging import logger
 from lerim.memory.memory_record import slugify
 from lerim.config.settings import get_config, reload_config
 from lerim.memory.utils import (
-    configure_dspy_lm,
+    call_with_fallback,
+    configure_dspy_lms,
     estimate_tokens,
     window_transcript,
     window_transcript_jsonl,
@@ -121,69 +121,70 @@ def _summarize_trace(
     config = get_config()
     max_window_tokens = config.summarize_role.max_window_tokens
     overlap_tokens = config.summarize_role.window_overlap_tokens
-    lm = configure_dspy_lm("summarize")
+    lms = configure_dspy_lms("summarize")
     meta = metadata or {}
     guid = guidance.strip()
 
-    history_start = len(lm.history)
+    history_start = len(lms[0].history)
     trace_tokens = estimate_tokens(transcript)
 
-    with dspy.context(lm=lm, adapter=XMLAdapter()):
-        if trace_tokens <= int(max_window_tokens * 0.85):
-            # Fast path: single call — trace fits in context
-            logger.info("Summarization: single call ({} est. tokens)", trace_tokens)
-            w_start = time.time()
-            summarizer = dspy.Predict(TraceSummarySignature)
-            result = summarizer(transcript=transcript, guidance=guid)
-            logger.info("Summarization: done ({:.1f}s)", time.time() - w_start)
+    if trace_tokens <= int(max_window_tokens * 0.85):
+        # Fast path: single call — trace fits in context
+        logger.info("Summarization: single call ({} est. tokens)", trace_tokens)
+        w_start = time.time()
+        summarizer = dspy.Predict(TraceSummarySignature)
+        _, result = call_with_fallback(
+            summarizer, lms, transcript=transcript, guidance=guid
+        )
+        logger.info("Summarization: done ({:.1f}s)", time.time() - w_start)
+    else:
+        # Slow path: refine/fold — process chunks sequentially
+        if "\n{" in transcript:
+            windows = window_transcript_jsonl(
+                transcript, max_window_tokens, overlap_tokens
+            )
         else:
-            # Slow path: refine/fold — process chunks sequentially
-            if "\n{" in transcript:
-                windows = window_transcript_jsonl(
-                    transcript, max_window_tokens, overlap_tokens
-                )
+            windows = window_transcript(transcript, max_window_tokens, overlap_tokens)
+        logger.info(
+            "Summarization: {} windows (refine/fold), {} est. tokens",
+            len(windows),
+            trace_tokens,
+        )
+
+        # First chunk: full summarization
+        w_start = time.time()
+        summarizer = dspy.Predict(TraceSummarySignature)
+        _, result = call_with_fallback(
+            summarizer, lms, transcript=windows[0], guidance=guid
+        )
+        logger.info("  Chunk 1/{}: done ({:.1f}s)", len(windows), time.time() - w_start)
+
+        # Subsequent chunks: refine with running summary
+        refiner = dspy.Predict(RefineSummarySignature)
+        for i, window in enumerate(windows[1:], 2):
+            running = getattr(result, "summary_payload", None)
+            if isinstance(running, TraceSummaryCandidate):
+                running_json = running.model_dump_json()
+            elif isinstance(running, dict):
+                running_json = json.dumps(running)
             else:
-                windows = window_transcript(
-                    transcript, max_window_tokens, overlap_tokens
-                )
-            logger.info(
-                "Summarization: {} windows (refine/fold), {} est. tokens",
-                len(windows),
-                trace_tokens,
-            )
-
-            # First chunk: full summarization
+                running_json = str(running)
             w_start = time.time()
-            summarizer = dspy.Predict(TraceSummarySignature)
-            result = summarizer(transcript=windows[0], guidance=guid)
+            _, result = call_with_fallback(
+                refiner,
+                lms,
+                running_summary=running_json,
+                trace_chunk=window,
+                chunk_position=f"chunk {i} of {len(windows)}",
+            )
             logger.info(
-                "  Chunk 1/{}: done ({:.1f}s)", len(windows), time.time() - w_start
+                "  Chunk {}/{}: done ({:.1f}s)",
+                i,
+                len(windows),
+                time.time() - w_start,
             )
 
-            # Subsequent chunks: refine with running summary
-            refiner = dspy.Predict(RefineSummarySignature)
-            for i, window in enumerate(windows[1:], 2):
-                running = getattr(result, "summary_payload", None)
-                if isinstance(running, TraceSummaryCandidate):
-                    running_json = running.model_dump_json()
-                elif isinstance(running, dict):
-                    running_json = json.dumps(running)
-                else:
-                    running_json = str(running)
-                w_start = time.time()
-                result = refiner(
-                    running_summary=running_json,
-                    trace_chunk=window,
-                    chunk_position=f"chunk {i} of {len(windows)}",
-                )
-                logger.info(
-                    "  Chunk {}/{}: done ({:.1f}s)",
-                    i,
-                    len(windows),
-                    time.time() - w_start,
-                )
-
-    capture_dspy_cost(lm, history_start)
+    capture_dspy_cost(lms[0], history_start)
 
     payload = getattr(result, "summary_payload", None)
     if isinstance(payload, TraceSummaryCandidate):

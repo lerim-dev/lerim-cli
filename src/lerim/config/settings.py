@@ -56,6 +56,7 @@ class DSPyRoleConfig:
     max_window_tokens: int
     window_overlap_tokens: int
     openrouter_provider_order: tuple[str, ...]
+    fallback_models: tuple[str, ...] = ()
     thinking: bool = True
     max_workers: int = 4
 
@@ -435,6 +436,7 @@ def _build_dspy_role(
         provider=provider,
         model=model,
         api_base=_to_non_empty_string(raw.get("api_base")),
+        fallback_models=_to_fallback_models(raw.get("fallback_models")),
         timeout_seconds=_require_int(raw, "timeout_seconds", minimum=10),
         max_window_tokens=_require_int(raw, "max_window_tokens", minimum=1000),
         window_overlap_tokens=_require_int(raw, "window_overlap_tokens", minimum=0),

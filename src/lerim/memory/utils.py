@@ -6,9 +6,11 @@ Provides LM configuration, token estimation, and transcript windowing.
 from __future__ import annotations
 
 import dspy
+from dspy.adapters.xml_adapter import XMLAdapter
+
 from lerim.config.logging import logger
 from lerim.config.settings import get_config
-from lerim.runtime.providers import build_dspy_lm
+from lerim.runtime.providers import build_dspy_fallback_lms, build_dspy_lm
 
 
 def configure_dspy_lm(role: str = "extract") -> dspy.LM:
@@ -29,6 +31,28 @@ def configure_dspy_lm(role: str = "extract") -> dspy.LM:
         role_cfg.model,
     )
     return build_dspy_lm(normalized_role, config=config)
+
+
+def configure_dspy_lms(role: str = "extract") -> list[dspy.LM]:
+    """Build primary + fallback DSPy LMs for a role."""
+    config = get_config()
+    normalized_role = "summarize" if role == "summarize" else "extract"
+    primary = build_dspy_lm(normalized_role, config=config)
+    fallbacks = build_dspy_fallback_lms(normalized_role, config=config)
+    return [primary] + fallbacks
+
+
+def call_with_fallback(module, lms: list[dspy.LM], **kwargs):
+    """Call a DSPy module, falling back to next LM on failure."""
+    last_err = None
+    for lm in lms:
+        try:
+            with dspy.context(lm=lm, adapter=XMLAdapter()):
+                return lm, module(**kwargs)
+        except Exception as e:
+            logger.warning("DSPy LM {} failed: {}, trying fallback", lm.model, e)
+            last_err = e
+    raise last_err
 
 
 def estimate_tokens(text: str) -> int:

@@ -274,6 +274,28 @@ def build_dspy_lm(
     )
 
 
+def build_dspy_fallback_lms(
+    role: DSPyRoleName,
+    *,
+    config: Config | None = None,
+) -> list[dspy.LM]:
+    """Build fallback DSPy LMs from role config's fallback_models."""
+    cfg = config or get_config()
+    role_cfg = _dspy_role_config(cfg, role)
+    specs = [parse_fallback_spec(item) for item in role_cfg.fallback_models]
+    return [
+        _build_dspy_lm_for_provider(
+            provider=spec.provider.strip().lower(),
+            model=spec.model,
+            api_base="",
+            cfg=cfg,
+            role_label=f"roles.{role}.fallback={spec.provider}:{spec.model}",
+            thinking=role_cfg.thinking,
+        )
+        for spec in specs
+    ]
+
+
 def list_provider_models(provider: str) -> list[str]:
     """Return static provider model suggestions for dashboard UI selections."""
     normalized = str(provider).strip().lower()

@@ -21,13 +21,13 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 import dspy
-from dspy.adapters.xml_adapter import XMLAdapter
 
 from lerim.config.logging import logger
 from lerim.config.settings import get_config
 from lerim.memory.schemas import MemoryCandidate
 from lerim.memory.utils import (
-    configure_dspy_lm,
+    call_with_fallback,
+    configure_dspy_lms,
     window_transcript,
     window_transcript_jsonl,
 )
@@ -87,34 +87,35 @@ def _extract_candidates(
         len(windows),
         max_window_tokens,
     )
-    lm = configure_dspy_lm("extract")
+    lms = configure_dspy_lms("extract")
     guid = guidance.strip()
 
     all_candidates: list[dict[str, Any]] = []
     extractor = dspy.Predict(MemoryExtractSignature)
-    history_start = len(lm.history)
-    with dspy.context(lm=lm, adapter=XMLAdapter()):
-        for wi, window in enumerate(windows, 1):
-            logger.info("  Window {}/{}: extracting...", wi, len(windows))
-            w_start = time.time()
-            result = extractor(transcript=window, guidance=guid)
-            primitives = getattr(result, "primitives", [])
-            if isinstance(primitives, list):
-                for item in primitives:
-                    if isinstance(item, MemoryCandidate):
-                        all_candidates.append(
-                            item.model_dump(mode="json", exclude_none=True)
-                        )
-                    elif isinstance(item, dict):
-                        all_candidates.append(item)
-            logger.info(
-                "  Window {}/{}: done ({:.1f}s, {} candidates)",
-                wi,
-                len(windows),
-                time.time() - w_start,
-                len(primitives) if isinstance(primitives, list) else 0,
-            )
-    capture_dspy_cost(lm, history_start)
+    history_start = len(lms[0].history)
+    for wi, window in enumerate(windows, 1):
+        logger.info("  Window {}/{}: extracting...", wi, len(windows))
+        w_start = time.time()
+        used_lm, result = call_with_fallback(
+            extractor, lms, transcript=window, guidance=guid
+        )
+        primitives = getattr(result, "primitives", [])
+        if isinstance(primitives, list):
+            for item in primitives:
+                if isinstance(item, MemoryCandidate):
+                    all_candidates.append(
+                        item.model_dump(mode="json", exclude_none=True)
+                    )
+                elif isinstance(item, dict):
+                    all_candidates.append(item)
+        logger.info(
+            "  Window {}/{}: done ({:.1f}s, {} candidates)",
+            wi,
+            len(windows),
+            time.time() - w_start,
+            len(primitives) if isinstance(primitives, list) else 0,
+        )
+    capture_dspy_cost(lms[0], history_start)
     return all_candidates
 
 
