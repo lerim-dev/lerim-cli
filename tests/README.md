@@ -103,7 +103,7 @@ Fast, deterministic tests with no LLM calls and no network. External state (conf
 | `test_graph_explorer_frontend.py` | Graph explorer frontend rendering |
 | `test_index_html.py` | Dashboard index.html serving |
 | `test_trace_summarization_pipeline.py` | Trace summarization pipeline contracts |
-| `test_eval_scores.py` | Eval scoring utilities, schema checks, judge output parsing, prompt building |
+| `test_eval_scores.py` | Eval scoring utilities, schema checks, judge output parsing (incl. structured_output fix), prompt building |
 | `test_utils_windowing.py` | Transcript windowing: JSON ratio, oversized line splitting, prompt headroom, overlap carry |
 
 ### Smoke (`pytest tests/smoke/`)
@@ -126,6 +126,9 @@ Multi-component flows with real LLM calls, real file I/O, and real DB writes. Sk
 | `test_agent.py` | Full PydanticAI agent ask with memory context |
 | `test_providers.py` | LM provider construction works with actual configured backend |
 | `test_memory_write.py` | Agent-driven memory write flows with real LLM |
+| `test_dspy_adapters.py` | Parametrized adapter tests (ChatAdapter/JSONAdapter/XMLAdapter x ChainOfThought/Predict x simple/long fixtures). Requires `LERIM_EVAL_OLLAMA=1` |
+| `test_judge.py` | Judge output parsing (unit-level: structured_output, result fallback, prose, code blocks) + end-to-end Claude CLI judge invocation. Requires `LERIM_JUDGE=1` for integration tests |
+| `test_eval_runners.py` | End-to-end eval runner flows (extraction + summarization) with judge scoring. Requires `LERIM_EVAL_OLLAMA=1` + `LERIM_JUDGE=1` for full tests |
 
 ### E2E (`pytest tests/e2e/`)
 
@@ -210,6 +213,10 @@ Shared pytest fixtures available to all test tiers:
 | `LERIM_SMOKE=1` | Smoke tests | See `tests/test_config.toml` |
 | `LERIM_INTEGRATION=1` | Integration tests | See `tests/test_config.toml` |
 | `LERIM_E2E=1` | E2E tests | See `tests/test_config.toml` |
+| `LERIM_EVAL_OLLAMA=1` | DSPy adapter tests + eval pipeline tests | Requires Ollama running with `qwen3.5:4b-q8_0` |
+| `LERIM_JUDGE=1` | Judge integration tests | Requires Claude CLI installed |
+| `LERIM_EVAL_MODEL` | Override Ollama model for adapter tests | `qwen3.5:4b-q8_0` |
+| `LERIM_EVAL_OLLAMA_BASE` | Override Ollama API base URL | `http://127.0.0.1:11434` |
 | `LERIM_TEST_PROVIDER` | Override provider | `openrouter` |
 | `LERIM_TEST_MODEL` | Override model | `x-ai/grok-4.1-fast` (lead/explorer) |
 | `LERIM_CONFIG` | Override config path | `tests/test_config.toml` (auto-applied by conftest) |

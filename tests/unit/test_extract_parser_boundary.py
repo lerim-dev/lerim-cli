@@ -10,7 +10,7 @@ from lerim.memory import extract_pipeline as pipeline
 def test_pipeline_module_is_extract_boundary() -> None:
     """Extract pipeline must not import memory repo or agent internals."""
     source = Path(pipeline.__file__).read_text(encoding="utf-8")
-    assert "dspy.ChainOfThought" in source
+    assert "dspy.Predict" in source
     assert "MemoryRepository" not in source
     assert "search_memory" not in source
     assert "LerimAgent" not in source

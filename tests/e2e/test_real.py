@@ -73,11 +73,7 @@ def test_extract_pipeline_end_to_end_without_network(
             }
         ],
     )
-    result = pipeline.extract_memories_from_session_file(
-        session_path,
-        metadata={"run_id": "run-e2e-1"},
-        metrics={},
-    )
+    result = pipeline.extract_memories_from_session_file(session_path)
 
     assert len(result) == 1
     assert result[0]["title"] == "Queue lifecycle contract"

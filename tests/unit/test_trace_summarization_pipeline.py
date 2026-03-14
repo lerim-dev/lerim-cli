@@ -40,7 +40,6 @@ def test_summarize_trace_from_session_file_returns_frontmatter_fields(
     summary = pipeline.summarize_trace_from_session_file(
         session_path,
         metadata={"run_id": run_id, "repo_name": "lerim"},
-        metrics={},
     )
 
     assert summary["title"]
@@ -58,15 +57,13 @@ def test_summarize_trace_from_session_file_returns_frontmatter_fields(
 def test_summarize_trace_from_session_file_raises_on_missing_file(tmp_path) -> None:
     missing_path = tmp_path / "missing.jsonl"
     with pytest.raises(FileNotFoundError):
-        pipeline.summarize_trace_from_session_file(
-            missing_path, metadata={}, metrics={}
-        )
+        pipeline.summarize_trace_from_session_file(missing_path, metadata={})
 
 
 def test_summarization_pipeline_module_is_memory_boundary() -> None:
     """Summarization pipeline must not import memory repo or agent internals."""
     source = Path(pipeline.__file__).read_text(encoding="utf-8")
-    assert "dspy.ChainOfThought" in source
+    assert "dspy.Predict" in source
     assert "MemoryRepository" not in source
     assert "search_memory" not in source
     assert "LerimAgent" not in source
