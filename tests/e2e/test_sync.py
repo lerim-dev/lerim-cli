@@ -44,6 +44,7 @@ def test_sync_real_trace(tmp_path):
 
 
 @_skip
+@pytest.mark.timeout(900)
 def test_sync_idempotent(tmp_path):
     """Running sync twice on same trace doesn't duplicate memories."""
     from lerim.runtime.agent import LerimAgent
