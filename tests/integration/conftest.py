@@ -8,9 +8,11 @@ import pytest
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip all integration tests unless LERIM_INTEGRATION env var is set."""
+    """Skip integration tests unless LERIM_INTEGRATION env var is set."""
     if os.environ.get("LERIM_INTEGRATION"):
         return
+    integration_dir = os.path.dirname(__file__)
     skip = pytest.mark.skip(reason="LERIM_INTEGRATION not set")
     for item in items:
-        item.add_marker(skip)
+        if str(item.fspath).startswith(integration_dir):
+            item.add_marker(skip)

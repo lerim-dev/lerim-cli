@@ -8,9 +8,11 @@ import pytest
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip all smoke tests unless LERIM_SMOKE env var is set."""
+    """Skip smoke tests unless LERIM_SMOKE env var is set."""
     if os.environ.get("LERIM_SMOKE"):
         return
+    smoke_dir = os.path.dirname(__file__)
     skip = pytest.mark.skip(reason="LERIM_SMOKE not set")
     for item in items:
-        item.add_marker(skip)
+        if str(item.fspath).startswith(smoke_dir):
+            item.add_marker(skip)

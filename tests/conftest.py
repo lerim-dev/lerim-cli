@@ -94,8 +94,10 @@ def _toml_value(v) -> str:
         return "true" if v else "false"
     if isinstance(v, (int, float)):
         return str(v)
+    if isinstance(v, (list, tuple)):
+        items = ", ".join(_toml_value(item) for item in v)
+        return f"[{items}]"
     return f'"{v}"'
-
 
 
 def pytest_configure(config):

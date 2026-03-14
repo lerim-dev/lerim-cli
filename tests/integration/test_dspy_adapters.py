@@ -2,7 +2,7 @@
 
 Parametrized tests across 3 adapters (ChatAdapter, JSONAdapter, XMLAdapter),
 2 DSPy modules (ChainOfThought, Predict), and 2 fixtures (simple, long).
-Gated by LERIM_EVAL_OLLAMA=1. Uses qwen3.5:4b-q8_0 via Ollama.
+Uses the configured test provider (LERIM_TEST_PROVIDER / LERIM_TEST_MODEL).
 
 Each test asserts that the pipeline produces non-empty, schema-valid output.
 No adapter is favored — all are tested with identical assertions.
@@ -11,7 +11,6 @@ No adapter is favored — all are tested with identical assertions.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -24,18 +23,9 @@ from lerim.memory.schemas import MemoryCandidate
 
 pytestmark = pytest.mark.integration
 
-_skip_no_ollama = pytest.mark.skipif(
-    not os.environ.get("LERIM_EVAL_OLLAMA"),
-    reason="LERIM_EVAL_OLLAMA not set",
-)
-
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "traces"
 SIMPLE_TRACE = FIXTURES_DIR / "claude_simple.jsonl"
 LONG_TRACE = FIXTURES_DIR / "claude_long_multitopic.jsonl"
-
-# Model used for all adapter tests (matches eval config)
-OLLAMA_MODEL = os.environ.get("LERIM_EVAL_MODEL", "qwen3.5:4b-q8_0")
-OLLAMA_BASE = os.environ.get("LERIM_EVAL_OLLAMA_BASE", "http://127.0.0.1:11434")
 
 
 # ---------------------------------------------------------------------------
@@ -43,15 +33,11 @@ OLLAMA_BASE = os.environ.get("LERIM_EVAL_OLLAMA_BASE", "http://127.0.0.1:11434")
 # ---------------------------------------------------------------------------
 
 
-def _build_ollama_lm() -> dspy.LM:
-    """Build DSPy LM for Ollama without config system."""
-    return dspy.LM(
-        f"ollama_chat/{OLLAMA_MODEL}",
-        api_key="ollama",
-        api_base=OLLAMA_BASE,
-        cache=False,
-        max_tokens=32000,
-    )
+def _build_test_lm() -> dspy.LM:
+    """Build DSPy LM from the active test config (respects LERIM_TEST_PROVIDER/MODEL)."""
+    from lerim.memory.utils import configure_dspy_lm
+
+    return configure_dspy_lm("extract")
 
 
 def _get_adapter(name: str):
@@ -80,21 +66,26 @@ def _setup_eval_config() -> tuple[Any, Path]:
     (temp_dir / "memory").mkdir()
     (temp_dir / "index").mkdir()
 
-    from lerim.config.settings import build_eval_config, set_config_override
+    from lerim.config.settings import build_eval_config, get_config, set_config_override
 
+    # Use the active test config's provider/model (set by LERIM_TEST_PROVIDER/MODEL)
+    base_cfg = get_config()
+    provider = base_cfg.extract_role.provider
+    model = base_cfg.extract_role.model
+    thinking = base_cfg.extract_role.thinking
     roles = {
-        "lead": {"provider": "ollama", "model": OLLAMA_MODEL, "thinking": False},
-        "explorer": {"provider": "ollama", "model": OLLAMA_MODEL, "thinking": False},
+        "lead": {"provider": provider, "model": model, "thinking": thinking},
+        "explorer": {"provider": provider, "model": model, "thinking": thinking},
         "extract": {
-            "provider": "ollama",
-            "model": OLLAMA_MODEL,
-            "thinking": False,
+            "provider": provider,
+            "model": model,
+            "thinking": thinking,
             "max_window_tokens": 150000,
         },
         "summarize": {
-            "provider": "ollama",
-            "model": OLLAMA_MODEL,
-            "thinking": False,
+            "provider": provider,
+            "model": model,
+            "thinking": thinking,
             "max_window_tokens": 150000,
         },
     }
@@ -131,7 +122,7 @@ FIXTURES = [
 ]
 
 
-@_skip_no_ollama
+@pytest.mark.integration
 @pytest.mark.parametrize("adapter_name", ADAPTERS)
 @pytest.mark.parametrize("module_name", MODULES)
 @pytest.mark.parametrize("fixture_name,fixture_path", FIXTURES)
@@ -142,7 +133,7 @@ def test_extraction_adapter(
     cfg, temp_dir = _setup_eval_config()
     try:
         transcript = fixture_path.read_text(encoding="utf-8")
-        lm = _build_ollama_lm()
+        lm = _build_test_lm()
         adapter = _get_adapter(adapter_name)
         module = _get_module(module_name, MemoryExtractSignature)
 
@@ -183,7 +174,7 @@ def test_extraction_adapter(
 # ---------------------------------------------------------------------------
 
 
-@_skip_no_ollama
+@pytest.mark.integration
 @pytest.mark.parametrize("adapter_name", ADAPTERS)
 @pytest.mark.parametrize("module_name", MODULES)
 @pytest.mark.parametrize("fixture_name,fixture_path", FIXTURES)
@@ -194,7 +185,7 @@ def test_summarization_adapter(
     cfg, temp_dir = _setup_eval_config()
     try:
         transcript = fixture_path.read_text(encoding="utf-8")
-        lm = _build_ollama_lm()
+        lm = _build_test_lm()
         adapter = _get_adapter(adapter_name)
         module = _get_module(module_name, TraceSummarySignature)
 
@@ -244,7 +235,7 @@ def test_summarization_adapter(
 # ---------------------------------------------------------------------------
 
 
-@_skip_no_ollama
+@pytest.mark.integration
 @pytest.mark.parametrize("fixture_name,fixture_path", FIXTURES)
 def test_extract_pipeline_full(fixture_name: str, fixture_path: Path) -> None:
     """Full extraction pipeline produces candidates on {fixture}."""
@@ -261,7 +252,7 @@ def test_extract_pipeline_full(fixture_name: str, fixture_path: Path) -> None:
         _cleanup_eval_config(temp_dir)
 
 
-@_skip_no_ollama
+@pytest.mark.integration
 @pytest.mark.parametrize("fixture_name,fixture_path", FIXTURES)
 def test_summarize_pipeline_full(fixture_name: str, fixture_path: Path) -> None:
     """Full summarization pipeline produces valid output on {fixture}."""

@@ -1,7 +1,6 @@
 """Layer 3: End-to-end eval runner integration tests.
 
 Tests the full extract->judge->score and summarize->judge->score flows.
-Gated by LERIM_EVAL_OLLAMA=1 (for pipeline) + LERIM_JUDGE=1 (for judge).
 Also tests error recovery paths (missing traces, empty traces).
 """
 
@@ -17,22 +16,22 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
-_skip_no_ollama = pytest.mark.skipif(
-    not os.environ.get("LERIM_EVAL_OLLAMA"),
-    reason="LERIM_EVAL_OLLAMA not set",
-)
-
 _skip_no_judge = pytest.mark.skipif(
     not os.environ.get("LERIM_JUDGE"),
     reason="LERIM_JUDGE not set",
 )
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "traces"
-OLLAMA_MODEL = os.environ.get("LERIM_EVAL_MODEL", "qwen3.5:4b-q8_0")
 
 
 def _write_eval_config(tmp_dir: Path) -> Path:
-    """Write a minimal eval TOML config for Ollama."""
+    """Write a minimal eval TOML config using the active test provider."""
+    from lerim.config.settings import get_config
+
+    cfg = get_config()
+    provider = cfg.extract_role.provider
+    model = cfg.extract_role.model
+    thinking = "true" if cfg.extract_role.thinking else "false"
     config_path = tmp_dir / "eval_test.toml"
     config_path.write_text(
         f"""\
@@ -41,25 +40,25 @@ agent = "claude"
 timeout_seconds = 120
 
 [lead]
-provider = "ollama"
-model = "{OLLAMA_MODEL}"
-thinking = false
+provider = "{provider}"
+model = "{model}"
+thinking = {thinking}
 
 [explorer]
-provider = "ollama"
-model = "{OLLAMA_MODEL}"
-thinking = false
+provider = "{provider}"
+model = "{model}"
+thinking = {thinking}
 
 [extraction]
-provider = "ollama"
-model = "{OLLAMA_MODEL}"
-thinking = false
+provider = "{provider}"
+model = "{model}"
+thinking = {thinking}
 max_window_tokens = 150000
 
 [summarization]
-provider = "ollama"
-model = "{OLLAMA_MODEL}"
-thinking = false
+provider = "{provider}"
+model = "{model}"
+thinking = {thinking}
 max_window_tokens = 150000
 """,
         encoding="utf-8",
@@ -72,7 +71,7 @@ max_window_tokens = 150000
 # ---------------------------------------------------------------------------
 
 
-@_skip_no_ollama
+@pytest.mark.integration
 @_skip_no_judge
 def test_extraction_eval_runner_e2e(tmp_path: Path) -> None:
     """Full extraction eval: pipeline + judge + scoring on fixture traces."""
@@ -101,7 +100,7 @@ def test_extraction_eval_runner_e2e(tmp_path: Path) -> None:
     ), "Extraction eval produced 0 candidates"
 
 
-@_skip_no_ollama
+@pytest.mark.integration
 @_skip_no_judge
 def test_summarization_eval_runner_e2e(tmp_path: Path) -> None:
     """Full summarization eval: pipeline + judge + scoring on fixture traces."""
@@ -126,7 +125,7 @@ def test_summarization_eval_runner_e2e(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@_skip_no_ollama
+@pytest.mark.integration
 def test_extraction_eval_pipeline_only(tmp_path: Path) -> None:
     """Extraction pipeline runs without judge errors when traces exist."""
     config_path = _write_eval_config(tmp_path)
@@ -152,7 +151,7 @@ def test_extraction_eval_pipeline_only(tmp_path: Path) -> None:
         cleanup_eval(temp_dir)
 
 
-@_skip_no_ollama
+@pytest.mark.integration
 def test_summarization_eval_pipeline_only(tmp_path: Path) -> None:
     """Summarization pipeline runs without judge errors when traces exist."""
     config_path = _write_eval_config(tmp_path)
@@ -183,7 +182,7 @@ def test_summarization_eval_pipeline_only(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@_skip_no_ollama
+@pytest.mark.integration
 def test_extraction_empty_trace_no_crash(tmp_path: Path) -> None:
     """Extraction pipeline on empty trace returns empty list, no crash."""
     config_path = _write_eval_config(tmp_path)
@@ -207,7 +206,7 @@ def test_extraction_empty_trace_no_crash(tmp_path: Path) -> None:
         cleanup_eval(temp_dir)
 
 
-@_skip_no_ollama
+@pytest.mark.integration
 def test_summarization_empty_trace_raises(tmp_path: Path) -> None:
     """Summarization pipeline on empty trace raises RuntimeError."""
     config_path = _write_eval_config(tmp_path)
