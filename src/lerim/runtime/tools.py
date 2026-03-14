@@ -455,10 +455,8 @@ def run_extract_pipeline_tool(
     if not context.trace_path or not context.artifact_paths:
         raise RuntimeError("trace_path and artifact_paths required in context")
     output_file = context.artifact_paths["extract"]
-    metadata = {"run_id": context.run_id, "trace_path": str(context.trace_path)}
     candidates = extract_memories_from_session_file(
         context.trace_path,
-        metadata=metadata,
         guidance=str(guidance or "").strip(),
     )
     output_file.parent.mkdir(parents=True, exist_ok=True)
