@@ -37,6 +37,7 @@ specs/
 .pytest_cache/
 .ruff_cache/
 .claude/
+.local/
 
 
 dev-docs/

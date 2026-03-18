@@ -2,7 +2,7 @@
   <img src="assets/lerim.png" alt="Lerim Logo" width="160">
 </p>
 
-<h3 align="center">You shouldn't have to repeat yourself every session, to every agent.<br>Lerim makes your decisions, patterns, and context persist across all of them.</h3>
+<h3 align="center">The context graph layer for coding agents.<br>Lerim extracts the decisions, the reasoning, and the <em>why</em> -- so no agent starts blind.</h3>
 
 <p align="center">
   <a href="https://pypi.org/project/lerim/"><img src="https://img.shields.io/pypi/v/lerim?style=flat-square&color=blue" alt="PyPI version"></a>
@@ -16,18 +16,18 @@
 
 ## The Problem
 
-> You spend 20 minutes explaining context to your coding agent. It writes great code. Next session? It's forgotten everything. Every decision, every pattern, every "we tried X and it didn't work" -- gone.
+> AI agents decide fast -- but the reasoning is lost after every session. Every decision, every "we tried X and it didn't work," every architectural choice -- gone.
 
-> And if you use multiple agents -- Claude Code at the terminal, Cursor in the IDE, Codex for reviews -- none of them know what the others learned. Your project knowledge is **scattered across isolated sessions with no shared intelligence**.
+> And if you use multiple agents -- Claude Code at the terminal, Cursor in the IDE, Codex for reviews -- none of them know what the others learned. The *why* behind your project is **scattered across isolated sessions, lost between agents**.
 
-> This is **agent context amnesia**, and it's the biggest productivity drain in AI-assisted development.
+> Everyone stores memory. Nobody extracts the reasoning.
 
 ## The Solution
 
-Lerim is the **continual learning and context graph layer** for AI coding agents — it watches sessions, extracts structured knowledge, and builds a shared intelligence graph across agents, projects, and teams.
+Lerim is the **context graph layer** for coding agents -- it watches sessions, extracts the reasoning behind decisions, and builds a shared context graph across agents, projects, and teams.
 
 - **Watches** your agent sessions across all supported coding agents
-- **Extracts** decisions and learnings automatically using LLM pipelines (DSPy + PydanticAI)
+- **Extracts** the reasoning behind decisions -- the *why*, not just the *what* -- using LLM pipelines (DSPy + PydanticAI)
 - **Stores** everything as plain markdown files in your repo (`.lerim/`)
 - **Refines** knowledge continuously -- merges duplicates, archives stale entries, applies time-based decay
 - **Connects** learnings into a context graph -- related decisions and patterns are linked
@@ -297,6 +297,6 @@ Full documentation: [docs.lerim.dev](https://docs.lerim.dev)
 ---
 
 <p align="center">
-  <strong>If Lerim saves you from re-explaining context to your agent, give it a ⭐</strong><br>
+  <strong>If your agents keep re-debating the same decisions, give Lerim a ⭐</strong><br>
   <a href="https://github.com/lerim-dev/lerim-cli">Star on GitHub</a>
 </p>
