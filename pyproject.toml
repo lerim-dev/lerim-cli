@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lerim"
-version = "0.1.67"
+version = "0.1.68"
 description = "Continual learning layer for coding agents and software projects."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -65,6 +65,7 @@ include = ["lerim*"]
 lerim = ["config/default.toml", "skills/*.md"]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 testpaths = ["tests/unit", "tests/smoke", "tests/integration", "tests/e2e"]
 markers = [
     "integration: Tests that hit real external services",

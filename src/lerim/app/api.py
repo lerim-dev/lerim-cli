@@ -251,10 +251,11 @@ GHCR_IMAGE = "ghcr.io/lerim-dev/lerim-cli"
 
 
 _API_KEY_ENV_NAMES = (
-    "ZAI_API_KEY",
-    "OPENROUTER_API_KEY",
-    "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
+    "MINIMAX_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "ZAI_API_KEY",
 )
 
 

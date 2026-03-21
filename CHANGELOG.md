@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.68] - 2026-03-21
+
+### Added
+
+- **Server readiness check on `lerim up`**: `cli.py` now polls `/api/health` for up to 30 seconds after starting the container, printing a clear warning if the server never responds.
+- **`pytest-timeout`** added to the `[test]` optional dependency group for controlled test execution time.
+- **`MINIMAX_API_KEY`** added to the environment-variable look-up list in the HTTP API.
+
+### Fixed
+
+- **Docker dashboard path**: `dashboard.py` resolves the dashboard directory correctly inside containers by falling back to `/opt/lerim/dashboard` when the repo-relative path does not exist. A corresponding `COPY dashboard/` step is added to the `Dockerfile`.
+- **Test `pythonpath`**: `[tool.pytest.ini_options]` now includes `pythonpath = ["."]` so `from tests.helpers import ...` resolves when running `uv run pytest`.
+- **HTTP API key list**: `_API_KEY_ENV_NAMES` is sorted alphabetically and now includes `ANTHROPIC_API_KEY` and `MINIMAX_API_KEY`.
+
 ## [0.1.66] - 2026-03-15
 
 ### Added
