@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ripgrep &&
 COPY . /build
 RUN pip install --no-cache-dir /build && rm -rf /build
 
+# Dashboard assets for the built-in web UI
+COPY dashboard/ /opt/lerim/dashboard/
+
 EXPOSE 8765
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

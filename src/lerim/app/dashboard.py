@@ -52,8 +52,8 @@ from lerim.sessions.catalog import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-DASHBOARD_DIR = REPO_ROOT / "dashboard"
+_REPO_DASHBOARD = Path(__file__).resolve().parents[3] / "dashboard"
+DASHBOARD_DIR = _REPO_DASHBOARD if _REPO_DASHBOARD.is_dir() else Path("/opt/lerim/dashboard")
 MAX_BODY_BYTES = 1_000_000
 READ_ONLY_MESSAGE = "Dashboard is read-only. Use CLI commands for write actions."
 _REPORT_CACHE: dict[str, Any] = {"at": None, "value": None}

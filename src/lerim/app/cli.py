@@ -86,6 +86,22 @@ def _not_running() -> int:
     return 1
 
 
+def _wait_for_ready(port: int, timeout: int = 30) -> bool:
+	"""Poll /api/health until the server responds or *timeout* seconds elapse."""
+	url = f"http://localhost:{port}/api/health"
+	deadline = time.monotonic() + timeout
+	while time.monotonic() < deadline:
+		try:
+			req = urllib.request.Request(url, method="GET")
+			with urllib.request.urlopen(req, timeout=5) as resp:
+				if resp.status == 200:
+					return True
+		except (urllib.error.URLError, OSError):
+			pass
+		time.sleep(1)
+	return False
+
+
 def _api_get(path: str) -> dict[str, Any] | None:
     """GET from the running Lerim server. Returns None if not reachable."""
     config = get_config()
@@ -476,17 +492,26 @@ def _cmd_project(args: argparse.Namespace) -> int:
 
 
 def _cmd_up(args: argparse.Namespace) -> int:
-    """Start the Docker container."""
-    config = get_config()
-    _emit(
-        f"Starting Lerim with {len(config.projects)} projects and {len(config.agents)} agents..."
-    )
-    result = api_up(build_local=getattr(args, "build", False))
-    if result.get("error"):
-        _emit(result["error"], file=sys.stderr)
-        return 1
-    _emit(f"Lerim is running at http://localhost:{config.server_port}")
-    return 0
+	"""Start the Docker container."""
+	config = get_config()
+	_emit(
+		f"Starting Lerim with {len(config.projects)} projects and {len(config.agents)} agents..."
+	)
+	result = api_up(build_local=getattr(args, "build", False))
+	if result.get("error"):
+		_emit(result["error"], file=sys.stderr)
+		return 1
+
+	if not _wait_for_ready(config.server_port):
+		_emit(
+			"Container started but the server is not responding. "
+			"Check logs with: lerim logs",
+			file=sys.stderr,
+		)
+		return 1
+
+	_emit(f"Lerim is running at http://localhost:{config.server_port}")
+	return 0
 
 
 def _cmd_down(args: argparse.Namespace) -> int:
