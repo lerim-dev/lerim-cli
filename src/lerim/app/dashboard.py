@@ -405,13 +405,33 @@ def _load_messages_for_run(run_doc: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _list_memory_files_dashboard() -> list[Path]:
-    """List all markdown files in canonical memory primitive folders."""
+    """List all markdown files across global + all registered project memory dirs."""
     config = get_config()
+
+    # Collect candidate memory root dirs: primary, global, and all registered projects.
+    mem_dirs: list[Path] = [
+        config.memory_dir,
+        config.global_data_dir / "memory",
+    ]
+    for _name, project_path in config.projects.items():
+        mem_dirs.append(
+            Path(project_path).expanduser().resolve()
+            / config.memory_project_dir_name
+            / "memory"
+        )
+
+    # Deduplicate by resolved path, then collect .md files from each.
+    seen: set[Path] = set()
     paths: list[Path] = []
-    for mtype in MemoryType:
-        folder = config.memory_dir / memory_folder(mtype)
-        if folder.exists():
-            paths.extend(sorted(folder.rglob("*.md")))
+    for d in mem_dirs:
+        resolved = d.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        for mtype in MemoryType:
+            folder = resolved / memory_folder(mtype)
+            if folder.exists():
+                paths.extend(sorted(folder.rglob("*.md")))
     return paths
 
 
