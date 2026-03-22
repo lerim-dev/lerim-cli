@@ -742,7 +742,6 @@ def build_eval_config(
     load_dotenv()
     toml_data, _sources = _load_layers()
 
-    data = toml_data.get("data", {})
     memory = toml_data.get("memory", {})
     decay = memory.get("decay", {}) if isinstance(memory.get("decay", {}), dict) else {}
     server = toml_data.get("server", {})
