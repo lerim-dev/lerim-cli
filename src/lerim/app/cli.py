@@ -49,6 +49,7 @@ from lerim.app.daemon import (
 )
 from lerim.config.project_scope import resolve_data_dirs
 from lerim.config.logging import configure_logging
+from lerim.app.auth import cmd_auth, cmd_auth_logout, cmd_auth_status
 from lerim.config.settings import get_config, USER_CONFIG_PATH
 from lerim.config.tracing import configure_tracing
 from lerim.memory.memory_repo import build_memory_paths, reset_memory_root
@@ -821,6 +822,17 @@ def _cmd_skill(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_auth_dispatch(args: argparse.Namespace) -> int:
+    """Dispatch auth subcommands to the appropriate handler."""
+    auth_command = getattr(args, "auth_command", None)
+    if auth_command == "status":
+        return cmd_auth_status(args)
+    if auth_command == "logout":
+        return cmd_auth_logout(args)
+    # Default: login (bare `lerim auth` or `lerim auth login`)
+    return cmd_auth(args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the canonical Lerim command-line parser."""
     _F = argparse.RawDescriptionHelpFormatter  # noqa: N806
@@ -1378,10 +1390,56 @@ def build_parser() -> argparse.ArgumentParser:
     )
     skill.set_defaults(func=_cmd_skill)
 
+    # ── auth ──────────────────────────────────────────────────────────
+    auth = sub.add_parser(
+        "auth",
+        formatter_class=_F,
+        help="Authenticate with Lerim Cloud",
+        description=(
+            "Log in, check status, or log out of Lerim Cloud.\n\n"
+            "The default action (no subcommand) opens a browser for OAuth login.\n"
+            "Use --token to authenticate manually without a browser.\n\n"
+            "Subcommands:\n"
+            "  status   Check current authentication state\n"
+            "  logout   Remove stored credentials\n\n"
+            "Examples:\n"
+            "  lerim auth                     # browser-based login\n"
+            "  lerim auth --token lerim_tok_abc123  # manual token\n"
+            "  lerim auth status              # check auth state\n"
+            "  lerim auth logout              # remove token"
+        ),
+    )
+    auth.add_argument(
+        "--token",
+        default=None,
+        help="Authenticate with a token directly (skip browser flow).",
+    )
+    auth_sub = auth.add_subparsers(dest="auth_command")
+
+    auth_sub.add_parser(
+        "login",
+        formatter_class=_F,
+        help="Log in to Lerim Cloud (same as bare `lerim auth`)",
+    )
+
+    auth_sub.add_parser(
+        "status",
+        formatter_class=_F,
+        help="Check current authentication state",
+    )
+
+    auth_sub.add_parser(
+        "logout",
+        formatter_class=_F,
+        help="Remove stored credentials",
+    )
+
+    auth.set_defaults(func=_cmd_auth_dispatch)
+
     return parser
 
 
-_SKIP_TRACING_COMMANDS = frozenset({"logs", "version", "help"})
+_SKIP_TRACING_COMMANDS = frozenset({"auth", "logs", "version", "help"})
 
 
 def main(argv: list[str] | None = None) -> int:

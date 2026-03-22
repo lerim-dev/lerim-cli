@@ -92,6 +92,10 @@ enabled = false                          # set true or LERIM_TRACING=1 to enable
 include_httpx = false                    # capture raw HTTP request/response bodies
 include_content = true                   # include prompt/completion text in spans
 
+[cloud]
+endpoint = "https://api.lerim.dev"
+# token is set via `lerim auth` or LERIM_CLOUD_TOKEN env var
+
 [agents]
 # Map agent names to session directory paths.
 # claude = "~/.claude/projects"
