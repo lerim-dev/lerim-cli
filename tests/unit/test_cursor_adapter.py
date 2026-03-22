@@ -322,6 +322,6 @@ def test_compact_trace_preserves_user_assistant_text():
         json.dumps({"type": 2, "text": "assistant reply"}),
     ]
     result = compact_trace("\n".join(lines) + "\n")
-    parsed = [json.loads(l) for l in result.strip().split("\n")]
+    parsed = [json.loads(line) for line in result.strip().split("\n")]
     assert parsed[0]["text"] == "user message"
     assert parsed[1]["text"] == "assistant reply"

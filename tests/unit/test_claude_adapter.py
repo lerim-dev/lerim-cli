@@ -264,7 +264,7 @@ def test_compact_trace_drops_noise_types():
         ),
     ]
     result = compact_trace("\n".join(lines) + "\n")
-    parsed = [json.loads(l) for l in result.strip().split("\n")]
+    parsed = [json.loads(line) for line in result.strip().split("\n")]
     assert len(parsed) == 2
     assert parsed[0]["type"] == "user"
     assert parsed[1]["type"] == "assistant"
@@ -395,6 +395,6 @@ def test_compact_trace_keeps_malformed_lines():
         + "\n"
     )
     result = compact_trace(raw)
-    lines = [l for l in result.strip().split("\n") if l.strip()]
+    lines = [line for line in result.strip().split("\n") if line.strip()]
     assert lines[0] == "not-json"
     assert json.loads(lines[1])["type"] == "user"

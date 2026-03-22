@@ -129,7 +129,6 @@ def test_jsonl_oversized_line_with_overlap():
     """Oversized line chunks overlap correctly."""
     max_tokens = 10_000
     overlap_tokens = 1000
-    max_chars = 12_500  # (10000 - 5000) * 5 // 2
     overlap_chars = overlap_tokens * 5 // 2  # 2500
     oversized = "Z" * 30_000
     windows = window_transcript_jsonl(oversized, max_tokens=max_tokens, overlap_tokens=overlap_tokens)

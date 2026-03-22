@@ -10,7 +10,6 @@ No adapter is favored — all are tested with identical assertions.
 
 from __future__ import annotations
 
-import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -18,6 +17,9 @@ from typing import Any
 
 import dspy
 import pytest
+
+from lerim.memory.extract_pipeline import MemoryExtractSignature
+from lerim.memory.summarization_pipeline import TraceSummarySignature
 
 from lerim.memory.schemas import MemoryCandidate
 
@@ -100,14 +102,6 @@ def _cleanup_eval_config(temp_dir: Path) -> None:
 
     set_config_override(None)
     shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-# ---------------------------------------------------------------------------
-# Extraction signature (duplicated from pipeline to allow direct module calls)
-# ---------------------------------------------------------------------------
-
-from lerim.memory.extract_pipeline import MemoryExtractSignature
-from lerim.memory.summarization_pipeline import TraceSummarySignature
 
 
 # ---------------------------------------------------------------------------

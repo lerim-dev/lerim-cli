@@ -10,8 +10,6 @@ import pytest
 from lerim.sessions.catalog import (
     claim_session_jobs,
     enqueue_session_job,
-    fetch_session_doc,
-    get_indexed_run_ids,
     init_sessions_db,
     index_session_for_fts,
     latest_service_run,

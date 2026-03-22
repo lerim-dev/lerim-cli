@@ -14,7 +14,6 @@ import pytest
 
 from lerim.config.settings import Config, DSPyRoleConfig, LLMRoleConfig
 from lerim.runtime.ollama_lifecycle import (
-    _is_ollama_reachable,
     _ollama_models,
     ollama_lifecycle,
 )

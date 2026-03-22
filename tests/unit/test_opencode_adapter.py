@@ -191,7 +191,7 @@ def test_compact_trace_clears_tool_output():
         ),
     ]
     result = compact_trace("\n".join(lines) + "\n")
-    parsed = [json.loads(l) for l in result.strip().split("\n")]
+    parsed = [json.loads(line) for line in result.strip().split("\n")]
     assert parsed[0]["session_id"] == "s1"
     assert parsed[1]["tool_name"] == "bash"
     assert parsed[1]["tool_input"] == "ls -la"
@@ -206,7 +206,7 @@ def test_compact_trace_preserves_user_assistant_messages():
         json.dumps({"role": "assistant", "content": "world"}),
     ]
     result = compact_trace("\n".join(lines) + "\n")
-    parsed = [json.loads(l) for l in result.strip().split("\n")]
+    parsed = [json.loads(line) for line in result.strip().split("\n")]
     assert parsed[1]["content"] == "hello"
     assert parsed[2]["content"] == "world"
 

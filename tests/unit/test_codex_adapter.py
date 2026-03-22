@@ -160,7 +160,7 @@ def test_compact_trace_drops_turn_context():
         ),
     ]
     result = compact_trace("\n".join(lines) + "\n")
-    parsed = [json.loads(l) for l in result.strip().split("\n")]
+    parsed = [json.loads(line) for line in result.strip().split("\n")]
     assert len(parsed) == 1
     assert parsed[0]["type"] == "event_msg"
 
