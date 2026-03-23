@@ -365,9 +365,11 @@ def _scan_memory_files(
             if since_iso and updated_value and updated_value <= since_iso:
                 continue
 
-            # Determine memory type from parent folder name.
+            # Determine memory type from parent folder name (normalize to singular).
+            _TYPE_MAP = {"decisions": "decision", "learnings": "learning", "summaries": "summary"}
             rel = md_path.relative_to(memory_root)
-            memory_type = rel.parts[0] if rel.parts else "unknown"
+            raw_type = rel.parts[0] if rel.parts else "unknown"
+            memory_type = _TYPE_MAP.get(raw_type, raw_type)
 
             results.append(
                 {
