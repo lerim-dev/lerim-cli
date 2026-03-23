@@ -47,6 +47,7 @@ class _ShipperState:
     memories_shipped_at: str = ""
     memories_pulled_at: str = ""
     config_pulled_at: str = ""
+    service_runs_shipped_at: str = ""
 
     def save(self) -> None:
         """Write state to disk."""
@@ -70,6 +71,7 @@ class _ShipperState:
                 memories_shipped_at=str(raw.get("memories_shipped_at") or ""),
                 memories_pulled_at=str(raw.get("memories_pulled_at") or ""),
                 config_pulled_at=str(raw.get("config_pulled_at") or ""),
+                service_runs_shipped_at=str(raw.get("service_runs_shipped_at") or ""),
             )
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             return cls()
@@ -637,6 +639,76 @@ async def _ship_memories(
     return shipped
 
 
+# ── service-run shipping ─────────────────────────────────────────────────
+
+
+def _query_service_runs(db_path: Path, since_iso: str, limit: int) -> list[dict[str, Any]]:
+    """Query local service_runs table for new entries."""
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = lambda cur, row: {col[0]: row[idx] for idx, col in enumerate(cur.description)}
+        if since_iso:
+            rows = conn.execute(
+                "SELECT job_type, status, started_at, completed_at, trigger, details_json "
+                "FROM service_runs WHERE started_at > ? ORDER BY started_at ASC LIMIT ?",
+                (since_iso, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT job_type, status, started_at, completed_at, trigger, details_json "
+                "FROM service_runs ORDER BY started_at ASC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        conn.close()
+        # Parse details_json from string to dict
+        for row in rows:
+            dj = row.get("details_json")
+            if isinstance(dj, str):
+                try:
+                    row["details_json"] = json.loads(dj)
+                except json.JSONDecodeError:
+                    row["details_json"] = {}
+            elif dj is None:
+                row["details_json"] = {}
+        return rows
+    except sqlite3.Error as exc:
+        logger.warning("cloud shipper: service_runs query failed: {}", exc)
+        return []
+
+
+async def _ship_service_runs(
+    endpoint: str, token: str, state: _ShipperState, db_path: Path
+) -> int:
+    """Ship service run records from local SQLite."""
+    shipped = 0
+    latest_started = state.service_runs_shipped_at
+
+    while True:
+        rows = await asyncio.to_thread(
+            _query_service_runs, db_path, latest_started, 100
+        )
+        if not rows:
+            break
+
+        ok = await _post_batch(
+            endpoint, "/api/v1/ingest/service_runs", token, {"runs": rows}
+        )
+        if ok:
+            shipped += len(rows)
+            last_ts = str(rows[-1].get("started_at") or "")
+            if last_ts > latest_started:
+                latest_started = last_ts
+        else:
+            break
+
+        if len(rows) < 100:
+            break
+
+    if latest_started and latest_started != state.service_runs_shipped_at:
+        state.service_runs_shipped_at = latest_started
+    return shipped
+
+
 # ── public entry point ───────────────────────────────────────────────────────
 
 
@@ -667,6 +739,9 @@ async def ship_once(config: Config) -> dict[str, int]:
     sessions_shipped = await _ship_sessions(
         endpoint, token, state, config.sessions_db_path
     )
+    service_runs_shipped = await _ship_service_runs(
+        endpoint, token, state, config.sessions_db_path
+    )
     memories_shipped = await _ship_memories(endpoint, token, config, state)
 
     state.save()
@@ -674,6 +749,7 @@ async def ship_once(config: Config) -> dict[str, int]:
     return {
         "logs": logs_shipped,
         "sessions": sessions_shipped,
+        "service_runs": service_runs_shipped,
         "memories": memories_shipped,
         "memories_pulled": memories_pulled,
         "config_pulled": config_pulled,
