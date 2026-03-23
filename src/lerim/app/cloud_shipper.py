@@ -541,6 +541,10 @@ def _scan_memory_files(
                     except Exception:
                         frontmatter_raw = {}
                     updated_value = str(frontmatter_raw.get("updated", ""))
+                    # Strip ARCHIVED prefix from body (added by maintain process)
+                    if body.startswith("ARCHIVED"):
+                        body_lines = body.split("\n", 2)
+                        body = body_lines[2].strip() if len(body_lines) > 2 else body_lines[-1].strip()
                 else:
                     body = text
             else:
@@ -550,10 +554,15 @@ def _scan_memory_files(
             if since_iso and updated_value and updated_value <= since_iso:
                 continue
 
-            # Determine memory type from parent folder name (normalize to singular).
+            # Determine memory type and archived status from folder structure.
             _TYPE_MAP = {"decisions": "decision", "learnings": "learning", "summaries": "summary"}
             rel = md_path.relative_to(memory_root)
-            raw_type = rel.parts[0] if rel.parts else "unknown"
+            parts = rel.parts
+            is_archived_folder = len(parts) >= 2 and parts[0] == "archived"
+            if is_archived_folder:
+                raw_type = parts[1] if len(parts) > 1 else "unknown"
+            else:
+                raw_type = parts[0] if parts else "unknown"
             memory_type = _TYPE_MAP.get(raw_type, raw_type)
 
             results.append(
@@ -564,6 +573,7 @@ def _scan_memory_files(
                     "frontmatter": frontmatter_raw,
                     "body": body,
                     "updated": updated_value,
+                    "is_archived": is_archived_folder or bool(frontmatter_raw.get("archived")),
                 }
             )
     return results
@@ -604,7 +614,7 @@ async def _ship_memories(
                 "tags": fm.get("tags", []) if isinstance(fm.get("tags"), list) else [],
                 "confidence": fm.get("confidence"),
                 "source": fm.get("source"),
-                "status": fm.get("status", "active"),
+                "status": "archived" if mem.get("is_archived") else fm.get("status", "active"),
             }
             batch.append(entry)
         ok = await _post_batch(
