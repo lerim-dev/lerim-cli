@@ -45,6 +45,8 @@ class _ShipperState:
     log_file: str = "lerim.jsonl"
     sessions_shipped_at: str = ""
     memories_shipped_at: str = ""
+    memories_pulled_at: str = ""
+    config_pulled_at: str = ""
 
     def save(self) -> None:
         """Write state to disk."""
@@ -66,6 +68,8 @@ class _ShipperState:
                 log_file=str(raw.get("log_file") or "lerim.jsonl"),
                 sessions_shipped_at=str(raw.get("sessions_shipped_at") or ""),
                 memories_shipped_at=str(raw.get("memories_shipped_at") or ""),
+                memories_pulled_at=str(raw.get("memories_pulled_at") or ""),
+                config_pulled_at=str(raw.get("config_pulled_at") or ""),
             )
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             return cls()
@@ -115,6 +119,187 @@ async def _post_batch(
 ) -> bool:
     """Async wrapper that offloads the synchronous HTTP call to a thread."""
     return await asyncio.to_thread(_post_batch_sync, endpoint, path, token, payload)
+
+
+# ── HTTP GET helper ──────────────────────────────────────────────────────────
+
+
+def _get_json_sync(
+    endpoint: str, path: str, token: str, params: dict[str, str]
+) -> dict[str, Any] | None:
+    """Synchronous GET request returning parsed JSON."""
+    qs = "&".join(f"{k}={v}" for k, v in params.items()) if params else ""
+    url = f"{endpoint.rstrip('/')}{path}{'?' + qs if qs else ''}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_SECONDS) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as exc:
+        logger.warning("cloud GET {} failed: {}", path, exc)
+        return None
+
+
+# ── pull helpers ─────────────────────────────────────────────────────────────
+
+
+def _find_memory_file(project_path: Path, memory_id: str) -> Path | None:
+    """Find an existing local memory file by its ID."""
+    memory_root = project_path / ".lerim" / "memory"
+    if not memory_root.is_dir():
+        return None
+    for md_path in memory_root.rglob("*.md"):
+        try:
+            text = md_path.read_text(encoding="utf-8")
+            if text.startswith("---"):
+                end = text.find("---", 3)
+                if end > 0:
+                    import yaml
+
+                    fm = yaml.safe_load(text[3:end]) or {}
+                    if fm.get("id") == memory_id:
+                        return md_path
+        except Exception:
+            continue
+    return None
+
+
+async def _pull_memories(
+    endpoint: str, token: str, config: Config, state: _ShipperState
+) -> int:
+    """Pull dashboard-edited memories from cloud and write to local files."""
+    params: dict[str, str] = {"limit": "200"}
+    if state.memories_pulled_at:
+        params["since"] = state.memories_pulled_at
+
+    try:
+        data = await asyncio.to_thread(
+            _get_json_sync, endpoint, "/api/v1/sync/memories", token, params
+        )
+    except Exception as exc:
+        logger.warning("cloud pull memories failed: {}", exc)
+        return 0
+
+    if not data or not data.get("memories"):
+        return 0
+
+    pulled = 0
+    latest_edited = state.memories_pulled_at
+
+    for mem in data["memories"]:
+        cloud_edited = mem.get("cloud_edited_at", "")
+        if not cloud_edited:
+            continue
+
+        # Find the project directory for this memory
+        project_name = mem.get("project")
+        if not project_name or project_name not in (config.projects or {}):
+            # Try first project as fallback
+            if config.projects:
+                project_name = next(iter(config.projects))
+            else:
+                continue
+
+        project_path = Path(config.projects[project_name])
+        memory_type = mem.get("memory_type", "decision")
+        memory_dir = project_path / ".lerim" / "memory" / f"{memory_type}s"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+
+        # Build filename from memory_id
+        memory_id = mem.get("memory_id", "")
+        if not memory_id:
+            continue
+
+        # Find existing file or create new one
+        existing_file = _find_memory_file(project_path, memory_id)
+        if existing_file:
+            target_path = existing_file
+        else:
+            # Create new file: YYYYMMDD-slug.md
+            from datetime import datetime, timezone
+
+            date_prefix = datetime.now(timezone.utc).strftime("%Y%m%d")
+            slug = memory_id[:60].replace(" ", "-").lower()
+            target_path = memory_dir / f"{date_prefix}-{slug}.md"
+
+        # Build frontmatter + body
+        frontmatter: dict[str, Any] = {
+            "id": memory_id,
+            "title": mem.get("title", ""),
+            "confidence": mem.get("confidence"),
+            "tags": mem.get("tags", []),
+            "source": mem.get("source", "cloud-edit"),
+            "created": mem.get("created_at", ""),
+            "updated": cloud_edited,
+        }
+        # Remove None values
+        frontmatter = {k: v for k, v in frontmatter.items() if v is not None}
+
+        body = mem.get("body", "")
+
+        # Write YAML frontmatter + markdown body
+        import yaml
+
+        fm_str = yaml.dump(
+            frontmatter, default_flow_style=False, allow_unicode=True
+        ).strip()
+        content = f"---\n{fm_str}\n---\n\n{body}\n"
+
+        try:
+            target_path.write_text(content, encoding="utf-8")
+            pulled += 1
+        except OSError as exc:
+            logger.warning("failed to write pulled memory {}: {}", memory_id, exc)
+
+        if cloud_edited > latest_edited:
+            latest_edited = cloud_edited
+
+    if latest_edited and latest_edited != state.memories_pulled_at:
+        state.memories_pulled_at = latest_edited
+
+    return pulled
+
+
+async def _pull_config(
+    endpoint: str, token: str, state: _ShipperState
+) -> bool:
+    """Pull team config from cloud and merge into local config."""
+    try:
+        data = await asyncio.to_thread(
+            _get_json_sync, endpoint, "/api/v1/config", token, {}
+        )
+    except Exception as exc:
+        logger.warning("cloud pull config failed: {}", exc)
+        return False
+
+    if not data or not data.get("config"):
+        return False
+
+    cloud_updated = data.get("updated_at", "")
+    if cloud_updated and cloud_updated <= state.config_pulled_at:
+        return False  # No changes since last pull
+
+    cloud_config = data["config"]
+    if not cloud_config:
+        return False
+
+    # Merge cloud config into local config
+    from lerim.config.settings import save_config_patch
+
+    try:
+        save_config_patch(cloud_config)
+        logger.info("cloud config pulled and merged: {}", list(cloud_config.keys()))
+        if cloud_updated:
+            state.config_pulled_at = cloud_updated
+        return True
+    except Exception as exc:
+        logger.warning("failed to merge cloud config: {}", exc)
+        return False
 
 
 # ── log shipping ─────────────────────────────────────────────────────────────
@@ -451,10 +636,10 @@ def _is_cloud_configured(config: Config) -> bool:
 
 
 async def ship_once(config: Config) -> dict[str, int]:
-    """Run one shipping cycle.
+    """Run one sync cycle (pull then push).
 
-    Returns ``{"logs": N, "sessions": N, "memories": N}`` with counts of
-    shipped items per type, or an empty dict if cloud is not configured.
+    Returns counts of items synced per type, or an empty dict if cloud
+    is not configured.
     """
     if not _is_cloud_configured(config):
         return {}
@@ -463,6 +648,11 @@ async def ship_once(config: Config) -> dict[str, int]:
     token = config.cloud_token or ""
     state = _ShipperState.load()
 
+    # Phase 1: Pull (cloud -> local)
+    config_pulled = await _pull_config(endpoint, token, state)
+    memories_pulled = await _pull_memories(endpoint, token, config, state)
+
+    # Phase 2: Push (local -> cloud)
     logs_shipped = await _ship_logs(endpoint, token, state)
     sessions_shipped = await _ship_sessions(
         endpoint, token, state, config.sessions_db_path
@@ -475,4 +665,6 @@ async def ship_once(config: Config) -> dict[str, int]:
         "logs": logs_shipped,
         "sessions": sessions_shipped,
         "memories": memories_shipped,
+        "memories_pulled": memories_pulled,
+        "config_pulled": config_pulled,
     }
