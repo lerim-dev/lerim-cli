@@ -357,7 +357,7 @@ def _format_cursor_line(obj: dict) -> str | None:
 			parts.append(summary)
 
 		if parts:
-			return f"[ASSISTANT]\n" + "\n".join(parts)
+			return "[ASSISTANT]\n" + "\n".join(parts)
 		return None
 
 	# Type 30 = thinking, skip
@@ -687,7 +687,6 @@ if __name__ == "__main__":
         print("extract_pipeline: filter self-tests passed")
 
         # --- Transcript formatting tests ---
-        import os
         fixtures_dir = Path(__file__).parent.parent.parent.parent / "tests" / "fixtures" / "traces"
 
         # Test Claude formatting
