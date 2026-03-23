@@ -41,8 +41,12 @@ def compact_trace(raw_text: str) -> str:
             continue
         # Strip to only conversation-relevant fields
         obj = {k: v for k, v in obj.items() if k in keep_fields}
-        # Clear tool_result content and thinking blocks
+        # Strip metadata from inner message — keep only role and content
         msg = obj.get("message")
+        if isinstance(msg, dict):
+            obj["message"] = {k: v for k, v in msg.items() if k in {"role", "content"}}
+            msg = obj["message"]
+        # Clear tool_result content and thinking blocks
         if isinstance(msg, dict):
             content = msg.get("content")
             if isinstance(content, list):

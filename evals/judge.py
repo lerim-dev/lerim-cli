@@ -22,28 +22,30 @@ from lerim.config.logging import logger
 
 # JSON schema for judge responses with clarity dimension (extraction, summarization)
 JUDGE_SCHEMA_CLARITY = {
-    "type": "object",
-    "properties": {
-        "completeness": {"type": "number"},
-        "faithfulness": {"type": "number"},
-        "clarity": {"type": "number"},
-        "reasoning": {"type": "string"},
-    },
-    "required": ["completeness", "faithfulness", "clarity", "reasoning"],
-    "additionalProperties": False,
+	"type": "object",
+	"properties": {
+		"completeness": {"type": "number"},
+		"faithfulness": {"type": "number"},
+		"clarity": {"type": "number"},
+		"precision": {"type": "number"},
+		"reasoning": {"type": "string"},
+	},
+	"required": ["completeness", "faithfulness", "clarity", "precision", "reasoning"],
+	"additionalProperties": False,
 }
 
 # JSON schema for judge responses with coherence dimension (lifecycle sync/maintain)
 JUDGE_SCHEMA_COHERENCE = {
-    "type": "object",
-    "properties": {
-        "completeness": {"type": "number"},
-        "faithfulness": {"type": "number"},
-        "coherence": {"type": "number"},
-        "reasoning": {"type": "string"},
-    },
-    "required": ["completeness", "faithfulness", "coherence", "reasoning"],
-    "additionalProperties": False,
+	"type": "object",
+	"properties": {
+		"completeness": {"type": "number"},
+		"faithfulness": {"type": "number"},
+		"coherence": {"type": "number"},
+		"precision": {"type": "number"},
+		"reasoning": {"type": "string"},
+	},
+	"required": ["completeness", "faithfulness", "coherence", "precision", "reasoning"],
+	"additionalProperties": False,
 }
 
 MAX_RETRIES = 2
@@ -328,6 +330,7 @@ if __name__ == "__main__":
                 "completeness": 0.9,
                 "faithfulness": 0.8,
                 "clarity": 0.7,
+                "precision": 0.6,
                 "reasoning": "test",
             },
         }
@@ -336,6 +339,7 @@ if __name__ == "__main__":
         "completeness": 0.9,
         "faithfulness": 0.8,
         "clarity": 0.7,
+        "precision": 0.6,
         "reasoning": "test",
     }
 
@@ -368,6 +372,7 @@ if __name__ == "__main__":
         "completeness": 0.9,
         "faithfulness": 0.8,
         "clarity": 0.7,
+        "precision": 0.6,
         "reasoning": "test",
     }
     _validate_judge_result(valid, JUDGE_SCHEMA_CLARITY)  # should not raise
@@ -385,6 +390,7 @@ if __name__ == "__main__":
             "completeness": "high",
             "faithfulness": 0.8,
             "clarity": 0.7,
+            "precision": 0.6,
             "reasoning": "test",
         }
         _validate_judge_result(bad, JUDGE_SCHEMA_CLARITY)
@@ -440,12 +446,14 @@ if __name__ == "__main__":
         "completeness",
         "faithfulness",
         "clarity",
+        "precision",
         "reasoning",
     }
     assert set(JUDGE_SCHEMA_COHERENCE["required"]) == {
         "completeness",
         "faithfulness",
         "coherence",
+        "precision",
         "reasoning",
     }
 

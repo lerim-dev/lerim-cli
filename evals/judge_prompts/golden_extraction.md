@@ -6,7 +6,10 @@ This will be used as ground truth for evaluating automated extraction pipelines.
 ## Instructions
 
 1. Read the trace file at: `{trace_path}`
-2. Extract ALL meaningful decisions, learnings, preferences, and friction signals.
+2. Extract ONLY items that would help the user or their coding agent in a FUTURE session.
+   Do NOT include: generic research results, code-derivable architecture facts,
+   tautological items (body ≈ title), ephemeral task details, or changelogs.
+   An empty list is valid when no durable memories exist.
 3. For each item produce:
    - **primitive**: "decision" or "learning"
    - **kind**: one of "insight", "procedure", "friction", "pitfall", "preference" (for learnings)

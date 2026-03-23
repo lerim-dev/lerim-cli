@@ -455,9 +455,16 @@ def run_extract_pipeline_tool(
     if not context.trace_path or not context.artifact_paths:
         raise RuntimeError("trace_path and artifact_paths required in context")
     output_file = context.artifact_paths["extract"]
+    effective_guidance = str(guidance or "").strip()
+    if not effective_guidance:
+        effective_guidance = (
+            "Focus on user decisions and preferences. "
+            "Skip generic research findings, web search results, "
+            "and code architecture facts derivable from reading the source."
+        )
     candidates = extract_memories_from_session_file(
         context.trace_path,
-        guidance=str(guidance or "").strip(),
+        guidance=effective_guidance,
     )
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(
