@@ -24,15 +24,25 @@ def test_composite_perfect_scores() -> None:
 
 
 def test_composite_zero_scores() -> None:
-    """Zero scores produce composite of 0.0."""
-    assert compute_composite(0.0, 0.0, 0.0) == 0.0
+    """Zero scores (including precision) produce composite of 0.0."""
+    assert compute_composite(0.0, 0.0, 0.0, 0.0) == 0.0
 
 
 def test_composite_weighted_average() -> None:
-    """Composite uses 40/35/25 weighting."""
-    result = compute_composite(0.8, 0.6, 0.4)
-    expected = 0.8 * 0.4 + 0.6 * 0.35 + 0.4 * 0.25
+    """Composite uses precision 30%, completeness 25%, faithfulness 25%, clarity 20%."""
+    result = compute_composite(0.8, 0.6, 0.4, 0.9)
+    expected = 0.9 * 0.30 + 0.8 * 0.25 + 0.6 * 0.25 + 0.4 * 0.20
     assert abs(result - expected) < 1e-9
+
+
+def test_composite_default_precision() -> None:
+    """When precision is not passed, defaults to 1.0 for backward compatibility."""
+    result = compute_composite(1.0, 1.0, 1.0)
+    assert result == 1.0
+    # With precision=1.0 default: 0.30 + 0.8*0.25 + 0.6*0.25 + 0.4*0.20 = 0.73
+    result2 = compute_composite(0.8, 0.6, 0.4)
+    expected = 1.0 * 0.30 + 0.8 * 0.25 + 0.6 * 0.25 + 0.4 * 0.20
+    assert abs(result2 - expected) < 1e-9
 
 
 # --- check_extraction_schema ---

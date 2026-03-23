@@ -22,12 +22,13 @@ Use your Read and search tools to investigate the files above. Do NOT load entir
 
 ## Scoring (each 0.0 to 1.0)
 
-- **completeness** (weight 0.4): Did maintenance identify all opportunities for merging duplicates, archiving stale/trivial memories, and consolidating related items? Were all memory files reviewed? 1.0 = no missed opportunities.
-- **faithfulness** (weight 0.35): Are maintenance actions reasonable and well-justified? No incorrect merges or inappropriate archives? Were merge results faithful to the originals? 1.0 = all actions correct.
-- **coherence** (weight 0.25): Is the maintenance report well-structured with clear reasoning? Do the before/after counts make sense given the actions? 1.0 = excellent coherence.
+- **completeness** (weight 0.25): Did maintenance identify all opportunities for merging duplicates, archiving stale/trivial memories, and consolidating related items? Were all memory files reviewed? 1.0 = no missed opportunities.
+- **faithfulness** (weight 0.25): Are maintenance actions reasonable and well-justified? No incorrect merges or inappropriate archives? Were merge results faithful to the originals? 1.0 = all actions correct.
+- **coherence** (weight 0.20): Is the maintenance report well-structured with clear reasoning? Do the before/after counts make sense given the actions? 1.0 = excellent coherence.
+- **precision** (weight 0.30): Did maintenance correctly identify and archive low-quality memories? Reward archiving: generic research results, code-derivable facts, tautological items, ephemeral task details. Penalize leaving obvious junk untouched. 1.0 = all low-quality memories were handled.
 
 ## Response Format
 
 Return ONLY valid JSON (no markdown fences, no extra text):
 
-{"completeness": 0.0, "faithfulness": 0.0, "coherence": 0.0, "reasoning": "Brief explanation of scores."}
+{"completeness": 0.0, "faithfulness": 0.0, "coherence": 0.0, "precision": 0.0, "reasoning": "Brief explanation of scores."}

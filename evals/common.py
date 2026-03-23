@@ -96,6 +96,7 @@ def print_extraction_table(per_trace: list[dict], agg: dict) -> None:
     table.add_column("Compl", justify="right")
     table.add_column("Faith", justify="right")
     table.add_column("Clar", justify="right")
+    table.add_column("Prec", justify="right")
     table.add_column("COMP", justify="right", style="bold")
     table.add_column("Time", justify="right")
 
@@ -108,6 +109,7 @@ def print_extraction_table(per_trace: list[dict], agg: dict) -> None:
             f"{t['completeness']:.2f}",
             f"{t['faithfulness']:.2f}",
             f"{t['clarity']:.2f}",
+            f"{t.get('precision', 0):.2f}",
             f"{t['composite']:.2f}",
             f"{t['wall_time_s']:.1f}s",
         )
@@ -120,6 +122,7 @@ def print_extraction_table(per_trace: list[dict], agg: dict) -> None:
         f"{agg['completeness']:.2f}",
         f"{agg['faithfulness']:.2f}",
         f"{agg['clarity']:.2f}",
+        f"{agg.get('precision', 0):.2f}",
         f"[bold]{agg['composite']:.2f}[/]",
         f"{agg['wall_time_s']:.1f}s",
         style="bold",

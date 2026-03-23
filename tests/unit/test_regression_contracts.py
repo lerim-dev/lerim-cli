@@ -60,7 +60,7 @@ def test_memory_candidate_schema_stable():
     """MemoryCandidate has primitive, kind, title, body, confidence, tags."""
     from lerim.memory.schemas import MemoryCandidate
 
-    expected = {"primitive", "kind", "title", "body", "confidence", "tags"}
+    expected = {"primitive", "kind", "title", "body", "confidence", "tags", "source_speaker", "durability"}
     assert set(MemoryCandidate.model_fields.keys()) == expected
 
 

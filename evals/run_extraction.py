@@ -118,16 +118,17 @@ def run_extraction_eval(
                     completeness = float(judge_result.get("completeness", 0))
                     faithfulness = float(judge_result.get("faithfulness", 0))
                     clarity = float(judge_result.get("clarity", 0))
+                    precision = float(judge_result.get("precision", 0))
                     reasoning = judge_result.get("reasoning", "")
                 except Exception as e:
                     logger.warning("Judge error on {}: {}", trace_path.name, e)
-                    completeness = faithfulness = clarity = 0.0
+                    completeness = faithfulness = clarity = precision = 0.0
                     reasoning = f"Judge failed: {e}"
 
                 judge_time = time.time() - judge_start
                 wall_time = time.time() - t0
 
-                composite = compute_composite(completeness, faithfulness, clarity)
+                composite = compute_composite(completeness, faithfulness, clarity, precision)
 
                 score = EvalScore(
                     trace=trace_path.name,
@@ -136,6 +137,7 @@ def run_extraction_eval(
                     completeness=completeness,
                     faithfulness=faithfulness,
                     clarity=clarity,
+                    precision=precision,
                     composite=composite,
                     wall_time_s=round(wall_time, 2),
                     judge_reasoning=reasoning,
@@ -164,6 +166,7 @@ def run_extraction_eval(
                 "completeness",
                 "faithfulness",
                 "clarity",
+                "precision",
                 "composite",
                 "wall_time_s",
             )

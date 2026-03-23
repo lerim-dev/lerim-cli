@@ -22,12 +22,13 @@ Use your Read and search tools to investigate the files above. Do NOT load entir
 
 ## Scoring (each 0.0 to 1.0)
 
-- **completeness** (weight 0.4): Did the sync capture all important signals from the trace? Were valid extraction, summary, and memory_actions artifacts produced? If similar memories already existed, did it correctly choose update or no_op instead of duplicating?
-- **faithfulness** (weight 0.35): Are extracted memories grounded in the trace? No hallucinated content? Are add/update/no_op decisions reasonable given existing memories?
-- **coherence** (weight 0.25): Is the output well-organized? Do extraction, summary, and memory actions form a consistent picture? Are memory files well-written?
+- **completeness** (weight 0.25): Did the sync capture important signals from the trace? Were valid extraction, summary, and memory_actions artifacts produced? If similar memories already existed, did it correctly choose update or no_op instead of duplicating? Note: it is FINE to skip generic research, code-derivable facts, and ephemeral details.
+- **faithfulness** (weight 0.25): Are extracted memories grounded in the trace? No hallucinated content? Are add/update/no_op decisions reasonable given existing memories?
+- **coherence** (weight 0.20): Is the output well-organized? Do extraction, summary, and memory actions form a consistent picture? Are memory files well-written?
+- **precision** (weight 0.30): Are ALL new memories genuinely worth keeping for future sessions? Penalize for: generic industry knowledge, code architecture facts readable from source, tautological items, ephemeral task details, changelog entries. 1.0 = every added memory is worth keeping.
 
 ## Response Format
 
 Return ONLY valid JSON (no markdown fences, no extra text):
 
-{"completeness": 0.0, "faithfulness": 0.0, "coherence": 0.0, "reasoning": "Brief explanation of scores."}
+{"completeness": 0.0, "faithfulness": 0.0, "coherence": 0.0, "precision": 0.0, "reasoning": "Brief explanation of scores."}

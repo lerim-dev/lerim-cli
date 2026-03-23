@@ -243,7 +243,7 @@ def _run_sync_eval(
     candidate_count = len(extract_data) if isinstance(extract_data, list) else 0
 
     # Judge scoring
-    completeness = faithfulness = coherence = 0.0
+    completeness = faithfulness = coherence = precision = 0.0
     reasoning = ""
     try:
         logger.info("[{}/{}] Judging sync...", trace_index, total_traces)
@@ -265,6 +265,7 @@ def _run_sync_eval(
         completeness = float(judge_result.get("completeness", 0))
         faithfulness = float(judge_result.get("faithfulness", 0))
         coherence = float(judge_result.get("coherence", 0))
+        precision = float(judge_result.get("precision", 0))
         reasoning = judge_result.get("reasoning", "")
         logger.info(
             "[{}/{}] Judge done ({:.1f}s)",
@@ -299,6 +300,7 @@ def _run_sync_eval(
         "completeness": completeness,
         "faithfulness": faithfulness,
         "coherence": coherence,
+        "precision": precision,
         "composite": composite,
         "wall_time_s": round(wall_time, 2),
         "judge_reasoning": reasoning,
@@ -341,6 +343,7 @@ def _run_maintain_eval(
             "completeness": 0.0,
             "faithfulness": 0.0,
             "coherence": 0.0,
+            "precision": 0.0,
             "composite": 0.0,
             "wall_time_s": round(wall_time, 2),
             "judge_reasoning": str(e),
@@ -352,7 +355,7 @@ def _run_maintain_eval(
     agent_trace_path = run_folder / "agent_trace.json"
 
     # Judge scoring
-    completeness = faithfulness = coherence = 0.0
+    completeness = faithfulness = coherence = precision = 0.0
     reasoning = ""
     try:
         logger.info("[{}/...] Judging maintain...", after_trace_index)
@@ -374,6 +377,7 @@ def _run_maintain_eval(
         completeness = float(judge_result.get("completeness", 0))
         faithfulness = float(judge_result.get("faithfulness", 0))
         coherence = float(judge_result.get("coherence", 0))
+        precision = float(judge_result.get("precision", 0))
         reasoning = judge_result.get("reasoning", "")
         logger.info(
             "[{}/...] Judge done ({:.1f}s)",
@@ -405,6 +409,7 @@ def _run_maintain_eval(
         "completeness": completeness,
         "faithfulness": faithfulness,
         "coherence": coherence,
+        "precision": precision,
         "composite": composite,
         "wall_time_s": round(wall_time, 2),
         "judge_reasoning": reasoning,

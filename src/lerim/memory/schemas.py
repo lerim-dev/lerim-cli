@@ -19,12 +19,23 @@ class MemoryCandidate(BaseModel):
     )
     kind: str | None = Field(
         default=None,
-        description="Subtype: insight, procedure, friction, pitfall, or preference. Usually set when primitive=learning.",
+        description="Subtype for learnings: insight, procedure, friction, pitfall, or preference. Must be null for decisions.",
     )
     title: str = Field(description="Short memory title.")
-    body: str = Field(description="Memory content in plain language.")
+    body: str = Field(description="Memory content in plain language. Must add substantive information beyond the title.")
     confidence: float | None = Field(
-        default=None, ge=0.0, le=1.0, description="Confidence score from 0 to 1."
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Confidence score 0-1. 0.9+ = explicitly stated/decided. 0.7-0.8 = strongly implied or accepted without objection. 0.5-0.6 = inferred. Below 0.5 = should not be extracted.",
+    )
+    source_speaker: Literal["user", "agent", "both"] = Field(
+        default="both",
+        description="Who originated this: 'user' = user stated/decided. 'agent' = agent chose during implementation. 'both' = emerged from dialog or agent decided and user accepted.",
+    )
+    durability: Literal["permanent", "project", "session"] = Field(
+        default="project",
+        description="Expected lifespan. permanent = preferences/identity. project = codebase-specific. session = ephemeral (should usually NOT be extracted).",
     )
     tags: list[str] = Field(
         default_factory=list,
@@ -39,6 +50,8 @@ if __name__ == "__main__":
         body="Test content",
         confidence=0.9,
         tags=["test"],
+        source_speaker="both",
+        durability="permanent",
     )
     print(f"MemoryCandidate schema: {candidate.model_json_schema()['title']}")
     print("schemas: self-test passed")
