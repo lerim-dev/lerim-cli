@@ -342,21 +342,20 @@ def _scan_memory_files(
             except OSError:
                 continue
 
-            # Parse frontmatter manually to avoid import dependency.
+            # Parse frontmatter with YAML (handles lists like tags properly).
             updated_value = ""
-            frontmatter_raw: dict[str, str] = {}
+            frontmatter_raw: dict[str, Any] = {}
             if text.startswith("---"):
                 end = text.find("---", 3)
                 if end > 0:
                     fm_block = text[3:end].strip()
                     body = text[end + 3 :].strip()
-                    for line in fm_block.splitlines():
-                        m = re.match(r"^(\w[\w_-]*)\s*:\s*(.+)$", line)
-                        if m:
-                            frontmatter_raw[m.group(1).strip()] = m.group(
-                                2
-                            ).strip().strip("'\"")
-                    updated_value = frontmatter_raw.get("updated", "")
+                    try:
+                        import yaml
+                        frontmatter_raw = yaml.safe_load(fm_block) or {}
+                    except Exception:
+                        frontmatter_raw = {}
+                    updated_value = str(frontmatter_raw.get("updated", ""))
                 else:
                     body = text
             else:
