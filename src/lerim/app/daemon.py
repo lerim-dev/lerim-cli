@@ -413,6 +413,15 @@ def run_sync_once(
             return EXIT_LOCK_BUSY, _empty_sync_summary()
 
     try:
+        record_service_run(
+            job_type="sync",
+            status="started",
+            started_at=started,
+            completed_at=None,
+            trigger=trigger,
+            details=None,
+        )
+
         config = get_config()
         target_run_ids: list[str] = []
         indexed_sessions = 0
@@ -559,6 +568,16 @@ def run_sync_once(
                 cost_usd=cost_usd,
             )
         return code, summary
+    except Exception as exc:
+        _record_service_event(
+            record_service_run,
+            job_type="sync",
+            status="failed",
+            started_at=started,
+            trigger=trigger,
+            details={"error": str(exc)},
+        )
+        return EXIT_FATAL, _empty_sync_summary()
     finally:
         if lock:
             lock.release()
