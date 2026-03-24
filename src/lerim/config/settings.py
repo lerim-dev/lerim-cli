@@ -3,8 +3,7 @@
 Layers (low to high priority):
 1. lerim/config/default.toml
 2. ~/.lerim/config.toml
-3. <repo>/.lerim/config.toml
-4. LERIM_CONFIG env path (optional explicit override)
+3. LERIM_CONFIG env path (optional explicit override)
 
 API keys are read from environment variables only.
 """
@@ -216,11 +215,6 @@ def _load_layers() -> tuple[dict[str, Any], list[dict[str, str]]]:
         ("package_default", DEFAULT_CONFIG_PATH),
         ("user", USER_CONFIG_PATH),
     ]
-
-    project_root = git_root_for(Path.cwd())
-    if project_root:
-        project_dir = project_root / ".lerim"
-        layers.append(("project", project_dir / "config.toml"))
 
     explicit = os.getenv("LERIM_CONFIG")
     if explicit:

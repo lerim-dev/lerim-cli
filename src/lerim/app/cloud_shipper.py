@@ -46,7 +46,6 @@ class _ShipperState:
     sessions_shipped_at: str = ""
     memories_shipped_at: str = ""
     memories_pulled_at: str = ""
-    config_pulled_at: str = ""
     service_runs_shipped_at: str = ""
 
     def save(self) -> None:
@@ -70,7 +69,6 @@ class _ShipperState:
                 sessions_shipped_at=str(raw.get("sessions_shipped_at") or ""),
                 memories_shipped_at=str(raw.get("memories_shipped_at") or ""),
                 memories_pulled_at=str(raw.get("memories_pulled_at") or ""),
-                config_pulled_at=str(raw.get("config_pulled_at") or ""),
                 service_runs_shipped_at=str(raw.get("service_runs_shipped_at") or ""),
             )
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
@@ -265,43 +263,6 @@ async def _pull_memories(
         state.memories_pulled_at = latest_edited
 
     return pulled
-
-
-async def _pull_config(
-    endpoint: str, token: str, state: _ShipperState
-) -> bool:
-    """Pull team config from cloud and merge into local config."""
-    try:
-        data = await asyncio.to_thread(
-            _get_json_sync, endpoint, "/api/v1/config", token, {}
-        )
-    except Exception as exc:
-        logger.warning("cloud pull config failed: {}", exc)
-        return False
-
-    if not data or not data.get("config"):
-        return False
-
-    cloud_updated = data.get("updated_at", "")
-    if cloud_updated and cloud_updated <= state.config_pulled_at:
-        return False  # No changes since last pull
-
-    cloud_config = data["config"]
-    if not cloud_config:
-        return False
-
-    # Merge cloud config into local config
-    from lerim.config.settings import save_config_patch
-
-    try:
-        save_config_patch(cloud_config)
-        logger.info("cloud config pulled and merged: {}", list(cloud_config.keys()))
-        if cloud_updated:
-            state.config_pulled_at = cloud_updated
-        return True
-    except Exception as exc:
-        logger.warning("failed to merge cloud config: {}", exc)
-        return False
 
 
 # ── log shipping ─────────────────────────────────────────────────────────────
@@ -731,7 +692,6 @@ async def ship_once(config: Config) -> dict[str, int]:
     state = _ShipperState.load()
 
     # Phase 1: Pull (cloud -> local)
-    config_pulled = await _pull_config(endpoint, token, state)
     memories_pulled = await _pull_memories(endpoint, token, config, state)
 
     # Phase 2: Push (local -> cloud)
@@ -752,5 +712,4 @@ async def ship_once(config: Config) -> dict[str, int]:
         "service_runs": service_runs_shipped,
         "memories": memories_shipped,
         "memories_pulled": memories_pulled,
-        "config_pulled": config_pulled,
     }
