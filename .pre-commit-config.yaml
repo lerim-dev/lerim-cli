@@ -5,4 +5,5 @@ repos:
       - id: ruff
         args: [check, src/, tests/]
         pass_filenames: false
+        always_run: true
         stages: [pre-push]
