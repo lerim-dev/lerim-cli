@@ -92,7 +92,7 @@ Instructions:
    in favor of the newer memory.
 
 2. CROSS-SESSION ANALYSIS:
-   Using the summaries and memories gathered in step 1, perform three analyses:
+   Using the summaries and memories gathered in step 1, perform four analyses:
 
    a) Signal Amplification:
       Identify topics that appear in 3+ session summaries but have no corresponding
@@ -112,6 +112,17 @@ Instructions:
       Identify areas with heavy session activity (mentioned in many summaries) but
       thin memory coverage (few or no memories on the topic). List each gap with
       the relevant summary references.
+
+   d) Cross-Agent Patterns:
+      Session summaries include a "coding_agent" field (e.g. claude, cursor, codex,
+      opencode). Look for patterns across different agents:
+      - Decisions made in one agent that should inform work in another
+        (e.g. backend decision in Claude that frontend work in Cursor should know)
+      - Same error pattern or friction appearing across multiple agents
+      - Knowledge that exists in sessions from one agent but is missing from
+        sessions with another agent working on the same codebase
+      For each cross-agent insight, note the agents involved and the actionable
+      knowledge that should flow between them.
 
    Record all findings for inclusion in the final report.
 
@@ -171,6 +182,10 @@ Instructions:
    ## Watch Out
    - [contradictions, gaps, or low-confidence areas to monitor]
    ...
+
+   ## Cross-Agent Insights
+   - [patterns detected across different coding agents]
+   ...
    ```
 
    Selection criteria (~2000 tokens max, 20-30 items total):
@@ -187,7 +202,8 @@ Instructions:
    - cross_session_analysis: {{
        "signals": [{{"topic": "...", "summary_count": N, "recommendation": "..."}}],
        "contradictions": [{{"memory_a": "...", "memory_b": "...", "resolution": "..."}}],
-       "gaps": [{{"topic": "...", "summary_refs": ["..."], "coverage": "..."}}]
+       "gaps": [{{"topic": "...", "summary_refs": ["..."], "coverage": "..."}}],
+       "cross_agent": [{{"agents": ["claude", "cursor"], "topic": "...", "insight": "..."}}]
      }}
    - All file paths must be absolute.
 
@@ -235,6 +251,9 @@ if __name__ == "__main__":
 		assert "Signal Amplification" in prompt
 		assert "Contradiction Detection" in prompt
 		assert "Gap Detection" in prompt
+		assert "Cross-Agent Patterns" in prompt
+		assert "coding_agent" in prompt
+		assert "cross_agent" in prompt
 		assert "codex" in prompt
 		assert "No access data available" in prompt
 		# No explore tool references

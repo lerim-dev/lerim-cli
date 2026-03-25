@@ -292,6 +292,30 @@ def test_oai_maintain_prompt_summaries_reference(tmp_path):
 	assert "summaries" in prompt.lower()
 
 
+def test_oai_maintain_prompt_cross_agent_patterns(tmp_path):
+	"""Maintain prompt should include cross-agent pattern detection."""
+	run_folder, artifact_paths = _make_maintain_artifacts(tmp_path)
+	prompt = build_oai_maintain_prompt(
+		memory_root=tmp_path / "memory",
+		run_folder=run_folder,
+		artifact_paths=artifact_paths,
+	)
+	assert "Cross-Agent Patterns" in prompt
+	assert "coding_agent" in prompt
+	assert "cross_agent" in prompt
+
+
+def test_oai_maintain_prompt_hot_memory_cross_agent_section(tmp_path):
+	"""Hot-memory template should include Cross-Agent Insights section."""
+	run_folder, artifact_paths = _make_maintain_artifacts(tmp_path)
+	prompt = build_oai_maintain_prompt(
+		memory_root=tmp_path / "memory",
+		run_folder=run_folder,
+		artifact_paths=artifact_paths,
+	)
+	assert "Cross-Agent Insights" in prompt
+
+
 # ---------------------------------------------------------------------------
 # Schema tests
 # ---------------------------------------------------------------------------
