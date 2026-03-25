@@ -36,21 +36,6 @@ openrouter_provider_order = []
 thinking = true                        # enable model thinking/reasoning (Ollama Qwen 3.5)
 max_tokens = 32000                     # max output tokens for LLM responses (lower for OpenAI models, e.g. 16384)
 
-[roles.explorer]
-# NOTE: Explorer subagent was replaced by Codex tool. This section is kept
-# for backwards compatibility with Config dataclass but is not used by the
-# OpenAI Agents SDK agent.
-provider = "minimax"
-model = "MiniMax-M2.5"
-api_base = ""
-fallback_models = ["zai:glm-4.7"]
-timeout_seconds = 180
-max_iterations = 8
-openrouter_provider_order = []
-thinking = true
-max_tokens = 32000
-max_explorers = 4
-
 [roles.extract]
 provider = "minimax"
 model = "MiniMax-M2.5"

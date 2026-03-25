@@ -27,10 +27,11 @@
 Lerim is the **context graph layer** for coding agents -- it watches sessions, extracts the reasoning behind decisions, and builds a shared context graph across agents, projects, and teams.
 
 - **Watches** your agent sessions across all supported coding agents
-- **Extracts** the reasoning behind decisions -- the *why*, not just the *what* -- using LLM pipelines (DSPy + PydanticAI)
+- **Extracts** the reasoning behind decisions -- the *why*, not just the *what* -- using LLM pipelines (DSPy + OpenAI Agents SDK)
 - **Stores** everything as plain markdown files in your repo (`.lerim/`)
 - **Refines** knowledge continuously -- merges duplicates, archives stale entries, applies time-based decay
 - **Connects** learnings into a context graph -- related decisions and patterns are linked
+- **Remembers** across sessions -- hot-memory and cross-session intelligence keep agents informed
 - **Unifies** knowledge across all your agents -- what one agent learns, every other can recall
 - **Answers** questions about past context: `lerim ask "why did we choose Postgres?"`
 
@@ -57,7 +58,8 @@ Lerim is file-first and primitive-first.
 - Project memory: `<repo>/.lerim/`
 - Global fallback: `~/.lerim/`
 - Search: file-based (no index required)
-- Orchestration: `pydantic-ai` lead agent + read-only explorer subagent
+- Orchestration: `openai-agents` lead agent + Codex filesystem sub-agent
+- Multi-provider: ResponsesProxy adapter enables Codex sub-agent across any LLM provider
 - Extraction/summarization: `dspy.ChainOfThought` with transcript windowing
 
 ### Sync path
@@ -220,7 +222,7 @@ API keys come from environment variables only. Set keys for the providers you us
 Default model config (from `src/lerim/config/default.toml`):
 
 - All roles: `provider=minimax`, `model=MiniMax-M2.5`
-- Fallback: `zai:glm-4.7` (lead/explorer), `zai:glm-4.5-air` (extract/summarize)
+- Fallback: `zai:glm-4.7` (lead/codex), `zai:glm-4.5-air` (extract/summarize)
 
 ### Development
 
@@ -236,7 +238,7 @@ tests/run_tests.sh all
 
 ### Tracing (OpenTelemetry)
 
-Lerim uses PydanticAI's built-in OpenTelemetry instrumentation for agent observability.
+Lerim uses OpenTelemetry for agent observability, with traces routed through the OpenAI Agents SDK tracing layer.
 
 ```bash
 # Enable tracing
@@ -247,8 +249,6 @@ LERIM_TRACING=1 lerim sync
 [tracing]
 enabled = true
 ```
-
-View traces at https://logfire.pydantic.dev.
 
 ## Memory layout
 

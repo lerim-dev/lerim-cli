@@ -265,7 +265,6 @@ class Config:
     parallel_pipelines: bool
 
     lead_role: LLMRoleConfig
-    explorer_role: LLMRoleConfig
     extract_role: DSPyRoleConfig
     summarize_role: DSPyRoleConfig
 
@@ -345,18 +344,6 @@ class Config:
                 "openrouter_provider_order": list(
                     self.lead_role.openrouter_provider_order
                 ),
-            },
-            "explorer_role": {
-                "provider": self.explorer_role.provider,
-                "model": self.explorer_role.model,
-                "api_base": self.explorer_role.api_base,
-                "fallback_models": list(self.explorer_role.fallback_models),
-                "timeout_seconds": self.explorer_role.timeout_seconds,
-                "max_iterations": self.explorer_role.max_iterations,
-                "openrouter_provider_order": list(
-                    self.explorer_role.openrouter_provider_order
-                ),
-                "max_explorers": self.explorer_role.max_explorers,
             },
             "extract_role": {
                 "provider": self.extract_role.provider,
@@ -547,13 +534,6 @@ def load_config() -> Config:
         default_provider="openrouter",
         default_model="qwen/qwen3-coder-30b-a3b-instruct",
     )
-    explorer_role = _build_llm_role(
-        roles.get("explorer", {})
-        if isinstance(roles.get("explorer", {}), dict)
-        else {},
-        default_provider=lead_role.provider,
-        default_model=lead_role.model,
-    )
     extract_role = _build_dspy_role(
         roles.get("extract", {}) if isinstance(roles.get("extract", {}), dict) else {},
         default_provider="ollama",
@@ -632,7 +612,6 @@ def load_config() -> Config:
         sync_max_sessions=_require_int(server, "sync_max_sessions", minimum=1),
         parallel_pipelines=bool(server.get("parallel_pipelines", True)),
         lead_role=lead_role,
-        explorer_role=explorer_role,
         extract_role=extract_role,
         summarize_role=summarize_role,
         tracing_enabled=bool(tracing.get("enabled", False))
@@ -788,13 +767,6 @@ def build_eval_config(
         default_provider="openrouter",
         default_model="qwen/qwen3-coder-30b-a3b-instruct",
     )
-    explorer_role = _build_llm_role(
-        roles.get("explorer", {})
-        if isinstance(roles.get("explorer", {}), dict)
-        else {},
-        default_provider=lead_role.provider,
-        default_model=lead_role.model,
-    )
     extract_role = _build_dspy_role(
         roles.get("extract", {}) if isinstance(roles.get("extract", {}), dict) else {},
         default_provider="ollama",
@@ -856,7 +828,6 @@ def build_eval_config(
         sync_max_sessions=_require_int(server, "sync_max_sessions", minimum=1),
         parallel_pipelines=bool(server.get("parallel_pipelines", True)),
         lead_role=lead_role,
-        explorer_role=explorer_role,
         extract_role=extract_role,
         summarize_role=summarize_role,
         tracing_enabled=bool(tracing.get("enabled", False))
@@ -893,7 +864,6 @@ if __name__ == "__main__":
     assert cfg.lead_role.provider
     assert cfg.lead_role.model
     assert isinstance(cfg.lead_role.fallback_models, tuple)
-    assert cfg.explorer_role.provider
     assert cfg.extract_role.provider
     assert cfg.extract_role.max_window_tokens >= 1000
     assert cfg.extract_role.window_overlap_tokens >= 0
@@ -907,7 +877,6 @@ if __name__ == "__main__":
     assert isinstance(cfg.projects, dict)
     payload = cfg.public_dict()
     assert "lead_role" in payload
-    assert "explorer_role" in payload
     assert "extract_role" in payload
     assert "summarize_role" in payload
     assert "decay_enabled" in payload

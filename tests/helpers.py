@@ -42,15 +42,6 @@ def make_config(base: Path) -> Config:
             max_iterations=10,
             openrouter_provider_order=(),
         ),
-        explorer_role=LLMRoleConfig(
-            provider="openrouter",
-            model="x-ai/grok-4.1-fast",
-            api_base="",
-            fallback_models=(),
-            timeout_seconds=180,
-            max_iterations=8,
-            openrouter_provider_order=(),
-        ),
         extract_role=DSPyRoleConfig(
             provider="openrouter",
             model="openai/gpt-5-nano",

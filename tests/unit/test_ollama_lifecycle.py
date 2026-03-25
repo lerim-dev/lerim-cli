@@ -60,15 +60,6 @@ def _make_ollama_config(
             max_iterations=10,
             openrouter_provider_order=(),
         ),
-        explorer_role=LLMRoleConfig(
-            provider=lead_provider,
-            model=lead_model,
-            api_base="",
-            fallback_models=(),
-            timeout_seconds=180,
-            max_iterations=8,
-            openrouter_provider_order=(),
-        ),
         extract_role=DSPyRoleConfig(
             provider=extract_provider,
             model=extract_model,

@@ -45,17 +45,6 @@ max_iterations = 10
 openrouter_provider_order = []
 thinking = true                        # enable model thinking/reasoning (Ollama Qwen 3.5)
 
-[roles.explorer]
-provider = "minimax"
-model = "MiniMax-M2.5"
-api_base = ""
-fallback_models = ["zai:glm-4.7"]
-timeout_seconds = 180
-max_iterations = 8
-openrouter_provider_order = []
-thinking = true
-max_explorers = 4                     # max parallel explorer subagents per lead turn (set 1 for local/Ollama models)
-
 [roles.extract]
 provider = "minimax"
 model = "MiniMax-M2.5"
@@ -178,7 +167,7 @@ HTTP server and daemon loop configuration.
 Four roles control which LLM handles each task. See [Model Roles](model-roles.md)
 for a full breakdown.
 
-**Orchestration roles** (`lead`, `explorer`) -- used by PydanticAI agents:
+**Orchestration role** (`lead`) -- used by OpenAI Agents SDK agents:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -187,10 +176,9 @@ for a full breakdown.
 | `api_base` | string | `""` | Custom API base URL. Empty = use provider default from `[providers]`. |
 | `fallback_models` | list | `[]` | Fallback model chain (format: `"model"` or `"provider:model"`). |
 | `timeout_seconds` | int | `300`/`180` | Request timeout. |
-| `max_iterations` | int | `10`/`8` | Max agent tool-call iterations. |
+| `max_iterations` | int | `10` | Max agent tool-call iterations. |
 | `openrouter_provider_order` | list | `[]` | OpenRouter-specific provider ordering preference. |
 | `thinking` | bool | `true` | Enable model thinking/reasoning. Set `false` for non-reasoning models. |
-| `max_explorers` | int | `4` | Explorer only. Max parallel explorer subagents the lead dispatches per tool-call turn. Set `1` for local/Ollama models. |
 
 **DSPy roles** (`extract`, `summarize`) -- used by DSPy ChainOfThought pipelines:
 

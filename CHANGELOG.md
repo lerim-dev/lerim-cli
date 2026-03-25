@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.69] - 2026-03-25
+
+### Breaking
+
+- Removed PydanticAI dependency — all agent operations now use OpenAI Agents SDK.
+- Removed explorer subagent — replaced by Codex filesystem sub-agent.
+- Removed custom filesystem tools (read, write, edit, glob, grep) — Codex handles all filesystem ops.
+- Removed `[roles.explorer]` config section (kept in default.toml for compatibility but unused).
+
+### Added
+
+- OpenAI Agents SDK with LitellmModel for multi-provider support (MiniMax, ZAI, OpenRouter, OpenAI, Ollama, MLX).
+- Codex tool as intelligent filesystem sub-agent with kernel-level sandboxing.
+- ResponsesProxy — built-in Responses API → Chat Completions proxy for non-OpenAI providers (no external proxy needed).
+- Cross-session intelligence in maintain: signal amplification, contradiction detection, gap detection.
+- Cross-agent knowledge synthesis: detects patterns across Claude, Cursor, Codex, OpenCode sessions.
+- Hot-memory curation: auto-generated `.lerim/hot-memory.md` (~2000 tokens) with Active Decisions, Key Learnings, Recent Context, Watch Out.
+- Memory outcome field (worked/failed/unknown) for feedback tracking.
+- Docker container hardening: read_only root, cap_drop ALL, seccomp profile, mount only .lerim/ dirs.
+- Dashboard Intelligence tab: memory health score, contradictions, signals, gaps, cross-agent insights.
+
 ## [0.1.68] - 2026-03-21
 
 ### Added

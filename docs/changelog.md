@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-25
+
+### Changed
+
+- **Migrated from PydanticAI to OpenAI Agents SDK** -- the lead agent now runs on the OpenAI Agents SDK. Non-OpenAI providers are supported via `ResponsesProxy` (translates Responses API to Chat Completions via LiteLLM).
+- **Removed explorer subagent** -- filesystem operations (glob, grep, read) are now handled by Codex instead of a PydanticAI explorer subagent.
+- Removed `max_explorers` config option (no longer applicable).
+- Removed `[roles.explorer]` config section.
+- Runtime module reorganized: `agent.py` replaced by `oai_agent.py`, `tools.py`/`subagents.py` replaced by `oai_tools.py`, `oai_providers.py`, `oai_context.py`, `responses_proxy.py`, `helpers.py`.
+
+### Removed
+
+- PydanticAI dependency and all PydanticAI-specific code.
+
 ## [0.1.65] - 2026-03-14
 
 ### Added

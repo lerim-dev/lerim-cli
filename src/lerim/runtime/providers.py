@@ -9,7 +9,7 @@ import dspy
 
 from lerim.config.settings import Config, DSPyRoleConfig, LLMRoleConfig, get_config
 
-RoleName = Literal["lead", "explorer"]
+RoleName = Literal["lead"]
 DSPyRoleName = Literal["extract", "summarize"]
 
 
@@ -23,9 +23,7 @@ class FallbackSpec:
 
 def _role_config(config: Config, role: RoleName) -> LLMRoleConfig:
 	"""Return orchestration role config from runtime config."""
-	if role == "lead":
-		return config.lead_role
-	return config.explorer_role
+	return config.lead_role
 
 
 def _dspy_role_config(config: Config, role: DSPyRoleName) -> DSPyRoleConfig:

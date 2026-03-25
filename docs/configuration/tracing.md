@@ -91,9 +91,8 @@ When tracing is enabled, Lerim calls `configure_tracing()` once before any agent
 is constructed. This:
 
 1. Configures Logfire with `service_name="lerim"` and `send_to_logfire="if-token-present"`
-2. Instruments PydanticAI agents (`logfire.instrument_pydantic_ai()`)
-3. Instruments DSPy pipelines (`logfire.instrument_dspy()`)
-4. Optionally instruments httpx (`logfire.instrument_httpx()`) if `include_httpx = true`
+2. Instruments DSPy pipelines (`logfire.instrument_dspy()`)
+3. Optionally instruments httpx (`logfire.instrument_httpx()`) if `include_httpx = true`
 
 ## Viewing traces
 
