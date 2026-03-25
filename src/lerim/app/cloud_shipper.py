@@ -10,7 +10,6 @@ Uses only stdlib ``urllib.request`` for HTTP — no third-party HTTP deps.
 from __future__ import annotations
 
 import asyncio
-import gzip
 import json
 import sqlite3
 import urllib.error
@@ -475,8 +474,6 @@ def _scan_memory_files(
 
     Returns a list of dicts ready for JSON serialization.
     """
-    import re
-
     results: list[dict[str, Any]] = []
     for project_name, project_path_str in projects.items():
         memory_root = Path(project_path_str) / ".lerim" / "memory"

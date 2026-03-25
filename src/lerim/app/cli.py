@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 import time
 import urllib.error
@@ -28,7 +27,6 @@ from lerim.adapters.registry import (
 )
 
 from lerim.app.api import (
-    COMPOSE_PATH,
     api_project_add,
     api_project_list,
     api_project_remove,

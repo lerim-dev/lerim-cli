@@ -19,7 +19,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from lerim.config.project_scope import git_root_for, resolve_data_dirs
+from lerim.config.project_scope import resolve_data_dirs
 
 PACKAGE_DIR = Path(__file__).parent
 DEFAULT_CONFIG_PATH = PACKAGE_DIR / "default.toml"

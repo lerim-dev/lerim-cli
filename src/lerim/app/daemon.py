@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from lerim.app.activity_log import log_activity
-from lerim.app.arg_utils import parse_duration_to_seconds
 from lerim.config.project_scope import match_session_project
 from lerim.config.settings import get_config, reload_config
 from lerim.runtime.agent import LerimAgent
