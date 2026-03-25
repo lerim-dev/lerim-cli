@@ -52,6 +52,7 @@ from lerim.runtime.prompts.oai_maintain import (
 	build_oai_maintain_artifact_paths,
 	build_oai_maintain_prompt,
 )
+from lerim.runtime.prompts.oai_ask import build_oai_ask_prompt
 from lerim.runtime.prompts.oai_sync import build_oai_sync_prompt
 from lerim.runtime.responses_proxy import ResponsesProxy
 
@@ -59,7 +60,7 @@ logger = logging.getLogger("lerim.runtime.oai")
 
 
 class LerimOAIAgent:
-	"""Lead runtime wrapper for the OpenAI Agents SDK sync and maintain flows."""
+	"""Lead runtime wrapper for OpenAI Agents SDK sync, maintain, and ask flows."""
 
 	def __init__(
 		self,
@@ -679,3 +680,131 @@ class LerimOAIAgent:
 					logger.warning(
 						"[maintain] Failed to stop proxy: %s", exc
 					)
+
+	# ------------------------------------------------------------------
+	# Ask flow
+	# ------------------------------------------------------------------
+
+	@staticmethod
+	def generate_session_id() -> str:
+		"""Generate a unique session ID for ask mode."""
+		import secrets
+		return f"lerim-{secrets.token_hex(6)}"
+
+	def _build_ask_agent(
+		self,
+		*,
+		prompt: str,
+		memory_root: Path,
+		codex_opts: dict,
+		thread_opts: dict,
+	) -> Agent[OAIRuntimeContext]:
+		"""Build the OAI Agent for the ask flow.
+
+		Read-only Codex sandbox — the ask agent can search/read memories
+		but cannot modify them.
+		"""
+		clean_codex_opts = {
+			k: v
+			for k, v in codex_opts.items()
+			if k not in ("backend_url", "backend_api_key")
+		}
+
+		agent: Agent[OAIRuntimeContext] = Agent(
+			name="LerimAsk",
+			instructions=prompt,
+			model=self._lead_model,
+			tools=[
+				codex_tool(
+					codex_options=CodexOptions(**clean_codex_opts),
+					sandbox_mode="read-only",
+					working_directory=str(memory_root),
+					skip_git_repo_check=True,
+					default_thread_options=ThreadOptions(**thread_opts),
+					default_turn_options=TurnOptions(idle_timeout_seconds=60),
+				),
+			],
+		)
+		return agent
+
+	def ask(
+		self,
+		prompt: str,
+		session_id: str | None = None,
+		cwd: str | None = None,
+		memory_root: str | Path | None = None,
+	) -> tuple[str, str, float]:
+		"""Run one ask prompt via OAI agent. Returns (response, session_id, cost_usd).
+
+		The ask agent uses Codex in read-only mode to search and read
+		memory files. It cannot modify any files.
+
+		Args:
+			prompt: The user's question.
+			session_id: Optional session ID (generated if not provided).
+			cwd: Working directory override.
+			memory_root: Memory directory override.
+
+		Returns:
+			(response_text, session_id, cost_usd) tuple.
+		"""
+		runtime_cwd = (
+			Path(cwd or self._default_cwd or str(Path.cwd())).expanduser().resolve()
+		)
+		resolved_memory_root = (
+			Path(memory_root).expanduser().resolve()
+			if memory_root
+			else self.config.memory_dir
+		)
+		resolved_session_id = session_id or self.generate_session_id()
+
+		ctx = build_oai_context(
+			repo_root=runtime_cwd,
+			memory_root=resolved_memory_root,
+			run_id=resolved_session_id,
+			config=self.config,
+		)
+
+		ask_prompt = build_oai_ask_prompt(
+			question=prompt,
+			hits=[],
+			context_docs=[],
+			memory_root=str(resolved_memory_root),
+		)
+
+		# Prepare codex options — start proxy if needed
+		codex_opts = dict(self._codex_opts)
+		proxy_started = False
+		try:
+			if self._needs_proxy and self._proxy is not None:
+				proxy_url = self._proxy.start()
+				proxy_started = True
+				codex_opts["base_url"] = proxy_url
+
+			agent = self._build_ask_agent(
+				prompt=ask_prompt,
+				memory_root=resolved_memory_root,
+				codex_opts=codex_opts,
+				thread_opts=self._thread_opts,
+			)
+
+			start_cost_tracking()
+			result = asyncio.run(
+				Runner.run(
+					agent, ask_prompt, context=ctx,
+					max_turns=15,
+				)
+			)
+			cost_usd = stop_cost_tracking()
+
+			response_text = str(
+				result.final_output or ""
+			).strip() or "(no response)"
+			return response_text, resolved_session_id, cost_usd
+
+		finally:
+			if proxy_started and self._proxy is not None:
+				try:
+					self._proxy.stop()
+				except Exception as exc:
+					logger.warning("[ask] Failed to stop proxy: %s", exc)

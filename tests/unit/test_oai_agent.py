@@ -10,6 +10,7 @@ import pytest
 
 from lerim.config.settings import LLMRoleConfig
 from lerim.runtime.oai_agent import LerimOAIAgent
+from lerim.runtime.prompts.oai_ask import build_oai_ask_prompt
 from lerim.runtime.prompts.oai_maintain import (
 	build_oai_maintain_artifact_paths,
 	build_oai_maintain_prompt,
@@ -353,3 +354,60 @@ def test_memory_record_no_outcome_in_frontmatter():
 	)
 	fm = r.to_frontmatter_dict()
 	assert "outcome" not in fm
+
+
+# ---------------------------------------------------------------------------
+# Ask prompt tests (no LLM calls)
+# ---------------------------------------------------------------------------
+
+
+def test_oai_ask_prompt_contains_question():
+	"""Ask prompt should embed the user question."""
+	prompt = build_oai_ask_prompt("how to deploy", [], [])
+	assert "how to deploy" in prompt
+
+
+def test_oai_ask_prompt_references_codex():
+	"""Ask prompt should reference codex, not explore/grep/glob tools."""
+	prompt = build_oai_ask_prompt("test", [], [], memory_root="/tmp/memory")
+	assert "codex" in prompt.lower()
+	assert "explore()" not in prompt
+
+
+def test_oai_ask_prompt_with_memory_root():
+	"""Ask prompt with memory_root should include search guidance."""
+	prompt = build_oai_ask_prompt("test", [], [], memory_root="/tmp/memory")
+	assert "Memory root: /tmp/memory" in prompt
+	assert "decisions/*.md" in prompt
+	assert "learnings/*.md" in prompt
+
+
+def test_oai_ask_prompt_without_memory_root():
+	"""Ask prompt without memory_root should skip search guidance."""
+	prompt = build_oai_ask_prompt("test", [], [])
+	assert "Memory root" not in prompt
+
+
+def test_oai_ask_prompt_with_hits():
+	"""Ask prompt should include pre-fetched hits."""
+	hits = [{"id": "mem-1", "confidence": 0.9, "title": "Deploy tips", "_body": "Use CI."}]
+	prompt = build_oai_ask_prompt("deploy?", hits, [])
+	assert "mem-1" in prompt
+	assert "Deploy tips" in prompt
+
+
+def test_oai_ask_prompt_with_context_docs():
+	"""Ask prompt should include context docs."""
+	docs = [{"doc_id": "doc-1", "title": "CI Setup", "body": "Configure pipelines."}]
+	prompt = build_oai_ask_prompt("deploy?", [], docs)
+	assert "doc-1" in prompt
+	assert "CI Setup" in prompt
+
+
+def test_oai_agent_ask_generates_session_id(tmp_path):
+	"""ask() generates a session ID when not provided."""
+	cfg = make_config(tmp_path)
+	agent = LerimOAIAgent(default_cwd=str(tmp_path), config=cfg)
+	sid = agent.generate_session_id()
+	assert sid.startswith("lerim-")
+	assert len(sid) > 8
