@@ -60,9 +60,7 @@ def _build_litellm_model(
 	if provider_name == "opencode_go":
 		api_key = _api_key_for_provider(config, "opencode_go")
 		base = api_base or _default_api_base("opencode_go", config)
-		# kimi/glm use chat completions (openai/ prefix), minimax uses anthropic messages
-		if any(model.startswith(p) for p in ("minimax",)):
-			return LitellmModel(model=f"anthropic/{model}", api_key=api_key, base_url=base or None)
+		# All Go models work on the Chat Completions endpoint
 		return LitellmModel(model=f"openai/{model}", api_key=api_key, base_url=base or None)
 
 	if provider_name in {"zai", "openai"}:
@@ -188,7 +186,7 @@ def build_codex_options(
 			"zai": "https://open.bigmodel.cn/api/paas/v4",
 			"ollama": "http://127.0.0.1:11434/v1",
 			"mlx": "http://127.0.0.1:8000/v1",
-			"opencode_go": "https://api.opencode.go/v1",
+			"opencode_go": "https://opencode.ai/zen/go/v1",
 		}
 		backend_url = defaults.get(provider, "")
 

@@ -124,9 +124,6 @@ def _build_dspy_lm_for_provider(
 		if not api_key:
 			raise RuntimeError(f"missing_api_key:OPENCODE_API_KEY required for {role_label}")
 		base = api_base or _default_api_base("opencode_go")
-		# kimi/glm models use chat completions, minimax models use anthropic messages
-		if any(model.startswith(p) for p in ("minimax",)):
-			return dspy.LM(f"anthropic/{model}", api_key=api_key, api_base=base, cache=False, max_tokens=max_tokens)
 		return dspy.LM(f"openai/{model}", api_key=api_key, api_base=base, cache=False, max_tokens=max_tokens)
 	if provider in {"zai", "openai", "minimax"}:
 		api_key = _api_key_for_provider(cfg, provider)

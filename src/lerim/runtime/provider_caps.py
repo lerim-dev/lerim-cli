@@ -21,9 +21,7 @@ PROVIDER_CAPABILITIES: dict[str, dict] = {
 		"codex_needs_proxy": True,
 		"codex_wire_format": "chat_completions",
 		"api_key_env": "OPENCODE_API_KEY",
-		"codex_models": ["kimi-k2.5", "glm-5"],
-		"codex_blocked_models": ["minimax-m2.7", "minimax-m2.5"],
-		"lead_models": ["minimax-m2.7", "minimax-m2.5", "kimi-k2.5", "glm-5"],
+		"models": ["minimax-m2.7", "minimax-m2.5", "kimi-k2.5", "glm-5"],
 	},
 	"zai": {
 		"roles": ["lead", "codex", "extract", "summarize"],
