@@ -389,6 +389,7 @@ services:
     mem_limit: 2g
     tmpfs:
       - /tmp:size=100M
+      - {home}/.dspy_cache:size=50M
     environment:
 {env_block}
     volumes:

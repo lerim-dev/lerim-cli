@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -48,6 +49,7 @@ from lerim.sessions.catalog import (
     fetch_session_doc,
     init_sessions_db,
     latest_service_run,
+    list_session_jobs,
     list_sessions_window,
 )
 
@@ -1126,6 +1128,87 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
         }
         self._json(payload)
 
+    def _api_live(self) -> None:
+        """Lightweight live-status endpoint for frequent polling.
+
+        Designed for 2-3 second poll intervals from the cloud dashboard.
+        Avoids heavy queries: uses count aggregates and thread enumeration.
+        """
+        now = datetime.now(timezone.utc)
+
+        # -- Active background threads (sync-* / maintain-*) --
+        sync_threads: list[str] = []
+        maintain_threads: list[str] = []
+        proxy_thread_alive = False
+        for t in threading.enumerate():
+            name = t.name or ""
+            if name.startswith("sync-"):
+                sync_threads.append(name)
+            elif name.startswith("maintain-"):
+                maintain_threads.append(name)
+            elif "ResponsesProxy" in name or "responses-proxy" in name.lower():
+                proxy_thread_alive = True
+
+        # -- Queue counts (single lightweight GROUP BY) --
+        queue = count_session_jobs_by_status()
+
+        # -- Running job run_ids (small result set) --
+        running_jobs = list_session_jobs(limit=50, status="running")
+        running_run_ids = [
+            str(j.get("run_id") or "") for j in running_jobs if j.get("run_id")
+        ]
+
+        # -- Latest sync / maintain service runs --
+        last_sync_raw = latest_service_run("sync")
+        last_maintain_raw = latest_service_run("maintain")
+
+        def _format_service_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
+            if run is None:
+                return None
+            details = run.get("details") or {}
+            started = run.get("started_at")
+            completed = run.get("completed_at")
+            duration_ms: int | None = None
+            if started and completed:
+                try:
+                    t0 = datetime.fromisoformat(started)
+                    t1 = datetime.fromisoformat(completed)
+                    duration_ms = int((t1 - t0).total_seconds() * 1000)
+                except (ValueError, TypeError):
+                    pass
+            return {
+                "status": run.get("status"),
+                "started_at": started,
+                "completed_at": completed,
+                "duration_ms": duration_ms,
+                "sessions_processed": details.get("sessions_processed")
+                    or details.get("indexed")
+                    or details.get("enqueued"),
+            }
+
+        # -- Proxy status: check if any ResponsesProxy server thread is alive --
+        # Also look for the thread name pattern used by ThreadingHTTPServer
+        if not proxy_thread_alive:
+            for t in threading.enumerate():
+                if t.daemon and "HTTPServer" in type(t).__name__:
+                    # Cannot reliably distinguish; leave as False
+                    pass
+
+        payload = {
+            "timestamp": now.isoformat(),
+            "sync_active": len(sync_threads) > 0,
+            "sync_threads": sync_threads,
+            "maintain_active": len(maintain_threads) > 0,
+            "maintain_threads": maintain_threads,
+            "sync_sessions_processing": queue.get("running", 0),
+            "queue": queue,
+            "running_run_ids": running_run_ids,
+            "last_sync": _format_service_run(last_sync_raw),
+            "last_maintain": _format_service_run(last_maintain_raw),
+            "proxy_running": proxy_thread_alive,
+        }
+        self._json(payload)
+
     def _api_refine_report(self) -> None:
         """Return cached or freshly built extraction quality report."""
         now = datetime.now(timezone.utc)
@@ -1176,6 +1259,7 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
         no_query_handlers = {
             "/api/health": lambda: self._json(api_health()),
             "/api/status": lambda: self._json(api_status()),
+            "/api/live": self._api_live,
             "/api/connect": lambda: self._json({"platforms": api_connect_list()}),
             "/api/project/list": lambda: self._json({"projects": api_project_list()}),
             "/api/memory-graph/options": self._api_memory_graph_options,

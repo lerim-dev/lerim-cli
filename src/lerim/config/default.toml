@@ -27,24 +27,24 @@ parallel_pipelines = true               # run extract + summarize in the same to
 
 [roles.lead]
 provider = "opencode_go"               # opencode_go | minimax | zai | openrouter | openai | ollama
-model = "minimax-m2.5"                 # OpenCode Go model IDs: minimax-m2.7, minimax-m2.5, kimi-k2.5, glm-5
+model = "minimax-m2.5"                 # OpenCode Go models: minimax-m2.7, minimax-m2.5, kimi-k2.5, glm-5
 api_base = ""
 fallback_models = []
 timeout_seconds = 600
 max_iterations = 30
+max_turns_sync = 50                    # max tool calls for lead agent in sync flow
+max_turns_maintain = 100               # max tool calls for lead agent in maintain flow
+max_turns_ask = 30                     # max tool calls for lead agent in ask flow
 openrouter_provider_order = []
 thinking = true
 max_tokens = 32000
 
 [roles.codex]
-provider = "opencode_go"               # Provider for the Codex filesystem sub-agent
-model = "minimax-m2.5"                    # Codex model (kimi-k2.5 recommended for filesystem ops)
+provider = "opencode_go"               # provider for Codex filesystem sub-agent
+model = "minimax-m2.5"                 # model used by Codex CLI for filesystem ops
 api_base = ""
-timeout_seconds = 600
-max_turns_sync = 50                    # Max LLM turns for sync flow
-max_turns_maintain = 100               # Max LLM turns for maintain flow
-max_turns_ask = 30                     # Max LLM turns for ask flow
-idle_timeout_seconds = 120             # Codex tool idle timeout
+timeout_seconds = 600                  # per Codex call timeout
+idle_timeout_seconds = 120             # Codex idle timeout before giving up
 
 [roles.extract]
 provider = "opencode_go"
@@ -52,7 +52,7 @@ model = "minimax-m2.5"                 # DSPy extraction model
 api_base = ""
 fallback_models = []
 timeout_seconds = 300
-max_window_tokens = 300000
+max_window_tokens = 150000
 window_overlap_tokens = 5000
 openrouter_provider_order = []
 thinking = true
@@ -65,7 +65,7 @@ model = "minimax-m2.5"                 # DSPy summarization model
 api_base = ""
 fallback_models = []
 timeout_seconds = 300
-max_window_tokens = 300000
+max_window_tokens = 150000
 window_overlap_tokens = 5000
 openrouter_provider_order = []
 thinking = true

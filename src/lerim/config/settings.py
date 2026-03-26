@@ -31,7 +31,7 @@ _LAST_CONFIG_SOURCES: list[dict[str, str]] = []
 
 @dataclass(frozen=True)
 class LLMRoleConfig:
-    """Role config for PydanticAI orchestration agents."""
+    """Role config for lead orchestration agent."""
 
     provider: str
     model: str
@@ -43,6 +43,9 @@ class LLMRoleConfig:
     thinking: bool = True
     max_tokens: int = 32000
     max_explorers: int = 4
+    max_turns_sync: int = 50
+    max_turns_maintain: int = 100
+    max_turns_ask: int = 30
 
 
 @dataclass(frozen=True)
@@ -65,13 +68,10 @@ class DSPyRoleConfig:
 @dataclass(frozen=True)
 class CodexRoleConfig:
 	"""Configuration for the Codex filesystem sub-agent."""
-	provider: str = "minimax"
-	model: str = "MiniMax-M2.5"
+	provider: str = "opencode_go"
+	model: str = "minimax-m2.5"
 	api_base: str = ""
-	timeout_seconds: int = 300
-	max_turns_sync: int = 50
-	max_turns_maintain: int = 50
-	max_turns_ask: int = 15
+	timeout_seconds: int = 600
 	idle_timeout_seconds: int = 120
 
 
@@ -363,8 +363,6 @@ class Config:
             "codex_role": {
                 "provider": self.codex_role.provider,
                 "model": self.codex_role.model,
-                "max_turns_sync": self.codex_role.max_turns_sync,
-                "max_turns_maintain": self.codex_role.max_turns_maintain,
                 "idle_timeout_seconds": self.codex_role.idle_timeout_seconds,
             },
             "extract_role": {
@@ -436,6 +434,9 @@ def _build_llm_role(
         thinking=bool(raw.get("thinking", True)),
         max_tokens=int(raw.get("max_tokens", 32000)),
         max_explorers=int(raw.get("max_explorers", 4)),
+        max_turns_sync=int(raw.get("max_turns_sync", 50)),
+        max_turns_maintain=int(raw.get("max_turns_maintain", 100)),
+        max_turns_ask=int(raw.get("max_turns_ask", 30)),
     )
 
 
@@ -465,13 +466,10 @@ def _build_dspy_role(
 def _build_codex_role(raw: dict[str, Any]) -> CodexRoleConfig:
 	"""Build Codex filesystem sub-agent role config from TOML payload."""
 	return CodexRoleConfig(
-		provider=_to_non_empty_string(raw.get("provider")) or "minimax",
-		model=_to_non_empty_string(raw.get("model")) or "MiniMax-M2.5",
+		provider=_to_non_empty_string(raw.get("provider")) or "opencode_go",
+		model=_to_non_empty_string(raw.get("model")) or "minimax-m2.5",
 		api_base=_to_non_empty_string(raw.get("api_base")) or "",
-		timeout_seconds=_require_int(raw, "timeout_seconds", minimum=10),
-		max_turns_sync=int(raw.get("max_turns_sync", 50)),
-		max_turns_maintain=int(raw.get("max_turns_maintain", 50)),
-		max_turns_ask=int(raw.get("max_turns_ask", 15)),
+		timeout_seconds=int(raw.get("timeout_seconds", 600)),
 		idle_timeout_seconds=int(raw.get("idle_timeout_seconds", 120)),
 	)
 

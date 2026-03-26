@@ -14,6 +14,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+import litellm
+litellm.turn_off_message_logging = True
+litellm.suppress_debug_info = True
+
 from agents import Agent, Runner, set_tracing_disabled
 from agents.extensions.experimental.codex import (
 	CodexOptions,
@@ -261,7 +265,7 @@ class LerimOAIAgent:
 					result = asyncio.run(
 						Runner.run(
 							agent, prompt, context=ctx,
-							max_turns=self._codex_role.max_turns_sync,
+							max_turns=self.config.lead_role.max_turns_sync,
 						)
 					)
 					response_text = str(
@@ -560,7 +564,7 @@ class LerimOAIAgent:
 					result = asyncio.run(
 						Runner.run(
 							agent, prompt, context=ctx,
-							max_turns=self._codex_role.max_turns_maintain,
+							max_turns=self.config.lead_role.max_turns_maintain,
 						)
 					)
 					response_text = str(
@@ -815,7 +819,7 @@ class LerimOAIAgent:
 			result = asyncio.run(
 				Runner.run(
 					agent, ask_prompt, context=ctx,
-					max_turns=self._codex_role.max_turns_ask,
+					max_turns=self.config.lead_role.max_turns_ask,
 				)
 			)
 			cost_usd = stop_cost_tracking()

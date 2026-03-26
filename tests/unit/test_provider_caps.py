@@ -33,17 +33,10 @@ class TestValidateProviderForRole:
 		with pytest.raises(RuntimeError, match="does not support role 'summarize'"):
 			validate_provider_for_role("mlx", "summarize")
 
-	def test_blocked_codex_model_raises_with_allowed(self):
-		"""Blocked codex model on opencode_go should raise and list allowed models."""
-		with pytest.raises(RuntimeError, match="cannot be used for Codex") as exc_info:
-			validate_provider_for_role("opencode_go", "codex", model="minimax-m2.7")
-		msg = str(exc_info.value)
-		assert "kimi-k2.5" in msg
-		assert "glm-5" in msg
-
-	def test_non_blocked_codex_model_passes(self):
-		"""A codex-compatible model on opencode_go should not raise."""
-		validate_provider_for_role("opencode_go", "codex", model="kimi-k2.5")
+	def test_all_opencode_go_models_valid_for_codex(self):
+		"""All opencode_go models should work for codex (chat completions endpoint)."""
+		for m in ["minimax-m2.7", "minimax-m2.5", "kimi-k2.5", "glm-5"]:
+			validate_provider_for_role("opencode_go", "codex", model=m)
 
 
 class TestGetMissingApiKeyMessage:
