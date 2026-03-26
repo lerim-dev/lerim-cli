@@ -19,8 +19,8 @@ recent_access_grace_days = 30       # recently accessed memories skip archiving
 [server]
 host = "127.0.0.1"
 port = 8765
-sync_interval_minutes = 10          # sync hot path interval
-maintain_interval_minutes = 60      # maintain cold path interval
+sync_interval_minutes = 30          # sync hot path interval
+maintain_interval_minutes = 720      # 12 hours
 sync_window_days = 7
 sync_max_sessions = 50
 parallel_pipelines = true               # run extract + summarize in the same tool turn (set false for local/Ollama models)
@@ -30,11 +30,21 @@ provider = "minimax"                   # minimax | zai | openrouter | openai
 model = "MiniMax-M2.5"
 api_base = ""
 fallback_models = ["zai:glm-4.7"]
-timeout_seconds = 300
-max_iterations = 10
+timeout_seconds = 600
+max_iterations = 30
 openrouter_provider_order = []
 thinking = true                        # enable model thinking/reasoning (Ollama Qwen 3.5)
 max_tokens = 32000                     # max output tokens for LLM responses (lower for OpenAI models, e.g. 16384)
+
+[roles.codex]
+provider = "minimax"                    # Provider for the Codex filesystem sub-agent
+model = "MiniMax-M2.5"                  # Model used by Codex CLI for filesystem operations
+api_base = ""
+timeout_seconds = 300
+max_turns_sync = 50                     # Max LLM turns for sync flow
+max_turns_maintain = 50                 # Max LLM turns for maintain flow
+max_turns_ask = 15                      # Max LLM turns for ask flow
+idle_timeout_seconds = 120              # Codex tool idle timeout
 
 [roles.extract]
 provider = "minimax"
@@ -73,6 +83,7 @@ ollama = "http://127.0.0.1:11434"
 # Docker: use "http://host.docker.internal:11434" if Ollama runs on the host.
 litellm_proxy = "http://127.0.0.1:4000"
 mlx = "http://127.0.0.1:8000/v1"
+opencode_go = "https://opencode.ai/zen/go/v1"
 auto_unload = true                     # unload Ollama models after each sync/maintain cycle to free RAM
 
 [tracing]

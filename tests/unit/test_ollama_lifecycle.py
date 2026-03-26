@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from lerim.config.settings import Config, DSPyRoleConfig, LLMRoleConfig
+from lerim.config.settings import CodexRoleConfig, Config, DSPyRoleConfig, LLMRoleConfig
 from lerim.runtime.ollama_lifecycle import (
     _ollama_models,
     ollama_lifecycle,
@@ -60,6 +60,7 @@ def _make_ollama_config(
             max_iterations=10,
             openrouter_provider_order=(),
         ),
+        codex_role=CodexRoleConfig(),
         extract_role=DSPyRoleConfig(
             provider=extract_provider,
             model=extract_model,
@@ -89,6 +90,7 @@ def _make_ollama_config(
         zai_api_key=None,
         openrouter_api_key=None,
         minimax_api_key=None,
+        opencode_api_key=None,
         provider_api_bases={
             "ollama": "http://127.0.0.1:11434",
         },

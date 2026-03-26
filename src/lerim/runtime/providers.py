@@ -50,6 +50,8 @@ def _api_key_for_provider(config: Config, provider: str) -> str | None:
 		return config.anthropic_api_key
 	if provider == "minimax":
 		return config.minimax_api_key
+	if provider == "opencode_go":
+		return config.opencode_api_key
 	return None
 
 
@@ -117,6 +119,15 @@ def _build_dspy_lm_for_provider(
 			max_tokens=max_tokens,
 			extra_body=extra_body,
 		)
+	if provider == "opencode_go":
+		api_key = _api_key_for_provider(cfg, "opencode_go")
+		if not api_key:
+			raise RuntimeError(f"missing_api_key:OPENCODE_API_KEY required for {role_label}")
+		base = api_base or _default_api_base("opencode_go")
+		# kimi/glm models use chat completions, minimax models use anthropic messages
+		if any(model.startswith(p) for p in ("minimax",)):
+			return dspy.LM(f"anthropic/{model}", api_key=api_key, api_base=base, cache=False, max_tokens=max_tokens)
+		return dspy.LM(f"openai/{model}", api_key=api_key, api_base=base, cache=False, max_tokens=max_tokens)
 	if provider in {"zai", "openai", "minimax"}:
 		api_key = _api_key_for_provider(cfg, provider)
 		env_name = {
@@ -201,6 +212,7 @@ def list_provider_models(provider: str) -> list[str]:
 			"mlx-community/Qwen3.5-27B-4bit",
 			"mlx-community/Qwen3.5-35B-A3B-4bit",
 		],
+		"opencode_go": ["kimi-k2.5", "glm-5", "minimax-m2.7", "minimax-m2.5"],
 	}
 	return list(options.get(normalized, []))
 

@@ -148,7 +148,8 @@ def test_oai_agent_init_minimax(tmp_path):
 
 
 def test_oai_agent_init_openai_no_proxy(tmp_path):
-	"""OpenAI provider should not need a proxy."""
+	"""OpenAI provider for both lead and codex should not need a proxy."""
+	from lerim.config.settings import CodexRoleConfig
 	cfg = make_config(tmp_path)
 	openai_role = LLMRoleConfig(
 		provider="openai",
@@ -159,7 +160,8 @@ def test_oai_agent_init_openai_no_proxy(tmp_path):
 		max_iterations=10,
 		openrouter_provider_order=(),
 	)
-	cfg = replace(cfg, lead_role=openai_role, openai_api_key="test-key")
+	openai_codex = CodexRoleConfig(provider="openai", model="gpt-5-mini")
+	cfg = replace(cfg, lead_role=openai_role, codex_role=openai_codex, openai_api_key="test-key")
 	agent = LerimOAIAgent(default_cwd=str(tmp_path), config=cfg)
 	assert agent._needs_proxy is False
 	assert agent._proxy is None

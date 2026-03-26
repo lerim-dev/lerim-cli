@@ -9,6 +9,7 @@ from __future__ import annotations
 from agents.extensions.models.litellm_model import LitellmModel
 
 from lerim.config.settings import Config, LLMRoleConfig, get_config
+from lerim.runtime.provider_caps import validate_provider_for_role
 from lerim.runtime.providers import (
 	_api_key_for_provider,
 	_default_api_base,
@@ -55,6 +56,14 @@ def _build_litellm_model(
 			api_key="mlx",
 			base_url=f"{base}/v1" if base and not base.endswith("/v1") else base,
 		)
+
+	if provider_name == "opencode_go":
+		api_key = _api_key_for_provider(config, "opencode_go")
+		base = api_base or _default_api_base("opencode_go", config)
+		# kimi/glm use chat completions (openai/ prefix), minimax uses anthropic messages
+		if any(model.startswith(p) for p in ("minimax",)):
+			return LitellmModel(model=f"anthropic/{model}", api_key=api_key, base_url=base or None)
+		return LitellmModel(model=f"openai/{model}", api_key=api_key, base_url=base or None)
 
 	if provider_name in {"zai", "openai"}:
 		api_key = _api_key_for_provider(config, provider_name)
@@ -117,13 +126,19 @@ def build_codex_options(
 	*,
 	config: Config | None = None,
 	role: RoleName = "lead",
+	codex_provider: str | None = None,
+	codex_model: str | None = None,
 ) -> tuple[dict, dict, bool]:
 	"""Build CodexOptions and ThreadOptions kwargs for codex_tool() from lerim config.
 
 	The Codex CLI requires the Responses API wire format. Providers that support it
 	natively (OpenAI, OpenRouter) are used directly. For other providers (MiniMax,
-	ZAI, Ollama, MLX), a local ResponsesProxy is needed to translate
+	ZAI, Ollama, MLX, OpenCode Go), a local ResponsesProxy is needed to translate
 	Responses API → Chat Completions.
+
+	When codex_provider/codex_model are given they override the lead role's
+	provider and model for the Codex sub-agent, allowing lead and codex to
+	use different providers.
 
 	Returns:
 		(codex_options_kwargs, thread_options_kwargs, needs_proxy)
@@ -134,10 +149,16 @@ def build_codex_options(
 	"""
 	cfg = config or get_config()
 	role_cfg = _role_config(cfg, role)
-	provider = role_cfg.provider.strip().lower()
+
+	# Use explicit codex provider/model if provided, otherwise fall back to lead role.
+	provider = (codex_provider or role_cfg.provider).strip().lower()
+	model = codex_model or role_cfg.model
+
+	# Validate the provider can serve the codex role.
+	validate_provider_for_role(provider, "codex", model)
 
 	thread_kwargs = {
-		"model": role_cfg.model,
+		"model": model,
 		"approval_policy": "never",
 		"network_access_enabled": False,
 	}
@@ -167,6 +188,7 @@ def build_codex_options(
 			"zai": "https://open.bigmodel.cn/api/paas/v4",
 			"ollama": "http://127.0.0.1:11434/v1",
 			"mlx": "http://127.0.0.1:8000/v1",
+			"opencode_go": "https://api.opencode.go/v1",
 		}
 		backend_url = defaults.get(provider, "")
 

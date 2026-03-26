@@ -76,6 +76,14 @@ class LerimOAIAgent:
 		self.config = cfg
 		self._default_cwd = default_cwd
 
+		# Validate providers before building anything.
+		from lerim.runtime.provider_caps import validate_provider_for_role
+		validate_provider_for_role(cfg.lead_role.provider, "lead")
+		validate_provider_for_role(cfg.codex_role.provider, "codex", cfg.codex_role.model)
+
+		# Store codex role config for runtime parameters.
+		self._codex_role = cfg.codex_role
+
 		# Build lead model via LitellmModel
 		self._lead_model: LitellmModel = build_oai_model("lead", config=cfg)
 
@@ -84,7 +92,9 @@ class LerimOAIAgent:
 		self._thread_opts: dict
 		self._needs_proxy: bool
 		self._codex_opts, self._thread_opts, self._needs_proxy = build_codex_options(
-			config=cfg
+			config=cfg,
+			codex_provider=cfg.codex_role.provider,
+			codex_model=cfg.codex_role.model,
 		)
 
 		# Proxy instance created lazily but not started yet
@@ -138,7 +148,7 @@ class LerimOAIAgent:
 						**thread_opts,
 						additional_directories=[str(run_folder)],
 					),
-					default_turn_options=TurnOptions(idle_timeout_seconds=120),
+					default_turn_options=TurnOptions(idle_timeout_seconds=self._codex_role.idle_timeout_seconds),
 				),
 				write_memory,
 				extract_pipeline,
@@ -251,7 +261,7 @@ class LerimOAIAgent:
 					result = asyncio.run(
 						Runner.run(
 							agent, prompt, context=ctx,
-							max_turns=30,  # sync needs ~6 steps with tool calls
+							max_turns=self._codex_role.max_turns_sync,
 						)
 					)
 					response_text = str(
@@ -446,7 +456,7 @@ class LerimOAIAgent:
 						**thread_opts,
 						additional_directories=[str(run_folder)],
 					),
-					default_turn_options=TurnOptions(idle_timeout_seconds=120),
+					default_turn_options=TurnOptions(idle_timeout_seconds=self._codex_role.idle_timeout_seconds),
 				),
 				write_memory,
 			],
@@ -550,7 +560,7 @@ class LerimOAIAgent:
 					result = asyncio.run(
 						Runner.run(
 							agent, prompt, context=ctx,
-							max_turns=50,  # maintain needs many turns for 9 steps
+							max_turns=self._codex_role.max_turns_maintain,
 						)
 					)
 					response_text = str(
@@ -734,7 +744,7 @@ class LerimOAIAgent:
 					working_directory=str(memory_root.parent),
 					skip_git_repo_check=True,
 					default_thread_options=ThreadOptions(**thread_opts),
-					default_turn_options=TurnOptions(idle_timeout_seconds=60),
+					default_turn_options=TurnOptions(idle_timeout_seconds=self._codex_role.idle_timeout_seconds),
 				),
 			],
 		)
@@ -805,7 +815,7 @@ class LerimOAIAgent:
 			result = asyncio.run(
 				Runner.run(
 					agent, ask_prompt, context=ctx,
-					max_turns=15,
+					max_turns=self._codex_role.max_turns_ask,
 				)
 			)
 			cost_usd = stop_cost_tracking()
