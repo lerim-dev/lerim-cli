@@ -390,6 +390,10 @@ services:
     tmpfs:
       - /tmp:size=100M
       - {home}/.dspy_cache:size=50M
+      - {home}/.codex:size=50M
+      - {home}/.config:size=10M
+      - /root/.codex:size=50M
+      - /root/.config:size=10M
     environment:
 {env_block}
     volumes:
