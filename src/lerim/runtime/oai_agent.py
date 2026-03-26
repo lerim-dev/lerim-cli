@@ -109,17 +109,20 @@ class LerimOAIAgent:
 		*,
 		prompt: str,
 		memory_root: Path,
+		run_folder: Path,
 		codex_opts: dict,
 		thread_opts: dict,
 	) -> Agent[OAIRuntimeContext]:
 		"""Build the OpenAI Agents SDK Agent with codex and lerim tools."""
-		# Clean codex_opts: remove proxy-construction keys that are not
-		# valid CodexOptions fields.
 		clean_codex_opts = {
 			k: v
 			for k, v in codex_opts.items()
 			if k not in ("backend_url", "backend_api_key")
 		}
+
+		# working_directory = .lerim/ parent so Codex can access both
+		# memory/ (for reading/writing memories) and workspace/ (for reports).
+		lerim_root = str(memory_root.parent)
 
 		agent: Agent[OAIRuntimeContext] = Agent(
 			name="LerimSync",
@@ -129,9 +132,12 @@ class LerimOAIAgent:
 				codex_tool(
 					codex_options=CodexOptions(**clean_codex_opts),
 					sandbox_mode="workspace-write",
-					working_directory=str(memory_root),
+					working_directory=lerim_root,
 					skip_git_repo_check=True,
-					default_thread_options=ThreadOptions(**thread_opts),
+					default_thread_options=ThreadOptions(
+						**thread_opts,
+						additional_directories=[str(run_folder)],
+					),
 					default_turn_options=TurnOptions(idle_timeout_seconds=120),
 				),
 				write_memory,
@@ -222,6 +228,7 @@ class LerimOAIAgent:
 			agent = self._build_agent(
 				prompt=prompt,
 				memory_root=resolved_memory_root,
+				run_folder=run_folder,
 				codex_opts=codex_opts,
 				thread_opts=self._thread_opts,
 			)
@@ -406,6 +413,7 @@ class LerimOAIAgent:
 		*,
 		prompt: str,
 		memory_root: Path,
+		run_folder: Path,
 		codex_opts: dict,
 		thread_opts: dict,
 	) -> Agent[OAIRuntimeContext]:
@@ -414,13 +422,15 @@ class LerimOAIAgent:
 		The maintain agent only has codex_tool + write_memory. No
 		extract/summarize pipelines — those are sync-only.
 		"""
-		# Clean codex_opts: remove proxy-construction keys that are not
-		# valid CodexOptions fields.
 		clean_codex_opts = {
 			k: v
 			for k, v in codex_opts.items()
 			if k not in ("backend_url", "backend_api_key")
 		}
+
+		# working_directory = .lerim/ parent so Codex can access both
+		# memory/ (for reading/editing memories) and workspace/ (for reports).
+		lerim_root = str(memory_root.parent)
 
 		agent: Agent[OAIRuntimeContext] = Agent(
 			name="LerimMaintain",
@@ -430,9 +440,12 @@ class LerimOAIAgent:
 				codex_tool(
 					codex_options=CodexOptions(**clean_codex_opts),
 					sandbox_mode="workspace-write",
-					working_directory=str(memory_root),
+					working_directory=lerim_root,
 					skip_git_repo_check=True,
-					default_thread_options=ThreadOptions(**thread_opts),
+					default_thread_options=ThreadOptions(
+						**thread_opts,
+						additional_directories=[str(run_folder)],
+					),
 					default_turn_options=TurnOptions(idle_timeout_seconds=120),
 				),
 				write_memory,
@@ -514,6 +527,7 @@ class LerimOAIAgent:
 			agent = self._build_maintain_agent(
 				prompt=prompt,
 				memory_root=resolved_memory_root,
+				run_folder=run_folder,
 				codex_opts=codex_opts,
 				thread_opts=self._thread_opts,
 			)
@@ -717,7 +731,7 @@ class LerimOAIAgent:
 				codex_tool(
 					codex_options=CodexOptions(**clean_codex_opts),
 					sandbox_mode="read-only",
-					working_directory=str(memory_root),
+					working_directory=str(memory_root.parent),
 					skip_git_repo_check=True,
 					default_thread_options=ThreadOptions(**thread_opts),
 					default_turn_options=TurnOptions(idle_timeout_seconds=60),
