@@ -39,7 +39,7 @@ flowchart LR
 | 2 | `count_sessions(path)` | Counts how many sessions exist under the given path |
 | 3 | `iter_sessions(traces_dir, start, end, known_run_hashes)` | Yields `SessionRecord` entries within a time window, skipping already-known sessions by hash |
 | 4 | `find_session_path(session_id, traces_dir)` | Locates a specific session file on disk by session ID |
-| 5 | `read_session(session_path, session_id)` | Parses one session file and returns a normalized `ViewerSession` for the dashboard viewer |
+| 5 | `read_session(session_path, session_id)` | Parses one session file and returns a normalized `ViewerSession` for session viewers (e.g. Cloud) |
 
 Adapters handle platform-specific formats (JSONL, SQLite) and normalize them into a common `SessionRecord` that the sync pipeline processes. The `SessionRecord` contains:
 

@@ -110,7 +110,7 @@ nav:
     - lerim memory: cli/memory.md
     - lerim status: cli/status.md
     - lerim serve: cli/serve.md
-    - lerim daemon: cli/daemon.md
+    - Background loop: cli/daemon.md
     - lerim dashboard: cli/dashboard.md
   - Configuration:
     - Overview: configuration/overview.md

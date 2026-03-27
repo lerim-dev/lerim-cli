@@ -16,7 +16,7 @@ Override the test LLM: `LERIM_TEST_PROVIDER=minimax LERIM_TEST_MODEL=MiniMax-M2.
 
 ### Unit (`tests/unit/`, ~455 tests)
 
-Fast, deterministic, no LLM, no network. Covers session adapters (Claude, Codex, Cursor, OpenCode), memory schemas and storage, config loading and merging, CLI parsing, dashboard helpers, runtime tool boundaries, provider construction, cost tracking, job queue, decay logic, and regression contracts for public API surfaces.
+Fast, deterministic, no LLM, no network. Covers session adapters (Claude, Codex, Cursor, OpenCode), memory schemas and storage, config loading and merging, CLI parsing, `dashboard.py` API helpers, runtime tool boundaries, provider construction, cost tracking, job queue, decay logic, and regression contracts for public API surfaces.
 
 ### Smoke (`tests/smoke/`, ~5 tests)
 

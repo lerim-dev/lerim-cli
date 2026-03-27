@@ -175,12 +175,12 @@ Special value `all` scans all sessions ever recorded.
 
     [:octicons-arrow-right-24: lerim maintain](maintain.md)
 
--   :material-refresh: **lerim daemon**
+-   :material-refresh: **Background loop**
 
     ---
 
-    Continuous sync + maintain loop
+    Sync + maintain intervals (inside `lerim serve`)
 
-    [:octicons-arrow-right-24: lerim daemon](daemon.md)
+    [:octicons-arrow-right-24: Background loop](daemon.md)
 
 </div>

@@ -6,12 +6,15 @@ detailed traces (model calls, tool calls, tokens, timing) go through OTel spans.
 
 ## What gets traced
 
-When tracing is enabled, each `agent.run_sync()` emits a trace with spans for:
+When tracing is enabled, Logfire records spans for work instrumented at startup (see **What happens at startup** below). The lead runtime uses the OpenAI Agents SDK (`Runner.run`); **built-in OpenAI Agents SDK tracing is disabled** in `LerimOAIAgent` so traces are not exported to OpenAI’s hosted tracing by default.
 
-- Model requests (prompt, completion, token counts)
-- Tool calls (name, input, output, duration)
-- DSPy pipeline steps (extraction, summarization)
-- Per-run LLM cost (via OpenRouter's `usage.cost` response field)
+Typical visibility:
+
+- DSPy LLM calls (via `logfire.instrument_dspy()`)
+- Optional raw HTTP when `include_httpx = true` (provider debugging)
+- Per-run LLM cost from cost tracking (where the provider exposes usage)
+
+Each sync/maintain run also writes `agent_trace.json` under the run workspace for a full tool/message history (not Logfire-specific).
 
 ## One-time setup
 
@@ -99,8 +102,8 @@ is constructed. This:
 Open [logfire.pydantic.dev](https://logfire.pydantic.dev) and select your project.
 You'll see:
 
-- **Timeline** -- each sync/maintain/ask run as a top-level span
-- **Span tree** -- nested model calls, tool invocations, and pipeline steps
+- **Timeline** -- DSPy and HTTP-related activity as spans (lead SDK tracing disabled; use `agent_trace.json` in run folders for full tool turns)
+- **Span tree** -- nested spans from DSPy and optional httpx
 - **Token usage** -- per-span token counts
 - **Timing** -- latency for each operation
 

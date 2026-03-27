@@ -1,14 +1,15 @@
 # lerim serve
 
-Start the HTTP API server, dashboard, and daemon loop in a single process.
+Start the HTTP API server and daemon loop in a single process. The **web UI** is **[Lerim Cloud](https://lerim.dev)** (separate repo), not bundled here.
 
 ## Overview
 
-`lerim serve` is the all-in-one runtime process. It starts three components together:
+`lerim serve` is the all-in-one runtime process. It starts:
 
-1. **HTTP API** — REST endpoints used by CLI commands (`ask`, `sync`, `maintain`, `status`)
-2. **Dashboard** — Web UI served at the same host/port
-3. **Daemon loop** — Background sync and maintain cycles on configured intervals
+1. **HTTP API** — JSON endpoints used by CLI commands (`ask`, `sync`, `maintain`, `status`)
+2. **Daemon loop** — Background sync and maintain cycles on configured intervals
+
+GET `/` may return a minimal HTML stub linking to Lerim Cloud when no bundled static assets are present.
 
 This is the Docker container entrypoint (`lerim up` runs `lerim serve` inside the container), but it can also be run directly for development without Docker.
 
@@ -38,7 +39,7 @@ lerim serve [--host HOST] [--port PORT]
     <span class="param-type">integer</span>
     <span class="param-badge default">default: 8765</span>
   </div>
-  <p class="param-desc">TCP port to listen on. The API and dashboard are both served on this port.</p>
+  <p class="param-desc">TCP port for the JSON API (and stub HTML at <code>/</code> when no bundled UI).</p>
 </div>
 
 ## Examples
@@ -49,16 +50,7 @@ lerim serve [--host HOST] [--port PORT]
 lerim serve
 ```
 
-**Output:**
-
-```
-Lerim v0.4.0 starting...
-  API:       http://0.0.0.0:8765/api
-  Dashboard: http://0.0.0.0:8765
-  Daemon:    sync every 10m, maintain every 60m
-
-Server ready.
-```
+Logs show the API bind address and daemon intervals (exact wording may vary by version).
 
 ### Custom bind address
 
@@ -82,11 +74,11 @@ lerim serve
 
 | Component | Description | Endpoint |
 |-----------|-------------|----------|
-| HTTP API | REST API for CLI commands | `http://<host>:<port>/api/` |
-| Dashboard | Web UI for browsing memories and runs | `http://<host>:<port>/` |
+| HTTP API | JSON API for CLI and Cloud | `http://<host>:<port>/api/` |
+| Root | Stub HTML or optional assets | `http://<host>:<port>/` |
 | Daemon loop | Background sync/maintain on intervals | — (internal) |
 
-The daemon loop uses the same intervals as `lerim daemon`: `sync_interval_minutes` (default 10) and `maintain_interval_minutes` (default 60) from `~/.lerim/config.toml`.
+The daemon loop uses `sync_interval_minutes` and `maintain_interval_minutes` from `~/.lerim/config.toml` (defaults are in the shipped `default.toml`).
 
 ## Exit codes
 
@@ -107,19 +99,19 @@ The daemon loop uses the same intervals as `lerim daemon`: `sync_interval_minute
 
     [:octicons-arrow-right-24: lerim up](up-down-logs.md)
 
--   :material-refresh: **lerim daemon**
+-   :material-refresh: **Background loop**
 
     ---
 
-    Standalone daemon loop (no API/dashboard)
+    Sync + maintain intervals (runs inside `serve`)
 
-    [:octicons-arrow-right-24: lerim daemon](daemon.md)
+    [:octicons-arrow-right-24: Background loop](daemon.md)
 
 -   :material-monitor-dashboard: **lerim dashboard**
 
     ---
 
-    Print the dashboard URL
+    Print API URL + Lerim Cloud link
 
     [:octicons-arrow-right-24: lerim dashboard](dashboard.md)
 

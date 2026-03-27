@@ -29,8 +29,9 @@ API keys are **never** stored in TOML files. They come from environment variable
 
 | Variable | Provider | Required when |
 |----------|----------|---------------|
-| `MINIMAX_API_KEY` | MiniMax | When any role uses `provider = "minimax"` (default) |
-| `ZAI_API_KEY` | Z.AI | When any role uses `provider = "zai"` (default fallback) |
+| `OPENCODE_API_KEY` | OpenCode Go / Zen | When any role uses `provider = "opencode_go"` (common in shipped defaults) |
+| `MINIMAX_API_KEY` | MiniMax | When any role uses `provider = "minimax"` |
+| `ZAI_API_KEY` | Z.AI | When any role uses `provider = "zai"` |
 | `OPENROUTER_API_KEY` | OpenRouter | When any role uses `provider = "openrouter"` |
 | `OPENAI_API_KEY` | OpenAI | When any role uses `provider = "openai"` |
 
@@ -102,7 +103,7 @@ API keys are **never** stored in TOML files. They come from environment variable
 
     ---
 
-    Configure which models handle lead, explorer, extract, and summarize tasks.
+    Configure which models handle lead, extract, summarize, and optional codex (config surface) tasks.
 
     [:octicons-arrow-right-24: Model Roles](model-roles.md)
 

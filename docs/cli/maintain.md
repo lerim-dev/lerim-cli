@@ -63,12 +63,12 @@ lerim maintain --dry-run      # preview only, no writes
 
     [:octicons-arrow-right-24: lerim sync](sync.md)
 
--   :material-refresh: **lerim daemon**
+-   :material-refresh: **Background loop**
 
     ---
 
-    Continuous sync + maintain loop
+    Sync + maintain intervals (inside `lerim serve`)
 
-    [:octicons-arrow-right-24: lerim daemon](daemon.md)
+    [:octicons-arrow-right-24: Background loop](daemon.md)
 
 </div>

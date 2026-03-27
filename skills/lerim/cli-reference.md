@@ -6,9 +6,10 @@ Canonical parser source:
 Canonical command:
 - `lerim`
 
-Service commands (`ask`, `sync`, `maintain`, `status`) are thin HTTP clients that
-require a running server (`lerim up` or `lerim serve`). Commands marked **(host-only)**
-always run on the host.
+Commands that call the HTTP API (`ask`, `sync`, `maintain`, `status`) require a
+running server (`lerim up` or `lerim serve`). Most other commands are **host-only**
+(local files / Docker CLI / queue DB). `memory search`, `memory list`, and
+`memory add` work without a server (they read or write the memory tree directly).
 
 ## Global flags
 
@@ -34,12 +35,15 @@ always run on the host.
 - `connect`
 - `sync`
 - `maintain`
-- `daemon`
 - `dashboard`
 - `memory` (`search`, `list`, `add`, `reset`)
 - `ask`
 - `status`
+- `queue`
+- `retry`
+- `skip`
 - `skill` (`install`) (host-only)
+- `auth` (`login`, `status`, `logout`, or bare `lerim auth`)
 
 ## Commands
 
@@ -83,8 +87,9 @@ lerim logs --follow         # tail logs
 
 ### `lerim serve`
 
-HTTP API + dashboard + daemon loop in one process. This is the Docker container
-entrypoint, but can also be run directly for development without Docker.
+JSON HTTP API + daemon loop in one process (Docker entrypoint). The **web UI**
+is **[Lerim Cloud](https://lerim.dev)** — not bundled in this repo. GET `/` may
+return a stub page linking to Cloud when no static assets are present.
 
 ```bash
 lerim serve
@@ -173,41 +178,25 @@ lerim maintain --dry-run      # preview only, no writes
 | `--force` | Force maintenance even if a recent run was completed |
 | `--dry-run` | Record a run but skip actual memory changes |
 
-### `lerim daemon`
+### Background sync and maintain
 
-Runs a continuous loop with independent sync and maintain intervals.
-Sync (hot path) runs frequently; maintain (cold path) runs less often.
-Sessions are processed sequentially in chronological order (oldest first)
-so that later sessions can update memories from earlier ones.
-
-```bash
-lerim daemon                     # run forever (sync every 10 min, maintain every 60 min)
-lerim daemon --once              # run one sync+maintain cycle and exit
-lerim daemon --poll-seconds 120  # override both intervals uniformly to 2 minutes
-lerim daemon --max-sessions 20   # limit sessions extracted per cycle
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--once` | off | Run one cycle and exit |
-| `--max-sessions` | config `sync_max_sessions` (`50`) | Max sessions to extract per cycle |
-| `--poll-seconds` | -- | Override both sync and maintain intervals uniformly (seconds, minimum 30s) |
-
-Default intervals from config: `sync_interval_minutes` (10) and `maintain_interval_minutes` (60).
+There is **no** separate `lerim daemon` command. The daemon loop (sync + maintain
+on `sync_interval_minutes` / `maintain_interval_minutes`) runs **inside**
+`lerim serve` and therefore inside `lerim up` (Docker).
 
 ### `lerim dashboard`
 
-Prints the dashboard URL. The dashboard itself is served by `lerim serve`
-(or `lerim up`).
+Prints the **local API** base URL (`http://localhost:<port>/`) and reminds you
+that the browser UI is on **Lerim Cloud** (`https://lerim.dev`).
 
 ```bash
-lerim dashboard                  # print the dashboard URL
-lerim dashboard --port 9000      # use custom port
+lerim dashboard                  # print API URL + Cloud hint
+lerim dashboard --port 9000      # port shown in the API URL
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--port` | config `server.port` (`8765`) | Custom port for the dashboard URL |
+| `--port` | config `server.port` (`8765`) | Port shown in the printed API URL |
 
 ### `lerim memory`
 
@@ -314,6 +303,56 @@ Requires a running server (`lerim up` or `lerim serve`).
 ```bash
 lerim status
 lerim status --json    # structured JSON output
+```
+
+### `lerim queue`
+
+Host-only: reads the session extraction queue from the local SQLite catalog (no HTTP).
+
+```bash
+lerim queue
+lerim queue --failed
+lerim queue --status pending
+lerim queue --project lerim-cli
+lerim queue --json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--failed` | Only failed + dead_letter jobs |
+| `--status` | Filter by status (`pending`, `running`, `failed`, `dead_letter`, `done`) |
+| `--project` | Substring match on repo path |
+
+### `lerim retry`
+
+Host-only: reset `dead_letter` jobs to `pending` so the daemon can re-process them.
+
+```bash
+lerim retry a1b2c3d4
+lerim retry --project lerim-cli
+lerim retry --all
+```
+
+### `lerim skip`
+
+Host-only: mark `dead_letter` jobs as done (skipped) to unblock the queue.
+
+```bash
+lerim skip a1b2c3d4
+lerim skip --project lerim-cli
+lerim skip --all
+```
+
+### `lerim auth`
+
+Authenticate with Lerim Cloud (browser login, token, status, logout).
+
+```bash
+lerim auth                    # browser OAuth (default)
+lerim auth --token lerim_tok_...
+lerim auth login
+lerim auth status
+lerim auth logout
 ```
 
 ### `lerim skill` (host-only)

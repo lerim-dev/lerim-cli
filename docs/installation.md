@@ -8,7 +8,7 @@ Before you begin, make sure you have:
 
 - **Python 3.10 or higher**
 - **Docker** installed ([get Docker](https://docs.docker.com/get-docker/)) — recommended for the always-on service
-- **An LLM API key** — you only need a key for the provider(s) you configure (MiniMax, Z.AI, OpenRouter, OpenAI, or Anthropic)
+- **An LLM API key** — you only need a key for the provider(s) in your `[roles.*]` config (e.g. `OPENCODE_API_KEY` for OpenCode Go defaults, or MiniMax / Z.AI / OpenRouter / OpenAI / Anthropic as configured)
 
 !!! tip "Docker is optional"
     If you don't have Docker, you can run Lerim directly using `lerim serve` instead of `lerim up`. See [Running without Docker](#running-without-docker) below.
@@ -43,14 +43,22 @@ lerim --version
 
 Lerim needs an LLM provider for extraction and querying. Set at least one:
 
-=== "MiniMax + ZAI (recommended)"
+=== "OpenCode Go (common default)"
+
+    ```bash
+    export OPENCODE_API_KEY="..."
+    ```
+
+    Package defaults often use `provider = "opencode_go"` — set this unless you change `[roles.*]`.
+
+=== "MiniMax + ZAI"
 
     ```bash
     export MINIMAX_API_KEY="sk-cp-..."
     export ZAI_API_KEY="..."
     ```
 
-    MiniMax is the default provider (MiniMax-M2.5 for all roles) with Z.AI as fallback. Both use subscription-based coding plans for low, predictable costs.
+    Use when your config uses MiniMax and Z.AI.
 
 === "OpenRouter"
 
@@ -65,7 +73,7 @@ Lerim needs an LLM provider for extraction and querying. Set at least one:
     ```
 
 !!! note
-    You only need API keys for the providers you configure. The defaults use MiniMax (primary) with Z.AI (fallback), but you can switch to any supported provider by updating `[roles.*]` in your config. See [model roles](configuration/model-roles.md).
+    You only need API keys for the providers you configure. Match keys to `[roles.*]` (see shipped `src/lerim/config/default.toml`). See [model roles](configuration/model-roles.md).
 
 ## First-time setup
 
@@ -97,13 +105,13 @@ lerim project add ~/codes/my-app        # another project
     lerim up
     ```
 
-    This starts a Docker container with the daemon + HTTP API + dashboard on `http://localhost:8765`.
+    This starts a Docker container with the daemon + JSON API on `http://localhost:8765` (web UI: [Lerim Cloud](https://lerim.dev)).
 
 === "Without Docker"
 
     ```bash
     lerim connect auto          # detect agent platforms
-    lerim serve                 # start API server + dashboard + daemon loop
+    lerim serve                 # JSON API + daemon loop (web UI: Lerim Cloud)
     ```
 
 ## Running without Docker
@@ -112,7 +120,7 @@ If you prefer not to use Docker, run Lerim directly:
 
 ```bash
 lerim connect auto           # detect agent platforms
-lerim serve                  # start API server + dashboard + daemon loop
+lerim serve                  # JSON API + daemon loop
 ```
 
 Then use `lerim ask`, `lerim sync`, `lerim status`, etc. as usual — they connect to the running server.
@@ -164,15 +172,9 @@ open -a Docker
 
 ### API key errors
 
-If sync or ask commands fail with authentication errors:
-
-```bash
-# Verify your key is set
-echo $MINIMAX_API_KEY
-
-# Re-export if needed
-export MINIMAX_API_KEY="sk-cp-..."
-```
+If sync or ask commands fail with authentication errors, confirm the env var for
+your configured `provider` (e.g. `echo $OPENCODE_API_KEY` for OpenCode Go) and
+re-export it, or switch `[roles.*]` to a provider you have keys for.
 
 ### Port already in use
 

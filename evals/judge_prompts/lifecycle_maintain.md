@@ -4,7 +4,7 @@ You are evaluating the quality of a memory maintenance run within a lifecycle ev
 
 ## Context
 
-- **Agent trace**: `{agent_trace_path}` — full PydanticAI message history (tool calls, reasoning)
+- **Agent trace**: `{agent_trace_path}` — OpenAI Agents SDK run history (`agent_trace.json`: tools and messages)
 - **Memory root**: `{memory_root}` — memory files (decisions/, learnings/, archived/)
 - **Run folder**: `{run_folder}` — maintain artifacts (maintain_actions.json)
 - **Memories before maintain**: {before_count}

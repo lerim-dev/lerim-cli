@@ -156,7 +156,7 @@ HTTP server and daemon loop configuration.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `host` | string | `"127.0.0.1"` | Bind address for the HTTP server. Use `0.0.0.0` for Docker. |
-| `port` | int | `8765` | Port for the HTTP server and dashboard. |
+| `port` | int | `8765` | Port for the JSON API (`lerim serve`). |
 | `sync_interval_minutes` | int | `10` | How often the daemon runs the sync hot path. |
 | `maintain_interval_minutes` | int | `60` | How often the daemon runs the maintain cold path. |
 | `sync_window_days` | int | `7` | Default time window for session discovery (can be overridden with `--window`). |
@@ -179,6 +179,16 @@ for a full breakdown.
 | `max_iterations` | int | `10` | Max agent tool-call iterations. |
 | `openrouter_provider_order` | list | `[]` | OpenRouter-specific provider ordering preference. |
 | `thinking` | bool | `true` | Enable model thinking/reasoning. Set `false` for non-reasoning models. |
+
+**Codex role** (`codex`) — optional; parsed for Cloud / future use. **Not** consumed by `LerimOAIAgent` at runtime today.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `provider` | string | `opencode_go` | Provider backend for the codex role slot. |
+| `model` | string | `minimax-m2.5` | Model identifier. |
+| `api_base` | string | `""` | Custom API base. Empty = use default from `[providers]`. |
+| `timeout_seconds` | int | `600` | Request timeout. |
+| `idle_timeout_seconds` | int | `120` | Idle timeout (reserved). |
 
 **DSPy roles** (`extract`, `summarize`) -- used by DSPy ChainOfThought pipelines:
 

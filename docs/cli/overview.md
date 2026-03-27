@@ -4,8 +4,10 @@ Global flags, exit codes, and common patterns for Lerim CLI.
 
 The Lerim CLI is the primary interface for managing Lerim's continual learning layer. Commands fall into two categories:
 
-- **Host-only commands** run locally and never require a running server: `init`, `project`, `up`, `down`, `logs`, `connect`, `memory add`, `memory reset`, `skill install`
-- **Service commands** are HTTP clients that require a running Lerim server started via `lerim up` or `lerim serve`: `ask`, `sync`, `maintain`, `status`, `memory search`, `memory list`
+- **Host-only commands** run locally and do not call the HTTP API: `init`, `project`, `up`, `down`, `logs`, `connect`, `memory` (all subcommands: `search`, `list`, `add`, `reset`), `dashboard`, `queue`, `retry`, `skip`, `skill`, `auth`
+- **Service commands** forward to `lerim serve` via HTTP and require a running server (`lerim up` or `lerim serve`): `ask`, `sync`, `maintain`, `status`
+
+`memory search`, `memory list`, and `memory add` read or write the memory tree on disk directly (no server). The background sync/maintain loop runs **inside** `lerim serve` — there is no separate `lerim daemon` command (see [Background loop](daemon.md)).
 
 ## Installation
 
@@ -70,8 +72,9 @@ Lerim commands return standard exit codes:
 
 - `lerim sync` — Index sessions and extract memories (hot path)
 - `lerim maintain` — Refine existing memories (cold path)
-- `lerim daemon` — Run continuous sync + maintain loop
 - `lerim ask` — Query memories with natural language
+- `lerim queue` — Show session extraction queue (host-only, SQLite)
+- `lerim retry` / `lerim skip` — Manage dead-letter jobs (host-only)
 
 ### Platform connections
 
@@ -92,8 +95,12 @@ Lerim commands return standard exit codes:
 
 ### Runtime status
 
-- `lerim status` — Show runtime state
-- `lerim dashboard` — Show dashboard URL
+- `lerim status` — Show runtime state (requires server)
+- `lerim dashboard` — Print local API URL + Lerim Cloud hint (host-only)
+
+### Cloud
+
+- `lerim auth` — Lerim Cloud login, status, logout
 
 ## Common patterns
 
@@ -156,7 +163,7 @@ If you prefer not to use Docker, run Lerim directly:
 
 ```bash
 lerim connect auto           # detect agent platforms
-lerim serve                  # start API server + dashboard + daemon loop
+lerim serve                  # JSON API + daemon loop
 ```
 
 Then use `lerim ask`, `lerim sync`, `lerim status`, etc. as usual.
@@ -174,12 +181,13 @@ LERIM_CONFIG env var              # explicit override path
 
 API keys come from environment variables:
 
-- `MINIMAX_API_KEY` (default provider)
-- `ZAI_API_KEY` (default fallback)
-- `OPENROUTER_API_KEY`
-- `OPENAI_API_KEY`
+Keys depend on `[roles.*]` (see shipped `src/lerim/config/default.toml`). Examples:
 
-Only the keys for providers you configure in `[roles.*]` are needed.
+- `OPENCODE_API_KEY` — OpenCode Go / Zen (common in current defaults)
+- `MINIMAX_API_KEY`, `ZAI_API_KEY` — when using those providers
+- `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, … — as configured
+
+Only the keys for providers you use are required.
 
 ## Next steps
 

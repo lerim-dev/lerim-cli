@@ -1,8 +1,8 @@
-"""Read-only dashboard HTTP server and memory graph/query API handlers.
+"""HTTP server: JSON APIs for sessions, memories, pipeline, queue, and config.
 
-Serves a single-page Alpine.js dashboard with ECharts visualizations.
-Backend provides JSON APIs for session stats, run listings, memory
-exploration, pipeline status, and config management.
+Optional bundled static files under ``dashboard/`` (repo or ``/opt/lerim/dashboard``)
+may serve a legacy local UI. If no ``index.html`` is present, GET ``/`` returns a
+minimal page pointing to Lerim Cloud; the web app itself lives in ``lerim-cloud``.
 """
 
 from __future__ import annotations
@@ -59,6 +59,8 @@ from lerim.sessions.catalog import (
 
 _REPO_DASHBOARD = Path(__file__).resolve().parents[3] / "dashboard"
 DASHBOARD_DIR = _REPO_DASHBOARD if _REPO_DASHBOARD.is_dir() else Path("/opt/lerim/dashboard")
+# Public web UI is hosted separately (lerim-cloud); this is the marketing/docs entry.
+_LERIM_CLOUD_UI_URL = "https://lerim.dev"
 MAX_BODY_BYTES = 1_000_000
 READ_ONLY_MESSAGE = "Dashboard is read-only. Use CLI commands for write actions."
 _REPORT_CACHE: dict[str, Any] = {"at": None, "value": None}
@@ -903,7 +905,7 @@ def _save_config_patch(patch: dict[str, Any]) -> dict[str, Any]:
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
-    """HTTP handler for read-only dashboard APIs and static assets."""
+    """HTTP handler: JSON API routes and optional static files; stub root if no UI."""
 
     server_version = "LerimDashboard/0.1"
 
@@ -938,6 +940,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
+
+    def _serve_cloud_stub_html(self) -> None:
+        """Serve minimal HTML when no bundled dashboard assets exist."""
+        body = (
+            "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"/>"
+            f"<title>Lerim</title></head><body><p>Lerim API is running on this host.</p>"
+            f"<p>The web UI is on <a href=\"{_LERIM_CLOUD_UI_URL}\">Lerim Cloud</a>.</p>"
+            "<p><a href=\"/api/health\">GET /api/health</a></p></body></html>\n"
+        ).encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _serve_file(self, relative_path: str) -> None:
         """Serve static dashboard asset with directory traversal protection."""
@@ -1450,7 +1466,14 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
             self._handle_api_get(path, query)
             return
         if path == "/" or path == "/index.html":
-            self._serve_file("index.html")
+            index_file = (DASHBOARD_DIR / "index.html").resolve()
+            if (
+                index_file.is_file()
+                and str(index_file).startswith(str(DASHBOARD_DIR.resolve()))
+            ):
+                self._serve_file("index.html")
+            else:
+                self._serve_cloud_stub_html()
             return
         if path.startswith("/session/"):
             self.send_response(HTTPStatus.FOUND)
@@ -1482,13 +1505,13 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
 
 
 def run_dashboard_server(host: str | None = None, port: int | None = None) -> int:
-    """Run read-only dashboard HTTP server."""
+    """Run HTTP server (JSON API; same handler as ``lerim serve``)."""
     config = get_config()
     bind_host = host or config.server_host or "127.0.0.1"
     bind_port = int(port or config.server_port or 8765)
     init_sessions_db()
     httpd = ThreadingHTTPServer((bind_host, bind_port), DashboardHandler)
-    logger.info("Lerim dashboard running at http://{}:{}/", bind_host, bind_port)
+    logger.info("Lerim API server at http://{}:{}/", bind_host, bind_port)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

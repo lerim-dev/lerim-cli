@@ -131,7 +131,7 @@ Last runs:
 
     ---
 
-    Open the web dashboard
+    Print API URL + Lerim Cloud
 
     [:octicons-arrow-right-24: lerim dashboard](dashboard.md)
 

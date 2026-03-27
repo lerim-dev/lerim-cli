@@ -179,11 +179,34 @@ lerim connect auto
 
 ### Sync sessions
 
-Lerim reads session transcripts, extracts decisions and learnings via DSPy pipelines, and writes them as markdown files.
+Lerim reads session transcripts, extracts decisions and learnings via DSPy pipelines, and writes them as markdown files. **Lead agent** + **tools** (DSPy runs inside the extract/summarize pipeline tools):
 
-<p align="center">
-  <img src="assets/sync.png" alt="Sync path diagram" width="700">
-</p>
+```mermaid
+flowchart TB
+    subgraph lead["Lead"]
+        OAI[LerimOAIAgent · OpenAI Agents SDK]
+    end
+    subgraph syncTools["Sync tools"]
+        ep[extract_pipeline]
+        sp[summarize_pipeline]
+        bd[batch_dedup_candidates]
+        wm[write_memory]
+        wr[write_report]
+        rf["read_file · list_files"]
+    end
+    subgraph dspy["DSPy LMs"]
+        ex[roles.extract]
+        su[roles.summarize]
+    end
+    OAI --> ep
+    OAI --> sp
+    OAI --> bd
+    OAI --> wm
+    OAI --> wr
+    OAI --> rf
+    ep -.-> ex
+    sp -.-> su
+```
 
 </div>
 
@@ -191,11 +214,30 @@ Lerim reads session transcripts, extracts decisions and learnings via DSPy pipel
 
 ### Maintain knowledge
 
-Offline refinement merges duplicates, archives low-value entries, consolidates related learnings, and applies time-based decay.
+Offline refinement merges duplicates, archives low-value entries, consolidates related learnings, and applies time-based decay. **Lead agent** + **maintain tools** only:
 
-<p align="center">
-  <img src="assets/maintain.png" alt="Maintain path diagram" width="700">
-</p>
+```mermaid
+flowchart TB
+    subgraph lead_m["Lead"]
+        OAI_m[LerimOAIAgent · OpenAI Agents SDK]
+    end
+    subgraph maintainTools["Maintain tools"]
+        ms[memory_search]
+        ar[archive_memory]
+        em[edit_memory]
+        wh[write_hot_memory]
+        wm2[write_memory]
+        wr2[write_report]
+        rf2["read_file · list_files"]
+    end
+    OAI_m --> ms
+    OAI_m --> ar
+    OAI_m --> em
+    OAI_m --> wh
+    OAI_m --> wm2
+    OAI_m --> wr2
+    OAI_m --> rf2
+```
 
 </div>
 
@@ -216,21 +258,11 @@ lerim memory search "authentication"
 
 ---
 
-## Dashboard
+## Web UI (Lerim Cloud)
 
-Lerim includes a local web UI for session analytics, knowledge browsing, and runtime status.
+The browser UI lives in **[Lerim Cloud](https://lerim.dev)** (separate from this CLI package). The local daemon still exposes a **JSON API** on `http://localhost:8765` for the CLI and for Cloud when connected.
 
-<p align="center">
-  <img src="assets/dashboard.png" alt="Lerim dashboard" width="1100">
-</p>
-
-Access it at `http://localhost:8765` after running `lerim up` or `lerim serve`.
-
-- **Overview** — High-level metrics and charts for sessions, messages, tools, errors, and tokens
-- **Runs** — Searchable session list with full-screen chat viewer
-- **Memories** — Library and editor for memory records with filters
-- **Pipeline** — Sync/maintain status and extraction queue state
-- **Settings** — Dashboard-editable config for server, model roles, and tracing
+See [Web UI (Lerim Cloud)](guides/dashboard.md).
 
 ---
 

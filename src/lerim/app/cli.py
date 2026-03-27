@@ -229,11 +229,11 @@ def _cmd_maintain(args: argparse.Namespace) -> int:
 
 
 def _cmd_dashboard(args: argparse.Namespace) -> int:
-    """Print the dashboard URL (dashboard is served by lerim serve)."""
+    """Print URLs for the local API and Lerim Cloud web UI."""
     config = get_config()
     port = args.port or config.server_port or 8765
-    _emit(f"Dashboard: http://localhost:{port}")
-    _emit("The dashboard is served by `lerim serve` (or `lerim up` for Docker).")
+    _emit(f"API (lerim serve): http://localhost:{port}/")
+    _emit("Web UI: https://lerim.dev — open Lerim Cloud while this server runs.")
     return 0
 
 
@@ -870,7 +870,7 @@ def _cmd_logs(args: argparse.Namespace) -> int:
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
-    """Start HTTP API + dashboard + daemon loop in one process."""
+    """Start HTTP API + daemon loop in one process (web UI is Lerim Cloud)."""
     import signal
     import threading
     from http.server import ThreadingHTTPServer
@@ -1215,10 +1215,10 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard = sub.add_parser(
         "dashboard",
         formatter_class=_F,
-        help="Show dashboard URL",
+        help="Show local API URL and Lerim Cloud web UI",
         description=(
-            "Print the dashboard URL. The dashboard is served by `lerim serve`\n"
-            "(or `lerim up` for Docker). No separate server is started.\n\n"
+            "Print the local API base URL and the Lerim Cloud web UI link.\n"
+            "The JSON API is served by `lerim serve` (or `lerim up`).\n\n"
             "Examples:\n"
             "  lerim dashboard"
         ),
@@ -1226,7 +1226,7 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard.add_argument(
         "--port",
         type=int,
-        help="Bind port for the dashboard server (default: 8765 or config value).",
+        help="Port shown in the API URL (default: 8765 or config).",
     )
     dashboard.set_defaults(func=_cmd_dashboard)
 
@@ -1596,9 +1596,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser(
         "serve",
         formatter_class=_F,
-        help="Start HTTP API + dashboard + daemon loop (Docker entrypoint)",
+        help="Start HTTP API + daemon loop (Docker entrypoint)",
         description=(
-            "Combined server: HTTP API + dashboard + background daemon loop\n"
+            "Combined server: HTTP JSON API + background daemon loop.\n"
+            "Web UI is hosted on Lerim Cloud; GET / may show a stub link.\n"
             "in one process. This is the Docker container entrypoint.\n\n"
             "Examples:\n"
             "  lerim serve\n"
