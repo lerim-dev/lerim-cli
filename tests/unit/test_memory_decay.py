@@ -19,7 +19,6 @@ from lerim.runtime.prompts.maintain import (
     build_maintain_artifact_paths,
     build_maintain_prompt,
 )
-from lerim.runtime.tools import build_tool_context, read_file_tool, write_memory_tool
 from tests.helpers import make_config
 
 
@@ -93,81 +92,6 @@ class TestExtractMemoryId:
             )
             is None
         )
-
-
-class TestRuntimeToolAccessTracking:
-    """Runtime read/write tools emit access tracker updates."""
-
-    def _context(self, tmp_path: Path):
-        cfg = make_config(tmp_path)
-        init_access_db(cfg.memories_db_path)
-        memory_root = tmp_path / "memory"
-        workspace_root = tmp_path / "workspace"
-        run_folder = workspace_root / "sync-20260223-000000-aaaaaa"
-        (memory_root / "decisions").mkdir(parents=True)
-        (memory_root / "learnings").mkdir(parents=True)
-        run_folder.mkdir(parents=True)
-        return build_tool_context(
-            repo_root=tmp_path,
-            memory_root=memory_root,
-            workspace_root=workspace_root,
-            run_folder=run_folder,
-            run_id=run_folder.name,
-            config=cfg,
-        )
-
-    def test_read_tool_skips_frontmatter_scan(self, tmp_path: Path) -> None:
-        context = self._context(tmp_path)
-        assert context.memory_root is not None
-        target = context.memory_root / "decisions" / "20260221-tips.md"
-        target.write_text("---\ntitle: Tips\n---\nBody\n", encoding="utf-8")
-
-        read_file_tool(
-            context=context,
-            file_path=str(target),
-            offset=1,
-            limit=15,
-        )
-        stats = get_access_stats(
-            context.config.memories_db_path, str(context.memory_root)
-        )
-        assert stats == []
-
-    def test_read_tool_tracks_full_body(self, tmp_path: Path) -> None:
-        context = self._context(tmp_path)
-        assert context.memory_root is not None
-        target = context.memory_root / "decisions" / "20260221-tips.md"
-        target.write_text("---\ntitle: Tips\n---\nBody\n", encoding="utf-8")
-
-        read_file_tool(
-            context=context,
-            file_path=str(target),
-            offset=1,
-            limit=200,
-        )
-        stats = get_access_stats(
-            context.config.memories_db_path, str(context.memory_root)
-        )
-        assert len(stats) == 1
-        assert stats[0]["memory_id"] == "20260221-tips"
-
-    def test_write_tool_tracks_memory_write(self, tmp_path: Path) -> None:
-        context = self._context(tmp_path)
-        assert context.memory_root is not None
-        write_memory_tool(
-            context=context,
-            primitive="learning",
-            title="Queue pattern",
-            body="Keep claim and heartbeat flow deterministic.",
-            confidence=0.8,
-            tags=["queue"],
-            kind="insight",
-        )
-        stats = get_access_stats(
-            context.config.memories_db_path, str(context.memory_root)
-        )
-        assert len(stats) == 1
-        assert stats[0]["memory_id"].endswith("-queue-pattern")
 
 
 class TestAskPromptMemoryRoot:

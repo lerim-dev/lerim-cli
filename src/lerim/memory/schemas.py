@@ -41,6 +41,10 @@ class MemoryCandidate(BaseModel):
         default_factory=list,
         description="Group/cluster labels for this memory. No limit.",
     )
+    outcome: Literal["worked", "failed", "unknown"] | None = Field(
+        default=None,
+        description="Whether this approach was validated (worked), tried and didn't work (failed), or unclear (unknown). Helps contradiction detection.",
+    )
 
 
 if __name__ == "__main__":

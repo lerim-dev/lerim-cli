@@ -37,7 +37,7 @@ This is **agent context amnesia**, and it's the biggest productivity drain in AI
 Lerim solves this by:
 
 - :material-sync: **Watching** your agent sessions across all supported coding agents
-- :material-brain: **Extracting** decisions and learnings automatically using LLM pipelines (DSPy + PydanticAI)
+- :material-brain: **Extracting** decisions and learnings automatically using LLM pipelines (DSPy + OpenAI Agents SDK)
 - :material-file-document: **Storing** everything as plain markdown files in your repo (`.lerim/`)
 - :material-refresh: **Refining** knowledge continuously — merges duplicates, archives stale entries, applies time-based decay
 - :material-graph: **Connecting** learnings into a context graph — related decisions and patterns are linked

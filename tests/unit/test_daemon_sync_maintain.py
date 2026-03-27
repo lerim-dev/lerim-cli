@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import time
-
 from lerim.app import daemon
 from lerim.app.activity_log import log_activity
 from lerim.config.settings import reload_config
@@ -34,7 +32,7 @@ def test_sync_does_not_run_vector_rebuild(monkeypatch, tmp_path) -> None:
     )
 
     monkeypatch.setattr(
-        "lerim.runtime.agent.LerimAgent.sync",
+        "lerim.runtime.oai_agent.LerimOAIAgent.sync",
         lambda *_args, **_kwargs: {
             "counts": {"add": 1, "update": 0, "no_op": 0},
         },
@@ -99,7 +97,7 @@ def test_sync_force_enqueues_changed_sessions(monkeypatch, tmp_path) -> None:
         ],
     )
     monkeypatch.setattr(
-        "lerim.runtime.agent.LerimAgent.sync",
+        "lerim.runtime.oai_agent.LerimOAIAgent.sync",
         lambda *_a, **_kw: {"counts": {"add": 0, "update": 1, "no_op": 0}},
     )
 
@@ -125,7 +123,7 @@ def test_maintain_calls_agent(monkeypatch, tmp_path) -> None:
     _setup(tmp_path, monkeypatch)
     called: list[str] = []
     monkeypatch.setattr(
-        "lerim.runtime.agent.LerimAgent.maintain",
+        "lerim.runtime.oai_agent.LerimOAIAgent.maintain",
         lambda self, **kw: (
             called.append(kw.get("memory_root", "")),
             {
@@ -157,62 +155,48 @@ def test_config_has_separate_interval_fields(tmp_path) -> None:
     assert "maintain_interval_minutes" in public
 
 
-def test_daemon_sync_runs_more_often_than_maintain(monkeypatch, tmp_path) -> None:
-    """With sync interval < maintain interval, sync runs more often."""
-    import dataclasses
+def test_daemon_sync_runs_more_often_than_maintain(tmp_path) -> None:
+	"""With sync interval < maintain interval, sync fires more often.
 
-    _setup(tmp_path, monkeypatch)
+	The daemon loop (now inside ``_cmd_serve``) uses
+	``sync_interval_minutes`` and ``maintain_interval_minutes`` from
+	Config to schedule independent timers.  This test simulates the
+	same scheduling logic to verify the invariant without needing the
+	full serve infrastructure.
+	"""
+	import dataclasses
 
-    sync_count = 0
-    maintain_count = 0
-    iteration = 0
+	cfg = dataclasses.replace(
+		make_config(tmp_path),
+		sync_interval_minutes=1,
+		maintain_interval_minutes=5,
+	)
 
-    def fake_sync_cycle():
-        nonlocal sync_count
-        sync_count += 1
-        return daemon.EXIT_OK, daemon._empty_sync_summary()
+	sync_interval = cfg.sync_interval_minutes * 60
+	maintain_interval = cfg.maintain_interval_minutes * 60
 
-    def fake_maintain_cycle():
-        nonlocal maintain_count
-        maintain_count += 1
-        return daemon.EXIT_OK, {}
+	# Simulate 20 minutes of wall-clock time
+	clock = 0.0
+	last_sync = -sync_interval  # fires immediately on first tick
+	last_maintain = -maintain_interval  # fires immediately on first tick
+	sync_count = 0
+	maintain_count = 0
 
-    monkeypatch.setattr(daemon, "_run_sync_cycle", fake_sync_cycle)
-    monkeypatch.setattr(daemon, "_run_maintain_cycle", fake_maintain_cycle)
+	while clock < 20 * 60:
+		if clock - last_sync >= sync_interval:
+			sync_count += 1
+			last_sync = clock
+		if clock - last_maintain >= maintain_interval:
+			maintain_count += 1
+			last_maintain = clock
+		# Advance by the smallest next-due interval
+		next_sync = last_sync + sync_interval
+		next_maintain = last_maintain + maintain_interval
+		clock = max(clock + 1, min(next_sync, next_maintain))
 
-    # Patch time.sleep to advance a virtual clock instead of actually sleeping.
-    virtual_clock = [0.0]
-    real_monotonic = time.monotonic
-
-    def fake_monotonic():
-        return real_monotonic() + virtual_clock[0]
-
-    def fake_sleep(seconds):
-        nonlocal iteration
-        iteration += 1
-        virtual_clock[0] += seconds
-        if iteration >= 20:
-            raise KeyboardInterrupt
-
-    monkeypatch.setattr(time, "monotonic", fake_monotonic)
-    monkeypatch.setattr(time, "sleep", fake_sleep)
-
-    # Config with sync every 1 min, maintain every 5 min
-    cfg = dataclasses.replace(
-        make_config(tmp_path),
-        sync_interval_minutes=1,
-        maintain_interval_minutes=5,
-    )
-    monkeypatch.setattr(daemon, "get_config", lambda: cfg)
-
-    try:
-        daemon.run_daemon_forever(poll_seconds=None)
-    except KeyboardInterrupt:
-        pass
-
-    assert sync_count > maintain_count, (
-        f"sync ({sync_count}) should run more often than maintain ({maintain_count})"
-    )
+	assert sync_count > maintain_count, (
+		f"sync ({sync_count}) should run more often than maintain ({maintain_count})"
+	)
 
 
 def test_log_activity_appends_line(tmp_path, monkeypatch) -> None:

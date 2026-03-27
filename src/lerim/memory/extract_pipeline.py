@@ -49,28 +49,34 @@ class MemoryExtractSignature(dspy.Signature):
     DO NOT EXTRACT:
     - Facts the assistant learned by READING code, configs, or docs (these are code-derivable).
       Example: "The default port is 8765" or "The pipeline uses DSPy Predict" — just reporting what exists.
-    - Generic industry knowledge, benchmarks, or research results from web searches
+    - Generic industry knowledge or benchmarks the user did NOT specifically request
     - Ephemeral task details (specific slide edits, line-number fixes, PR comments, TODO items)
     - Items where the body merely restates the title
     - Version-specific changelogs or release notes (git log has these)
+    - Raw web search results that were not synthesized into a conclusion or decision
 
     EXTRACT (high-value items only):
     - Decisions: choices about how to build, structure, or design things — by the user OR by the
       agent during implementation. If the agent chose an approach and the user didn't object, that
-      is a team decision worth remembering.
+      is a team decision worth remembering. Includes strategic, product, and business decisions,
+      not just code decisions.
     - Preferences: coding style, tool preferences, workflow habits (usually user-originated)
     - Hard-won insights: non-obvious lessons learned through debugging or painful experience
     - Friction: recurring blockers, time-wasters, tool failures worth remembering
     - Pitfalls: mistakes to avoid that are NOT obvious from reading the code
     - Procedures: multi-step workarounds that would otherwise be forgotten
+    - Research conclusions: when the user explicitly requested research on a topic and the session
+      produced synthesized findings that inform project direction. Extract the conclusion, not the
+      raw data.
 
     EXAMPLES — extract vs skip:
     ✓ Agent: "I'll use SQLite for the session catalog" → decision (agent CHOSE an approach)
     ✓ User: "use tabs for indentation" → preference (user STATED)
     ✓ Agent: "vllm-mlx crashes with concurrent Metal requests" → pitfall (DISCOVERED through debugging)
+    ✓ User asked to research pitch deck structure → agent synthesized: "Best decks follow problem-solution-traction-ask arc" → insight (RESEARCHED and CONCLUDED for this project)
     ✗ Agent: "The config file has sync_interval = 10" → just REPORTED a config value
     ✗ Agent: "The extraction pipeline uses DSPy Predict" → just DESCRIBED existing code
-    ✗ Agent: "B2B SaaS typically converts at 5-7%" → just RESEARCHED generic knowledge
+    ✗ Agent: "B2B SaaS typically converts at 5-7%" → UNSOLICITED generic statistic, not tied to a user question
 
     Kind (for learnings only):
     - insight: a reusable observation or pattern

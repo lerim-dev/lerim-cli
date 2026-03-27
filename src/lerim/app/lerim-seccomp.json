@@ -1,0 +1,26 @@
+{
+	"defaultAction": "SCMP_ACT_ALLOW",
+	"syscalls": [
+		{
+			"names": [
+				"ptrace",
+				"mount",
+				"umount2",
+				"unshare",
+				"setns",
+				"pivot_root",
+				"reboot",
+				"kexec_load",
+				"init_module",
+				"finit_module",
+				"delete_module",
+				"acct",
+				"swapon",
+				"swapoff"
+			],
+			"action": "SCMP_ACT_ERRNO",
+			"args": [],
+			"comment": "Block dangerous syscalls that could escape container or affect host"
+		}
+	]
+}

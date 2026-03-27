@@ -5,7 +5,7 @@ from __future__ import annotations
 
 def test_sync_result_contract_fields():
     """SyncResultContract has exactly these fields."""
-    from lerim.runtime.agent import SyncResultContract
+    from lerim.runtime.helpers import SyncResultContract
 
     expected = {
         "trace_path",
@@ -23,7 +23,7 @@ def test_sync_result_contract_fields():
 
 def test_maintain_result_contract_fields():
     """MaintainResultContract has exactly these fields."""
-    from lerim.runtime.agent import MaintainResultContract
+    from lerim.runtime.helpers import MaintainResultContract
 
     expected = {
         "memory_root",
@@ -60,7 +60,7 @@ def test_memory_candidate_schema_stable():
     """MemoryCandidate has primitive, kind, title, body, confidence, tags."""
     from lerim.memory.schemas import MemoryCandidate
 
-    expected = {"primitive", "kind", "title", "body", "confidence", "tags", "source_speaker", "durability"}
+    expected = {"primitive", "kind", "title", "body", "confidence", "tags", "source_speaker", "durability", "outcome"}
     assert set(MemoryCandidate.model_fields.keys()) == expected
 
 
@@ -81,11 +81,14 @@ def test_cli_subcommands_present():
         "connect",
         "sync",
         "maintain",
-        "daemon",
+        "serve",
         "ask",
         "memory",
         "dashboard",
         "status",
+        "queue",
+        "retry",
+        "skip",
     ):
         assert cmd in choices, f"Missing CLI subcommand: {cmd}"
 

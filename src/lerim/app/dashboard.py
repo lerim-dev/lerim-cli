@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +29,9 @@ from lerim.app.api import (
     api_project_add,
     api_project_list,
     api_project_remove,
+    api_queue_jobs,
+    api_retry_job,
+    api_skip_job,
     api_status,
     api_sync,
 )
@@ -48,6 +52,7 @@ from lerim.sessions.catalog import (
     fetch_session_doc,
     init_sessions_db,
     latest_service_run,
+    list_session_jobs,
     list_sessions_window,
 )
 
@@ -879,7 +884,6 @@ def _serialize_full_config(config: Config) -> dict[str, Any]:
         },
         "roles": {
             "lead": _role_dict(config.lead_role),
-            "explorer": _role_dict(config.explorer_role),
             "extract": _role_dict(config.extract_role),
             "summarize": _role_dict(config.summarize_role),
         },
@@ -1127,6 +1131,75 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
         }
         self._json(payload)
 
+    def _api_live(self) -> None:
+        """Lightweight live-status endpoint for frequent polling.
+
+        Designed for 2-3 second poll intervals from the cloud dashboard.
+        Avoids heavy queries: uses count aggregates and thread enumeration.
+        """
+        now = datetime.now(timezone.utc)
+
+        # -- Active background threads (sync-* / maintain-*) --
+        sync_threads: list[str] = []
+        maintain_threads: list[str] = []
+        for t in threading.enumerate():
+            name = t.name or ""
+            if name.startswith("sync-"):
+                sync_threads.append(name)
+            elif name.startswith("maintain-"):
+                maintain_threads.append(name)
+
+        # -- Queue counts (single lightweight GROUP BY) --
+        queue = count_session_jobs_by_status()
+
+        # -- Running job run_ids (small result set) --
+        running_jobs = list_session_jobs(limit=50, status="running")
+        running_run_ids = [
+            str(j.get("run_id") or "") for j in running_jobs if j.get("run_id")
+        ]
+
+        # -- Latest sync / maintain service runs --
+        last_sync_raw = latest_service_run("sync")
+        last_maintain_raw = latest_service_run("maintain")
+
+        def _format_service_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
+            if run is None:
+                return None
+            details = run.get("details") or {}
+            started = run.get("started_at")
+            completed = run.get("completed_at")
+            duration_ms: int | None = None
+            if started and completed:
+                try:
+                    t0 = datetime.fromisoformat(started)
+                    t1 = datetime.fromisoformat(completed)
+                    duration_ms = int((t1 - t0).total_seconds() * 1000)
+                except (ValueError, TypeError):
+                    pass
+            return {
+                "status": run.get("status"),
+                "started_at": started,
+                "completed_at": completed,
+                "duration_ms": duration_ms,
+                "sessions_processed": details.get("sessions_processed")
+                    or details.get("indexed")
+                    or details.get("enqueued"),
+            }
+
+        payload = {
+            "timestamp": now.isoformat(),
+            "sync_active": len(sync_threads) > 0,
+            "sync_threads": sync_threads,
+            "maintain_active": len(maintain_threads) > 0,
+            "maintain_threads": maintain_threads,
+            "sync_sessions_processing": queue.get("running", 0),
+            "queue": queue,
+            "running_run_ids": running_run_ids,
+            "last_sync": _format_service_run(last_sync_raw),
+            "last_maintain": _format_service_run(last_maintain_raw),
+        }
+        self._json(payload)
+
     def _api_refine_report(self) -> None:
         """Return cached or freshly built extraction quality report."""
         now = datetime.now(timezone.utc)
@@ -1174,9 +1247,15 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
             "/api/memories": self._api_memories,
             "/api/config/models": self._api_config_models,
         }
+        if path == "/api/jobs/queue":
+            status_f = (query.get("status") or [None])[0]
+            project_f = (query.get("project") or [None])[0]
+            self._json(api_queue_jobs(status=status_f, project=project_f))
+            return
         no_query_handlers = {
             "/api/health": lambda: self._json(api_health()),
             "/api/status": lambda: self._json(api_status()),
+            "/api/live": self._api_live,
             "/api/connect": lambda: self._json({"platforms": api_connect_list()}),
             "/api/project/list": lambda: self._json({"projects": api_project_list()}),
             "/api/memory-graph/options": self._api_memory_graph_options,
@@ -1330,6 +1409,21 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
                 HTTPStatus.BAD_REQUEST if result.get("error") else HTTPStatus.OK
             )
             self._json(result, status=status_code)
+            return
+        # ── Job queue management routes ──────────────────────────────
+        if path.startswith("/api/jobs/") and path.endswith("/retry"):
+            run_id = unquote(path.split("/api/jobs/", 1)[1].rsplit("/retry", 1)[0])
+            if not run_id:
+                self._error(HTTPStatus.BAD_REQUEST, "Missing run_id in path")
+                return
+            self._json(api_retry_job(run_id))
+            return
+        if path.startswith("/api/jobs/") and path.endswith("/skip"):
+            run_id = unquote(path.split("/api/jobs/", 1)[1].rsplit("/skip", 1)[0])
+            if not run_id:
+                self._error(HTTPStatus.BAD_REQUEST, "Missing run_id in path")
+                return
+            self._json(api_skip_job(run_id))
             return
         if path == "/api/memory-graph/query":
             payload = self._read_json_body()

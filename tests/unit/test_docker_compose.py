@@ -79,3 +79,72 @@ def test_api_up_build_local_no_dockerfile(monkeypatch: pytest.MonkeyPatch) -> No
     result = api_up(build_local=True)
     assert "error" in result
     assert "Dockerfile" in result["error"]
+
+
+# -- Container hardening tests --
+
+
+def test_compose_has_read_only_root() -> None:
+    """Container should have read-only root filesystem."""
+    content = _generate_compose_yml(build_local=False)
+    assert "read_only: true" in content
+
+
+def test_compose_drops_all_capabilities() -> None:
+    """Container should drop all Linux capabilities."""
+    content = _generate_compose_yml(build_local=False)
+    assert "cap_drop:" in content
+    assert "- ALL" in content
+
+
+def test_compose_has_no_new_privileges() -> None:
+    """Container should prevent privilege escalation."""
+    content = _generate_compose_yml(build_local=False)
+    assert "no-new-privileges:true" in content
+
+
+def test_compose_has_pids_limit() -> None:
+    """Container should have a PID limit to prevent fork bombs."""
+    content = _generate_compose_yml(build_local=False)
+    assert "pids_limit:" in content
+
+
+def test_compose_has_memory_limit() -> None:
+    """Container should have a memory limit."""
+    content = _generate_compose_yml(build_local=False)
+    assert "mem_limit:" in content
+
+
+def test_compose_has_tmpfs() -> None:
+    """Container should have tmpfs for writable /tmp."""
+    content = _generate_compose_yml(build_local=False)
+    assert "tmpfs:" in content
+    assert "/tmp:" in content
+
+
+def test_compose_mounts_lerim_dirs_only(tmp_path, monkeypatch) -> None:
+    """Project mounts should be .lerim subdirs, not entire project directories."""
+    from dataclasses import replace
+    cfg = make_config(tmp_path)
+    cfg = replace(cfg, projects={"test": str(tmp_path / "myproject")})
+    monkeypatch.setattr("lerim.app.api.reload_config", lambda: cfg)
+
+    content = _generate_compose_yml(build_local=False)
+    # Should mount project/.lerim, not project/ directly
+    assert ".lerim" in content
+    # The project path without .lerim should NOT appear as a standalone mount
+    lerim_path = str(tmp_path / "myproject" / ".lerim")
+    # lerim_path should be in volumes, bare project_path should not be a mount target
+    assert lerim_path in content
+
+
+def test_compose_agent_dirs_read_only(tmp_path, monkeypatch) -> None:
+    """Agent session directories should be mounted read-only."""
+    from dataclasses import replace
+    cfg = make_config(tmp_path)
+    agent_path = str(tmp_path / "sessions")
+    cfg = replace(cfg, agents={"claude": agent_path})
+    monkeypatch.setattr("lerim.app.api.reload_config", lambda: cfg)
+
+    content = _generate_compose_yml(build_local=False)
+    assert f"{agent_path}:{agent_path}:ro" in content

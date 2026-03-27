@@ -23,7 +23,6 @@ def test_tracing_disabled_does_nothing(mock_logfire: MagicMock) -> None:
     """When tracing is disabled, no logfire calls should be made."""
     configure_tracing(_make_config(enabled=False))
     mock_logfire.configure.assert_not_called()
-    mock_logfire.instrument_pydantic_ai.assert_not_called()
     mock_logfire.instrument_dspy.assert_not_called()
     mock_logfire.instrument_httpx.assert_not_called()
 
@@ -37,13 +36,6 @@ def test_tracing_enabled_configures_logfire(mock_logfire: MagicMock) -> None:
         service_name="lerim",
         console=False,
     )
-
-
-@patch("lerim.config.tracing.logfire")
-def test_tracing_enabled_instruments_pydantic_ai(mock_logfire: MagicMock) -> None:
-    """instrument_pydantic_ai is called with include_content from config."""
-    configure_tracing(_make_config(enabled=True, include_content=False))
-    mock_logfire.instrument_pydantic_ai.assert_called_once_with(include_content=False)
 
 
 @patch("lerim.config.tracing.logfire")

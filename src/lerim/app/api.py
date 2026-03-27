@@ -32,12 +32,15 @@ from lerim.config.settings import (
     _write_config_full,
     USER_CONFIG_PATH,
 )
-from lerim.runtime.agent import LerimAgent
-from lerim.runtime.prompts.ask import build_ask_prompt, looks_like_auth_error
+from lerim.runtime.oai_agent import LerimOAIAgent
+from lerim.runtime.prompts.oai_ask import build_oai_ask_prompt, looks_like_auth_error
 from lerim.sessions.catalog import (
     count_fts_indexed,
     count_session_jobs_by_status,
     latest_service_run,
+    list_queue_jobs,
+    retry_session_job,
+    skip_session_job,
 )
 
 
@@ -62,8 +65,8 @@ def api_ask(question: str, limit: int = 12) -> dict[str, Any]:
     memory_root = str(config.memory_dir)
     hits: list[dict[str, Any]] = []
     context_docs: list[dict[str, Any]] = []
-    prompt = build_ask_prompt(question, hits, context_docs, memory_root=memory_root)
-    agent = LerimAgent()
+    prompt = build_oai_ask_prompt(question, hits, context_docs, memory_root=memory_root)
+    agent = LerimOAIAgent()
     response, session_id, cost_usd = agent.ask(
         prompt, cwd=str(Path.cwd()), memory_root=memory_root
     )
@@ -150,6 +153,33 @@ def api_connect(platform: str, path: str | None = None) -> dict[str, Any]:
     """Connect a platform and return result."""
     config = get_config()
     return connect_platform(config.platforms_path, platform, custom_path=path)
+
+
+# ── Job queue management ─────────────────────────────────────────────
+
+
+def api_retry_job(run_id: str) -> dict[str, Any]:
+    """Retry a dead_letter job, returning result."""
+    ok = retry_session_job(run_id)
+    return {"retried": ok, "run_id": run_id, "queue": count_session_jobs_by_status()}
+
+
+def api_skip_job(run_id: str) -> dict[str, Any]:
+    """Skip a dead_letter job, returning result."""
+    ok = skip_session_job(run_id)
+    return {"skipped": ok, "run_id": run_id, "queue": count_session_jobs_by_status()}
+
+
+def api_queue_jobs(
+    status: str | None = None, project: str | None = None,
+) -> dict[str, Any]:
+    """List queue jobs with optional filters."""
+    jobs = list_queue_jobs(
+        status_filter=status,
+        project_filter=project,
+        failed_only=(status == "failed"),
+    )
+    return {"jobs": jobs, "total": len(jobs), "queue": count_session_jobs_by_status()}
 
 
 # ── Project management ───────────────────────────────────────────────
@@ -254,6 +284,7 @@ _API_KEY_ENV_NAMES = (
     "ANTHROPIC_API_KEY",
     "MINIMAX_API_KEY",
     "OPENAI_API_KEY",
+    "OPENCODE_API_KEY",
     "OPENROUTER_API_KEY",
     "ZAI_API_KEY",
 )
@@ -300,24 +331,31 @@ def _generate_compose_yml(build_local: bool = False) -> str:
     config = reload_config()
     home = str(Path.home())
 
-    volumes = [f"      - {home}/.lerim:{home}/.lerim"]
+    # Mount only .lerim/ subdirectories — agent should NOT see source code.
+    # Global lerim data (config, index, cache)
+    lerim_dir = f"{home}/.lerim"
+    volumes = [f"      - {lerim_dir}:{lerim_dir}"]
 
-    # Agent session dirs (read-only)
+    # Agent session dirs (read-only — agent reads traces but never modifies them)
     for _name, path_str in config.agents.items():
         resolved = str(Path(path_str).expanduser().resolve())
         volumes.append(f"      - {resolved}:{resolved}:ro")
 
-    # Project dirs
+    # Project .lerim dirs only (NOT the whole project directory)
     for _name, path_str in config.projects.items():
-        resolved = str(Path(path_str).expanduser().resolve())
-        volumes.append(f"      - {resolved}:{resolved}")
+        resolved = Path(path_str).expanduser().resolve()
+        lerim_subdir = resolved / ".lerim"
+        volumes.append(f"      - {lerim_subdir}:{lerim_subdir}")
 
     volumes_block = "\n".join(volumes)
     port = config.server_port
 
     # Forward API keys by name only — Docker reads values from host env.
     # NEVER write secret values into the compose file.
-    env_lines = [f"      - HOME={home}"]
+    env_lines = [
+        f"      - HOME={home}",
+        "      - FASTEMBED_CACHE_PATH=/opt/lerim/models",
+    ]
     for key in _API_KEY_ENV_NAMES:
         if os.environ.get(key):
             env_lines.append(f"      - {key}")
@@ -347,13 +385,19 @@ def _generate_compose_yml(build_local: bool = False) -> str:
     else:
         image_or_build = f"    image: {GHCR_IMAGE}:{__version__}"
 
-    # Set working_dir to first registered project so git_root_for() works
-    # inside the container (otherwise CWD is / and scope falls back to global).
+    # Set working_dir to first registered project's .lerim dir so
+    # git_root_for() can work with the mounted .lerim subdirectory.
     workdir_line = ""
     if config.projects:
         first_project = next(iter(config.projects.values()))
-        resolved_project = str(Path(first_project).expanduser().resolve())
-        workdir_line = f'\n    working_dir: "{resolved_project}"'
+        resolved_project = Path(first_project).expanduser().resolve()
+        workdir_line = f'\n    working_dir: "{resolved_project / ".lerim"}"'
+
+    # Resolve seccomp profile path (shipped with the package)
+    seccomp_path = Path(__file__).parent / "lerim-seccomp.json"
+    seccomp_line = ""
+    if seccomp_path.exists():
+        seccomp_line = f"\n      - seccomp={seccomp_path}"
 
     return f"""\
 # Auto-generated by lerim up — do not edit manually.
@@ -368,6 +412,21 @@ services:
       - "127.0.0.1:{port}:{port}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Container hardening
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true{seccomp_line}
+    pids_limit: 256
+    mem_limit: 2g
+    tmpfs:
+      - /tmp:size=100M
+      - {home}/.dspy_cache:size=50M
+      - {home}/.codex:size=50M
+      - {home}/.config:size=10M
+      - /root/.codex:size=50M
+      - /root/.config:size=10M
     environment:
 {env_block}
     volumes:

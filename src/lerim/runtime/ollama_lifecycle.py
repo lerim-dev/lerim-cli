@@ -27,7 +27,7 @@ def _ollama_models(config: Config) -> list[tuple[str, str]]:
 
     default_base = config.provider_api_bases.get("ollama", "http://127.0.0.1:11434")
 
-    for role in (config.lead_role, config.explorer_role):
+    for role in (config.lead_role,):
         if role.provider == "ollama":
             base = role.api_base or default_base
             key = (base, role.model)

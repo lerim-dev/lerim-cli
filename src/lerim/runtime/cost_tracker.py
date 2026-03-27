@@ -1,9 +1,8 @@
 """Track LLM cost per run via OpenRouter's usage.cost response field.
 
 Uses a ContextVar with a mutable accumulator so cost captured inside
-asyncio.run() (PydanticAI) and run_in_executor (tool calls) propagates
-back to the caller.  Two capture paths:
- - PydanticAI: httpx response event hook on the OpenRouter client.
+asyncio.run() and run_in_executor (tool calls) propagates back to the
+caller.  Capture path:
  - DSPy: explicit capture_dspy_cost() reads LM history after pipeline calls.
 """
 
@@ -11,64 +10,37 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 
-import httpx
-
 
 class _Acc:
-    """Mutable cost accumulator shared by reference across context copies."""
+	"""Mutable cost accumulator shared by reference across context copies."""
 
-    __slots__ = ("total",)
+	__slots__ = ("total",)
 
-    def __init__(self) -> None:
-        self.total = 0.0
+	def __init__(self) -> None:
+		self.total = 0.0
 
 
 _run_cost: ContextVar[_Acc | None] = ContextVar("lerim_run_cost", default=None)
 
 
 def start_cost_tracking() -> None:
-    """Begin accumulating LLM cost for the current run."""
-    _run_cost.set(_Acc())
+	"""Begin accumulating LLM cost for the current run."""
+	_run_cost.set(_Acc())
 
 
 def stop_cost_tracking() -> float:
-    """Stop tracking and return accumulated cost in USD."""
-    acc = _run_cost.get(None)
-    cost = acc.total if acc else 0.0
-    _run_cost.set(None)
-    return cost
+	"""Stop tracking and return accumulated cost in USD."""
+	acc = _run_cost.get(None)
+	cost = acc.total if acc else 0.0
+	_run_cost.set(None)
+	return cost
 
 
 def add_cost(amount: float) -> None:
-    """Add cost to the current run's accumulator (no-op when tracking inactive)."""
-    acc = _run_cost.get(None)
-    if acc is not None:
-        acc.total += amount
-
-
-# ---------------------------------------------------------------------------
-# PydanticAI path: httpx event hook
-# ---------------------------------------------------------------------------
-
-
-async def _capture_cost_hook(response: httpx.Response) -> None:
-    """Extract usage.cost from non-streaming OpenRouter JSON responses."""
-    if response.status_code != 200:
-        return
-    if "application/json" not in response.headers.get("content-type", ""):
-        return
-    try:
-        await response.aread()
-        cost = (response.json().get("usage") or {}).get("cost")
-        if cost is not None:
-            add_cost(float(cost))
-    except Exception:
-        pass
-
-
-def build_tracked_async_client() -> httpx.AsyncClient:
-    """Build httpx.AsyncClient that captures OpenRouter cost from responses."""
-    return httpx.AsyncClient(event_hooks={"response": [_capture_cost_hook]})
+	"""Add cost to the current run's accumulator (no-op when tracking inactive)."""
+	acc = _run_cost.get(None)
+	if acc is not None:
+		acc.total += amount
 
 
 # ---------------------------------------------------------------------------
@@ -77,21 +49,21 @@ def build_tracked_async_client() -> httpx.AsyncClient:
 
 
 def capture_dspy_cost(lm: object, history_start: int) -> None:
-    """Add cost from DSPy LM history entries added since *history_start*."""
-    history = getattr(lm, "history", None)
-    if not isinstance(history, list):
-        return
-    for entry in history[history_start:]:
-        if not isinstance(entry, dict):
-            continue
-        response = entry.get("response")
-        if response is None:
-            continue
-        usage = getattr(response, "usage", None)
-        if usage is None:
-            continue
-        cost = getattr(usage, "cost", None)
-        if cost is None and isinstance(usage, dict):
-            cost = usage.get("cost")
-        if cost is not None:
-            add_cost(float(cost))
+	"""Add cost from DSPy LM history entries added since *history_start*."""
+	history = getattr(lm, "history", None)
+	if not isinstance(history, list):
+		return
+	for entry in history[history_start:]:
+		if not isinstance(entry, dict):
+			continue
+		response = entry.get("response")
+		if response is None:
+			continue
+		usage = getattr(response, "usage", None)
+		if usage is None:
+			continue
+		cost = getattr(usage, "cost", None)
+		if cost is None and isinstance(usage, dict):
+			cost = usage.get("cost")
+		if cost is not None:
+			add_cost(float(cost))

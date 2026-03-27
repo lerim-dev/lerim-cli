@@ -46,6 +46,7 @@ class _ShipperState:
     memories_shipped_at: str = ""
     memories_pulled_at: str = ""
     service_runs_shipped_at: str = ""
+    jobs_shipped_at: str = ""
 
     def save(self) -> None:
         """Write state to disk."""
@@ -69,6 +70,7 @@ class _ShipperState:
                 memories_shipped_at=str(raw.get("memories_shipped_at") or ""),
                 memories_pulled_at=str(raw.get("memories_pulled_at") or ""),
                 service_runs_shipped_at=str(raw.get("service_runs_shipped_at") or ""),
+                jobs_shipped_at=str(raw.get("jobs_shipped_at") or ""),
             )
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             return cls()
@@ -667,6 +669,101 @@ async def _ship_service_runs(
     return shipped
 
 
+# ── job status shipping ──────────────────────────────────────────────────────
+
+
+_JOB_STATUS_MAP: dict[str, str] = {
+	"pending": "queued",
+	"running": "processing",
+	"done": "processed",
+	"failed": "failed",
+	"dead_letter": "blocked",
+}
+
+
+def _query_job_statuses(
+	db_path: Path, since_iso: str, limit: int,
+) -> list[dict[str, Any]]:
+	"""Query session_jobs with ``updated_at`` after *since_iso*."""
+	if not db_path.exists():
+		return []
+	try:
+		conn = sqlite3.connect(db_path)
+		conn.row_factory = lambda cur, row: {
+			col[0]: row[idx] for idx, col in enumerate(cur.description)
+		}
+		if since_iso:
+			rows = conn.execute(
+				"""
+				SELECT run_id, status, error, attempts, updated_at
+				FROM session_jobs
+				WHERE updated_at > ?
+				ORDER BY updated_at ASC
+				LIMIT ?
+				""",
+				(since_iso, limit),
+			).fetchall()
+		else:
+			rows = conn.execute(
+				"""
+				SELECT run_id, status, error, attempts, updated_at
+				FROM session_jobs
+				ORDER BY updated_at ASC
+				LIMIT ?
+				""",
+				(limit,),
+			).fetchall()
+		conn.close()
+		return rows
+	except sqlite3.Error as exc:
+		logger.warning("cloud shipper: job status query failed: {}", exc)
+		return []
+
+
+async def _ship_job_statuses(
+	endpoint: str, token: str, state: _ShipperState, db_path: Path,
+) -> int:
+	"""Ship processing status updates from session_jobs."""
+	shipped = 0
+	latest_updated = state.jobs_shipped_at
+
+	while True:
+		rows = await asyncio.to_thread(
+			_query_job_statuses, db_path, latest_updated, 500,
+		)
+		if not rows:
+			break
+
+		statuses_payload = []
+		for row in rows:
+			local_status = str(row.get("status") or "")
+			statuses_payload.append({
+				"run_id": str(row.get("run_id") or ""),
+				"processing_status": _JOB_STATUS_MAP.get(local_status, local_status),
+				"processing_error": row.get("error"),
+				"processing_attempts": int(row.get("attempts") or 0),
+			})
+
+		ok = await _post_batch(
+			endpoint, "/api/v1/ingest/job_statuses", token,
+			{"statuses": statuses_payload},
+		)
+		if ok:
+			shipped += len(rows)
+			last_ts = str(rows[-1].get("updated_at") or "")
+			if last_ts > latest_updated:
+				latest_updated = last_ts
+		else:
+			break
+
+		if len(rows) < 500:
+			break
+
+	if latest_updated and latest_updated != state.jobs_shipped_at:
+		state.jobs_shipped_at = latest_updated
+	return shipped
+
+
 # ── public entry point ───────────────────────────────────────────────────────
 
 
@@ -699,6 +796,9 @@ async def ship_once(config: Config) -> dict[str, int]:
     service_runs_shipped = await _ship_service_runs(
         endpoint, token, state, config.sessions_db_path
     )
+    job_statuses_shipped = await _ship_job_statuses(
+        endpoint, token, state, config.sessions_db_path
+    )
     memories_shipped = await _ship_memories(endpoint, token, config, state)
 
     state.save()
@@ -707,6 +807,7 @@ async def ship_once(config: Config) -> dict[str, int]:
         "logs": logs_shipped,
         "sessions": sessions_shipped,
         "service_runs": service_runs_shipped,
+        "job_statuses": job_statuses_shipped,
         "memories": memories_shipped,
         "memories_pulled": memories_pulled,
     }

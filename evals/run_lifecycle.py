@@ -201,7 +201,7 @@ def _run_sync_eval(
     judge_model: str | None = None,
 ) -> dict:
     """Run one sync + judge and return score dict."""
-    from lerim.runtime.agent import LerimAgent
+    from lerim.runtime.oai_agent import LerimOAIAgent
 
     memory_before = _count_memory_files(memory_root)
     logger.info(
@@ -214,7 +214,7 @@ def _run_sync_eval(
 
     t0 = time.time()
     try:
-        agent = LerimAgent(config=eval_cfg, default_cwd=str(Path.cwd()))
+        agent = LerimOAIAgent(config=eval_cfg, default_cwd=str(Path.cwd()))
         result = agent.sync(
             trace_path,
             memory_root=str(memory_root),
@@ -317,7 +317,7 @@ def _run_maintain_eval(
     judge_model: str | None = None,
 ) -> dict:
     """Run one maintain + judge and return score dict."""
-    from lerim.runtime.agent import LerimAgent
+    from lerim.runtime.oai_agent import LerimOAIAgent
 
     memory_before = _count_memory_files(memory_root)
     logger.info(
@@ -326,7 +326,7 @@ def _run_maintain_eval(
 
     t0 = time.time()
     try:
-        agent = LerimAgent(config=eval_cfg, default_cwd=str(Path.cwd()))
+        agent = LerimOAIAgent(config=eval_cfg, default_cwd=str(Path.cwd()))
         result = agent.maintain(
             memory_root=str(memory_root),
             workspace_root=str(workspace_root),

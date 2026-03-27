@@ -112,6 +112,8 @@ class MemoryRecord(MemoryCandidate):
         }
         if self.primitive == MemoryType.learning:
             base["kind"] = self.kind or "insight"
+        if self.outcome is not None:
+            base["outcome"] = self.outcome
         return base
 
     def to_markdown(self) -> str:

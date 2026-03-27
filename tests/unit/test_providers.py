@@ -121,28 +121,6 @@ def test_api_key_mlx_returns_none(tmp_path):
     assert _api_key_for_provider(cfg, "mlx") is None
 
 
-def test_build_orchestration_model_with_fallback(tmp_path):
-    """build_orchestration_model with fallback_models returns FallbackModel."""
-    from dataclasses import replace
-    from pydantic_ai.models.fallback import FallbackModel
-    from lerim.config.settings import LLMRoleConfig
-    from lerim.runtime.providers import build_orchestration_model_from_role
-
-    cfg = make_config(tmp_path)
-    cfg = replace(cfg, zai_api_key="test-key", openrouter_api_key="test-key")
-    role = LLMRoleConfig(
-        provider="openrouter",
-        model="qwen/qwen3-coder-30b-a3b-instruct",
-        api_base="",
-        fallback_models=("openrouter:anthropic/claude-haiku-4-5-20251001",),
-        timeout_seconds=300,
-        max_iterations=24,
-        openrouter_provider_order=("nebius",),
-    )
-    model = build_orchestration_model_from_role(role, config=cfg)
-    assert isinstance(model, FallbackModel)
-
-
 def test_api_key_resolution(tmp_path):
     """_api_key_for_provider resolves from config fields."""
     from dataclasses import replace

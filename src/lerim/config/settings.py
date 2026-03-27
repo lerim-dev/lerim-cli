@@ -31,7 +31,7 @@ _LAST_CONFIG_SOURCES: list[dict[str, str]] = []
 
 @dataclass(frozen=True)
 class LLMRoleConfig:
-    """Role config for PydanticAI orchestration agents."""
+    """Role config for lead orchestration agent."""
 
     provider: str
     model: str
@@ -43,6 +43,9 @@ class LLMRoleConfig:
     thinking: bool = True
     max_tokens: int = 32000
     max_explorers: int = 4
+    max_turns_sync: int = 50
+    max_turns_maintain: int = 100
+    max_turns_ask: int = 30
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,16 @@ class DSPyRoleConfig:
     thinking: bool = True
     max_tokens: int = 32000
     max_workers: int = 4
+
+
+@dataclass(frozen=True)
+class CodexRoleConfig:
+	"""Configuration for the Codex filesystem sub-agent."""
+	provider: str = "opencode_go"
+	model: str = "minimax-m2.5"
+	api_base: str = ""
+	timeout_seconds: int = 600
+	idle_timeout_seconds: int = 120
 
 
 def load_toml_file(path: Path | None) -> dict[str, Any]:
@@ -265,7 +278,7 @@ class Config:
     parallel_pipelines: bool
 
     lead_role: LLMRoleConfig
-    explorer_role: LLMRoleConfig
+    codex_role: CodexRoleConfig
     extract_role: DSPyRoleConfig
     summarize_role: DSPyRoleConfig
 
@@ -278,6 +291,7 @@ class Config:
     zai_api_key: str | None
     openrouter_api_key: str | None
     minimax_api_key: str | None
+    opencode_api_key: str | None
 
     provider_api_bases: dict[str, str]
     auto_unload: bool
@@ -346,17 +360,10 @@ class Config:
                     self.lead_role.openrouter_provider_order
                 ),
             },
-            "explorer_role": {
-                "provider": self.explorer_role.provider,
-                "model": self.explorer_role.model,
-                "api_base": self.explorer_role.api_base,
-                "fallback_models": list(self.explorer_role.fallback_models),
-                "timeout_seconds": self.explorer_role.timeout_seconds,
-                "max_iterations": self.explorer_role.max_iterations,
-                "openrouter_provider_order": list(
-                    self.explorer_role.openrouter_provider_order
-                ),
-                "max_explorers": self.explorer_role.max_explorers,
+            "codex_role": {
+                "provider": self.codex_role.provider,
+                "model": self.codex_role.model,
+                "idle_timeout_seconds": self.codex_role.idle_timeout_seconds,
             },
             "extract_role": {
                 "provider": self.extract_role.provider,
@@ -427,6 +434,9 @@ def _build_llm_role(
         thinking=bool(raw.get("thinking", True)),
         max_tokens=int(raw.get("max_tokens", 32000)),
         max_explorers=int(raw.get("max_explorers", 4)),
+        max_turns_sync=int(raw.get("max_turns_sync", 50)),
+        max_turns_maintain=int(raw.get("max_turns_maintain", 100)),
+        max_turns_ask=int(raw.get("max_turns_ask", 30)),
     )
 
 
@@ -451,6 +461,17 @@ def _build_dspy_role(
         max_tokens=int(raw.get("max_tokens", 32000)),
         max_workers=int(raw.get("max_workers", 4)),
     )
+
+
+def _build_codex_role(raw: dict[str, Any]) -> CodexRoleConfig:
+	"""Build Codex filesystem sub-agent role config from TOML payload."""
+	return CodexRoleConfig(
+		provider=_to_non_empty_string(raw.get("provider")) or "opencode_go",
+		model=_to_non_empty_string(raw.get("model")) or "minimax-m2.5",
+		api_base=_to_non_empty_string(raw.get("api_base")) or "",
+		timeout_seconds=int(raw.get("timeout_seconds", 600)),
+		idle_timeout_seconds=int(raw.get("idle_timeout_seconds", 120)),
+	)
 
 
 def _parse_string_table(raw: dict[str, Any]) -> dict[str, str]:
@@ -547,13 +568,6 @@ def load_config() -> Config:
         default_provider="openrouter",
         default_model="qwen/qwen3-coder-30b-a3b-instruct",
     )
-    explorer_role = _build_llm_role(
-        roles.get("explorer", {})
-        if isinstance(roles.get("explorer", {}), dict)
-        else {},
-        default_provider=lead_role.provider,
-        default_model=lead_role.model,
-    )
     extract_role = _build_dspy_role(
         roles.get("extract", {}) if isinstance(roles.get("extract", {}), dict) else {},
         default_provider="ollama",
@@ -565,6 +579,9 @@ def load_config() -> Config:
         else {},
         default_provider=extract_role.provider,
         default_model=extract_role.model,
+    )
+    codex_role = _build_codex_role(
+        roles.get("codex", {}) if isinstance(roles.get("codex", {}), dict) else {}
     )
 
     port = _require_int(server, "port", minimum=1)
@@ -632,7 +649,7 @@ def load_config() -> Config:
         sync_max_sessions=_require_int(server, "sync_max_sessions", minimum=1),
         parallel_pipelines=bool(server.get("parallel_pipelines", True)),
         lead_role=lead_role,
-        explorer_role=explorer_role,
+        codex_role=codex_role,
         extract_role=extract_role,
         summarize_role=summarize_role,
         tracing_enabled=bool(tracing.get("enabled", False))
@@ -646,6 +663,8 @@ def load_config() -> Config:
         openrouter_api_key=_to_non_empty_string(os.environ.get("OPENROUTER_API_KEY"))
         or None,
         minimax_api_key=_to_non_empty_string(os.environ.get("MINIMAX_API_KEY")) or None,
+        opencode_api_key=_to_non_empty_string(os.environ.get("OPENCODE_API_KEY"))
+        or None,
         provider_api_bases=_parse_string_table(
             toml_data.get("providers", {})
             if isinstance(toml_data.get("providers"), dict)
@@ -788,13 +807,6 @@ def build_eval_config(
         default_provider="openrouter",
         default_model="qwen/qwen3-coder-30b-a3b-instruct",
     )
-    explorer_role = _build_llm_role(
-        roles.get("explorer", {})
-        if isinstance(roles.get("explorer", {}), dict)
-        else {},
-        default_provider=lead_role.provider,
-        default_model=lead_role.model,
-    )
     extract_role = _build_dspy_role(
         roles.get("extract", {}) if isinstance(roles.get("extract", {}), dict) else {},
         default_provider="ollama",
@@ -806,6 +818,9 @@ def build_eval_config(
         else {},
         default_provider=extract_role.provider,
         default_model=extract_role.model,
+    )
+    codex_role = _build_codex_role(
+        roles.get("codex", {}) if isinstance(roles.get("codex", {}), dict) else {}
     )
 
     port = _require_int(server, "port", minimum=1)
@@ -856,7 +871,7 @@ def build_eval_config(
         sync_max_sessions=_require_int(server, "sync_max_sessions", minimum=1),
         parallel_pipelines=bool(server.get("parallel_pipelines", True)),
         lead_role=lead_role,
-        explorer_role=explorer_role,
+        codex_role=codex_role,
         extract_role=extract_role,
         summarize_role=summarize_role,
         tracing_enabled=bool(tracing.get("enabled", False))
@@ -870,6 +885,7 @@ def build_eval_config(
         openrouter_api_key=_to_non_empty_string(os.environ.get("OPENROUTER_API_KEY"))
         or None,
         minimax_api_key=_to_non_empty_string(os.environ.get("MINIMAX_API_KEY")) or None,
+        opencode_api_key=None,
         provider_api_bases=_parse_string_table(
             toml_data.get("providers", {})
             if isinstance(toml_data.get("providers"), dict)
@@ -893,7 +909,6 @@ if __name__ == "__main__":
     assert cfg.lead_role.provider
     assert cfg.lead_role.model
     assert isinstance(cfg.lead_role.fallback_models, tuple)
-    assert cfg.explorer_role.provider
     assert cfg.extract_role.provider
     assert cfg.extract_role.max_window_tokens >= 1000
     assert cfg.extract_role.window_overlap_tokens >= 0
@@ -907,7 +922,6 @@ if __name__ == "__main__":
     assert isinstance(cfg.projects, dict)
     payload = cfg.public_dict()
     assert "lead_role" in payload
-    assert "explorer_role" in payload
     assert "extract_role" in payload
     assert "summarize_role" in payload
     assert "decay_enabled" in payload

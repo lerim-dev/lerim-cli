@@ -8,7 +8,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 
-from lerim.config.settings import Config, DSPyRoleConfig, LLMRoleConfig
+from lerim.config.settings import CodexRoleConfig, Config, DSPyRoleConfig, LLMRoleConfig
 
 
 def make_config(base: Path) -> Config:
@@ -42,15 +42,7 @@ def make_config(base: Path) -> Config:
             max_iterations=10,
             openrouter_provider_order=(),
         ),
-        explorer_role=LLMRoleConfig(
-            provider="openrouter",
-            model="x-ai/grok-4.1-fast",
-            api_base="",
-            fallback_models=(),
-            timeout_seconds=180,
-            max_iterations=8,
-            openrouter_provider_order=(),
-        ),
+        codex_role=CodexRoleConfig(),
         extract_role=DSPyRoleConfig(
             provider="openrouter",
             model="openai/gpt-5-nano",
@@ -80,6 +72,7 @@ def make_config(base: Path) -> Config:
         zai_api_key=None,
         openrouter_api_key=None,
         minimax_api_key=None,
+        opencode_api_key=None,
         provider_api_bases={
             "minimax": "https://api.minimax.io/v1",
             "zai": "https://api.z.ai/api/coding/paas/v4",
@@ -91,6 +84,8 @@ def make_config(base: Path) -> Config:
         auto_unload=True,
         agents={},
         projects={},
+        cloud_endpoint="https://api.lerim.dev",
+        cloud_token=None,
     )
 
 

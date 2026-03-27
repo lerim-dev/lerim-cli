@@ -17,7 +17,7 @@ from typing import Any, Callable
 from lerim.app.activity_log import log_activity
 from lerim.config.project_scope import match_session_project
 from lerim.config.settings import get_config, reload_config
-from lerim.runtime.agent import LerimAgent
+from lerim.runtime.oai_agent import LerimOAIAgent
 from lerim.sessions.catalog import (
     IndexedSession,
     claim_session_jobs,
@@ -326,7 +326,7 @@ def _process_one_job(job: dict[str, Any]) -> dict[str, Any]:
             if not session_path:
                 doc = fetch_session_doc(rid) or {}
                 session_path = str(doc.get("session_path") or "").strip()
-            agent = LerimAgent(default_cwd=repo_path)
+            agent = LerimOAIAgent(default_cwd=repo_path)
             result = agent.sync(Path(session_path), memory_root=project_memory)
     except Exception as exc:
         fail_session_job(
@@ -634,9 +634,27 @@ def run_maintain_once(
                 continue
             project_memory = str(project_path / ".lerim" / "memory")
             try:
-                agent = LerimAgent(default_cwd=str(project_path))
+                agent = LerimOAIAgent(default_cwd=str(project_path))
                 result = agent.maintain(memory_root=project_memory)
                 results[project_name] = result
+                # Include intelligence data from maintain_actions if available
+                if isinstance(result, dict) and result.get("artifacts"):
+                    actions_path = result["artifacts"].get("maintain_actions")
+                    if actions_path and Path(actions_path).exists():
+                        try:
+                            actions_report = json.loads(
+                                Path(actions_path).read_text(encoding="utf-8")
+                            )
+                            if isinstance(actions_report, dict):
+                                csa = actions_report.get("cross_session_analysis")
+                                if csa:
+                                    result["cross_session_analysis"] = csa
+                        except (json.JSONDecodeError, OSError):
+                            pass
+                # Check for hot-memory
+                hot_memory_path = Path(project_memory).parent / "hot-memory.md"
+                if hot_memory_path.exists():
+                    result["hot_memory_exists"] = True
                 # Activity log per project.
                 counts = (
                     (result.get("counts") or {}) if isinstance(result, dict) else {}
