@@ -5,7 +5,7 @@ You are evaluating the quality of one sync run within a lifecycle eval. Memory a
 ## Context
 
 - **Original trace**: `{trace_path}` — the coding session being synced
-- **Agent trace**: `{agent_trace_path}` — full PydanticAI message history (tool calls, reasoning)
+- **Agent trace**: `{agent_trace_path}` — OpenAI Agents SDK run history (`agent_trace.json`: tools and messages)
 - **Memory root**: `{memory_root}` — existing memory files (decisions/ and learnings/)
 - **Run folder**: `{run_folder}` — sync artifacts (extract.json, summary.json, memory_actions.json)
 - **Memories before this sync**: {memory_count}

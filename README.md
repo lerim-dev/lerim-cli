@@ -58,25 +58,70 @@ Lerim is file-first and primitive-first.
 - Project memory: `<repo>/.lerim/`
 - Global fallback: `~/.lerim/`
 - Search: file-based (no index required)
-- Orchestration: `openai-agents` lead agent + Codex filesystem sub-agent
-- Multi-provider: ResponsesProxy adapter enables Codex sub-agent across any LLM provider
-- Extraction/summarization: `dspy.ChainOfThought` with transcript windowing
+- Orchestration: OpenAI Agents SDK (`LerimOAIAgent`) with per-flow tools; non-OpenAI providers use `ResponsesProxy` + LiteLLM on the lead path
+- Extraction/summarization: DSPy pipelines with transcript windowing
 
 ### Sync path
 
-<p align="center">
-  <img src="assets/sync.png" alt="Sync path" width="700">
-</p>
+Runtime shape: one **lead agent** (OpenAI Agents SDK) calls **tools**; `extract_pipeline` / `summarize_pipeline` run **DSPy** with your `[roles.extract]` and `[roles.summarize]` models.
 
-The sync path processes new agent sessions: reads transcript archives, extracts decision and learning candidates via DSPy, deduplicates against existing knowledge, and writes new entries to the project's knowledge store.
+```mermaid
+flowchart TB
+    subgraph lead["Lead"]
+        OAI[LerimOAIAgent · OpenAI Agents SDK]
+    end
+    subgraph syncTools["Sync tools"]
+        ep[extract_pipeline]
+        sp[summarize_pipeline]
+        bd[batch_dedup_candidates]
+        wm[write_memory]
+        wr[write_report]
+        rf["read_file · list_files"]
+    end
+    subgraph dspy["DSPy LMs"]
+        ex[roles.extract]
+        su[roles.summarize]
+    end
+    OAI --> ep
+    OAI --> sp
+    OAI --> bd
+    OAI --> wm
+    OAI --> wr
+    OAI --> rf
+    ep -.-> ex
+    sp -.-> su
+```
+
+Before that run, adapters **discover** sessions, **index** them, and **compact** traces — then the agent + tools above decide, write, and summarize.
 
 ### Maintain path
 
-<p align="center">
-  <img src="assets/maintain.png" alt="Maintain path" width="700">
-</p>
+Same **lead agent** pattern; **maintain** tools only (no DSPy pipelines on this flow).
 
-The maintain path runs offline refinement over stored knowledge: merges duplicates, archives low-value entries, consolidates related learnings, and applies time-based decay to keep the context graph clean and relevant.
+```mermaid
+flowchart TB
+    subgraph lead_m["Lead"]
+        OAI_m[LerimOAIAgent · OpenAI Agents SDK]
+    end
+    subgraph maintainTools["Maintain tools"]
+        ms[memory_search]
+        ar[archive_memory]
+        em[edit_memory]
+        wh[write_hot_memory]
+        wm2[write_memory]
+        wr2[write_report]
+        rf2["read_file · list_files"]
+    end
+    OAI_m --> ms
+    OAI_m --> ar
+    OAI_m --> em
+    OAI_m --> wh
+    OAI_m --> wm2
+    OAI_m --> wr2
+    OAI_m --> rf2
+```
+
+The maintainer prompt guides merge, archive, consolidate, decay, and hot-memory — the agent chooses **how** to use the tools above.
 
 ## Quick start
 
@@ -97,14 +142,18 @@ lerim project add .            # add current project (repeat for other repos)
 
 ### 3. Set API keys
 
-Set keys for the providers you configure (defaults: MiniMax primary, Z.AI fallback):
+Set keys for whatever you configure under `[roles.*]`. The shipped `default.toml`
+often uses **OpenCode Go** for roles — in that case set `OPENCODE_API_KEY` (see
+[model roles](https://docs.lerim.dev/configuration/model-roles/)). If you switch
+to MiniMax, Z.AI, OpenRouter, etc., set the matching env vars instead.
 
 ```bash
-export MINIMAX_API_KEY="..."   # if using MiniMax (default)
-export ZAI_API_KEY="..."       # if using Z.AI (default fallback)
+export OPENCODE_API_KEY="..."   # when using provider opencode_go (common default)
+# export MINIMAX_API_KEY="..."  # if roles use minimax
+# export ZAI_API_KEY="..."      # if you add zai as fallback
 ```
 
-You only need keys for providers referenced in your `[roles.*]` config. See [model roles](https://docs.lerim.dev/configuration/model-roles/).
+You only need keys for providers referenced in your `[roles.*]` config.
 
 ### 4. Start Lerim
 
@@ -113,7 +162,8 @@ lerim up
 ```
 
 That's it. Lerim is now running as a Docker service — syncing sessions, extracting
-decisions and learnings, refining memories, and serving a dashboard at `http://localhost:8765`.
+decisions and learnings, refining memories, and exposing the JSON API at `http://localhost:8765`.
+Use **[Lerim Cloud](https://lerim.dev)** for the web UI (session analytics, memories, settings).
 
 ### 5. Teach your agent about Lerim
 
@@ -123,7 +173,9 @@ Install the Lerim skill so your agent knows how to query past context:
 lerim skill install
 ```
 
-This copies skill files (SKILL.md, cli-reference.md) into your agent's skill directory.
+This copies bundled skill files (`SKILL.md`, `cli-reference.md`) into
+`~/.agents/skills/lerim/` (shared by Cursor, Codex, OpenCode, …) and
+`~/.claude/skills/lerim/` (Claude Code).
 
 ### 6. Get the most out of Lerim
 
@@ -152,21 +204,9 @@ ollama serve                   # start Ollama (runs outside Docker)
 
 For Docker deployments, set `ollama = "http://host.docker.internal:11434"` in `[providers]` so the container can reach the host Ollama instance. See [model roles](https://docs.lerim.dev/configuration/model-roles/) for full configuration.
 
-## Dashboard
+## Web UI (Lerim Cloud)
 
-The dashboard gives you a local UI for session analytics, knowledge browsing, and runtime status.
-
-<p align="center">
-  <img src="assets/dashboard.png" alt="Lerim dashboard" width="1100">
-</p>
-
-### Tabs
-
-- **Overview**: high-level metrics and charts (sessions, messages, tools, errors, tokens, activity by day/hour, model usage).
-- **Runs**: searchable session list with status and metadata; open any run in a full-screen chat viewer.
-- **Memories**: library + editor for memory records (filter, inspect, edit title/body/kind/confidence/tags).
-- **Pipeline**: sync/maintain status, extraction queue state, and latest extraction report.
-- **Settings**: dashboard-editable config for server, model roles, and tracing; saves to `~/.lerim/config.toml`.
+The browser UI (sessions, memories, pipeline, settings) lives in **[lerim-cloud](https://github.com/lerim-dev/lerim-cloud)** and is served from **[lerim.dev](https://lerim.dev)**. The `lerim` daemon still exposes a **JSON API** on `http://localhost:8765` for the CLI and for Cloud to talk to your local runtime when connected.
 
 ## CLI reference
 
@@ -213,16 +253,16 @@ API keys come from environment variables only. Set keys for the providers you us
 
 | Variable | Provider | Default role |
 |----------|----------|-------------|
-| `MINIMAX_API_KEY` | MiniMax | Primary (all roles) |
-| `ZAI_API_KEY` | Z.AI | Fallback |
-| `OPENROUTER_API_KEY` | OpenRouter | Optional alternative |
-| `OPENAI_API_KEY` | OpenAI | Optional alternative |
-| `ANTHROPIC_API_KEY` | Anthropic | Optional alternative |
+| `OPENCODE_API_KEY` | OpenCode Go / Zen | Common default (see `default.toml`) |
+| `MINIMAX_API_KEY` | MiniMax | When `provider = "minimax"` |
+| `ZAI_API_KEY` | Z.AI | When using Z.AI |
+| `OPENROUTER_API_KEY` | OpenRouter | Optional |
+| `OPENAI_API_KEY` | OpenAI | Optional |
+| `ANTHROPIC_API_KEY` | Anthropic | Optional |
 
-Default model config (from `src/lerim/config/default.toml`):
+Default model config (see `src/lerim/config/default.toml` — values change with releases):
 
-- All roles: `provider=minimax`, `model=MiniMax-M2.5`
-- Fallback: `zai:glm-4.7` (lead/codex), `zai:glm-4.5-air` (extract/summarize)
+- Example defaults: `provider = "opencode_go"`, `model = "minimax-m2.5"` for lead, extract, and summarize; `fallback_models` on the lead role for quota errors.
 
 ### Development
 
@@ -238,7 +278,7 @@ tests/run_tests.sh all
 
 ### Tracing (OpenTelemetry)
 
-Lerim uses OpenTelemetry for agent observability, with traces routed through the OpenAI Agents SDK tracing layer.
+When enabled, tracing uses Logfire (OpenTelemetry): DSPy is instrumented; optional httpx captures LLM HTTP traffic. Built-in OpenAI Agents SDK cloud tracing is disabled in the runtime so spans are not exported to OpenAI by default.
 
 ```bash
 # Enable tracing

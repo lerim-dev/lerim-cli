@@ -151,11 +151,6 @@ cd "$ROOT_DIR"
 run_unit() {
   print_section "Unit tests"
   python -m pytest tests/unit/ -x -q
-  if command -v node >/dev/null 2>&1; then
-    node tests/js_render_harness.js
-  else
-    echo "Node not found; skipping tests/js_render_harness.js"
-  fi
 }
 
 run_pytest_allow_empty() {

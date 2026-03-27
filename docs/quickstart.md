@@ -36,7 +36,7 @@ lerim --version
 You should see output like:
 
 ```
-lerim, version 0.1.55
+lerim, version 0.1.69
 ```
 
 </div>
@@ -47,14 +47,22 @@ lerim, version 0.1.55
 
 Lerim needs an LLM provider for extraction and querying. Set at least one API key:
 
-=== "MiniMax + ZAI (recommended)"
+=== "OpenCode Go (common default)"
+
+    ```bash
+    export OPENCODE_API_KEY="..."
+    ```
+
+    The shipped `default.toml` often uses `provider = "opencode_go"` for roles. Set this key unless you override providers in `~/.lerim/config.toml`.
+
+=== "MiniMax + ZAI"
 
     ```bash
     export MINIMAX_API_KEY="sk-cp-..."
     export ZAI_API_KEY="..."
     ```
 
-    MiniMax is the default provider (MiniMax-M2.5) with Z.AI as fallback. Both use subscription-based coding plans for low, predictable costs.
+    Use when `[roles.*]` uses MiniMax and Z.AI.
 
 === "OpenRouter"
 
@@ -69,7 +77,7 @@ Lerim needs an LLM provider for extraction and querying. Set at least one API ke
     ```
 
 !!! note
-    You only need API keys for the providers you configure. The defaults use MiniMax (primary) with Z.AI (fallback), but you can switch to any supported provider by updating `[roles.*]` in your config. See [model roles](configuration/model-roles.md).
+    You only need API keys for the providers you configure. Match keys to `[roles.*]` in `~/.lerim/config.toml` (see shipped `src/lerim/config/default.toml` for package defaults). See [model roles](configuration/model-roles.md).
 
 </div>
 
@@ -140,17 +148,12 @@ Lerim is running at http://localhost:8765
 This starts a Docker container that:
 
 - Runs the sync + maintain daemon loop
-- Serves the dashboard at `http://localhost:8765`
-- Exposes the HTTP API for CLI commands
+- Exposes the JSON API at `http://localhost:8765` for CLI commands
 
 !!! note
     The first time you run `lerim up`, it will pull the Docker image from the registry. This may take a minute.
 
-Open the dashboard in your browser:
-
-```bash
-open http://localhost:8765
-```
+Use **[Lerim Cloud](https://lerim.dev)** for the web UI (sessions, memories, settings). `http://localhost:8765/` may show a short stub page linking to Cloud.
 
 </div>
 
@@ -211,7 +214,8 @@ Install the Lerim skill so your coding agent knows how to query past context:
 lerim skill install
 ```
 
-This copies SKILL.md and the CLI reference into your agent's skill directory.
+This copies `SKILL.md` and `cli-reference.md` into `~/.agents/skills/lerim/` and
+`~/.claude/skills/lerim/` (see `lerim skill install --help`).
 
 At the start of a coding session, tell your agent:
 
@@ -309,12 +313,12 @@ lerim sync --agent claude
 
     [:octicons-arrow-right-24: Memory model](concepts/memory-model.md)
 
--   :material-monitor-dashboard: **Dashboard**
+-   :material-monitor-dashboard: **Lerim Cloud**
 
     ---
 
-    Explore the web UI features
+    Web UI (sessions, memories, pipeline)
 
-    [:octicons-arrow-right-24: Dashboard](guides/dashboard.md)
+    [:octicons-arrow-right-24: Web UI](guides/dashboard.md)
 
 </div>

@@ -1,27 +1,31 @@
 # Model Roles
 
-Lerim uses three model roles to separate concerns across the pipeline. Each role
-can point to a different provider and model, letting you balance cost, speed,
-and quality.
+Lerim separates **orchestration** (OpenAI Agents SDK lead), **DSPy extraction**, and **DSPy summarization**. A **`[roles.codex]`** block is also parsed for config (e.g. Cloud UI); it is **not** consumed by `LerimOAIAgent` at runtime today.
 
-## The three roles
+## Runtime roles
 
 | Role | Runtime | Purpose | Default model |
 |------|---------|---------|---------------|
-| `lead` | OpenAI Agents SDK | Orchestrates sync/maintain/ask flows, delegates to Codex, runs decision policy, writes memory | `MiniMax-M2.5` |
-| `extract` | DSPy | Extracts decision and learning candidates from session transcripts via ChainOfThought | `MiniMax-M2.5` |
-| `summarize` | DSPy | Generates structured session summaries from transcripts via ChainOfThought | `MiniMax-M2.5` |
+| `lead` | OpenAI Agents SDK | Orchestrates sync/maintain/ask via tools (`write_memory`, `extract_pipeline`, `memory_search`, …); only path that writes memory | See `default.toml` |
+| `extract` | DSPy | Extracts decision and learning candidates from session transcripts | See `default.toml` |
+| `summarize` | DSPy | Generates structured session summaries from transcripts | See `default.toml` |
+
+## Config-only role
+
+| Role | Purpose |
+|------|---------|
+| `codex` | Parsed into `Config` (e.g. for Lerim Cloud). Reserved for future use — **not** wired into the lead runtime. |
 
 ```mermaid
 flowchart LR
-	A[Session Transcript] --> B[extract]
-	A --> C[summarize]
-	B --> D[lead]
-	C --> D
-	D -->|filesystem ops| E[Codex]
-	D --> F[write_memory]
-	D --> G[DSPy pipelines]
+	Transcript[SessionTranscript] --> Ext[extract_DSPy]
+	Transcript --> Sum[summarize_DSPy]
+	Ext --> Lead[lead_OAI_agent]
+	Sum --> Lead
+	Lead --> Tools[SDK_tools]
 ```
+
+Tools include DSPy pipeline tools invoked by the lead agent and filesystem/search helpers as defined in `src/lerim/runtime/oai_tools.py`.
 
 ## Role configuration
 
@@ -83,6 +87,19 @@ Each role is configured under `[roles.<name>]` in your TOML config.
 
 	Summarization uses the same windowed ChainOfThought approach as extraction,
 	producing structured summaries with frontmatter.
+
+=== "Codex (config)"
+
+	```toml
+	[roles.codex]
+	provider = "opencode_go"
+	model = "minimax-m2.5"
+	api_base = ""
+	timeout_seconds = 600
+	idle_timeout_seconds = 120
+	```
+
+	This block is loaded for config visibility (e.g. Cloud) and future use. **Changing it does not affect the current OpenAI Agents SDK lead runtime.**
 
 ## Non-OpenAI providers and ResponsesProxy
 
@@ -189,7 +206,7 @@ All roles share these configuration keys:
 
 | Option | Description |
 |--------|-------------|
-| `provider` | Backend: `minimax`, `zai`, `openrouter`, `openai`, `ollama`, `mlx` |
+| `provider` | Backend: `minimax`, `zai`, `openrouter`, `openai`, `ollama`, `mlx`, `opencode_go`, … |
 | `model` | Model identifier (for OpenRouter, use the full slug e.g. `anthropic/claude-sonnet-4-5-20250929`) |
 | `api_base` | Custom API endpoint. Empty = use default from `[providers]` |
 | `fallback_models` | Ordered fallback chain: `"model"` (same provider) or `"provider:model"` |

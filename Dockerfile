@@ -16,9 +16,6 @@ RUN pip install --no-cache-dir /build && rm -rf /build
 ENV FASTEMBED_CACHE_PATH=/opt/lerim/models
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
 
-# Dashboard assets for the built-in web UI
-COPY dashboard/ /opt/lerim/dashboard/
-
 EXPOSE 8765
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

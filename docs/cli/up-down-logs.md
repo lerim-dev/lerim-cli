@@ -4,7 +4,7 @@ Docker container lifecycle commands for starting, stopping, and monitoring Lerim
 
 ## Overview
 
-These host-only commands manage the Docker container that runs `lerim serve` (daemon + API + dashboard).
+These host-only commands manage the Docker container that runs `lerim serve` (daemon + JSON API).
 
 !!! info "Host-only commands"
     These commands run on the host machine. They do not require a running Lerim server.
@@ -89,7 +89,7 @@ lerim down
 
 ## Notes
 
-- The container runs `lerim serve` which provides the daemon loop, HTTP API, and dashboard
+- The container runs `lerim serve` which provides the daemon loop and JSON API (web UI: [Lerim Cloud](https://lerim.dev))
 - Dashboard is available at `http://localhost:8765` when running
 - Docker restart policy is `"no"` — the container does not auto-restart after reboots
 
