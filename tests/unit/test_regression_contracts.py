@@ -86,6 +86,9 @@ def test_cli_subcommands_present():
         "memory",
         "dashboard",
         "status",
+        "queue",
+        "retry",
+        "skip",
     ):
         assert cmd in choices, f"Missing CLI subcommand: {cmd}"
 

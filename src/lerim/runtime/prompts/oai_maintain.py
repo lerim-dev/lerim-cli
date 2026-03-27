@@ -1,7 +1,8 @@
 """Maintain (memory maintenance) prompt builder for the OpenAI Agents SDK agent.
 
 Extends the base maintain prompt with cross-session analysis and hot-memory
-curation. All filesystem operations are delegated to the Codex tool.
+curation. All operations use lightweight tools (list_files, read_file,
+archive_memory, edit_memory, etc.).
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ def build_oai_maintain_prompt(
 	"""Build lead-agent prompt for the OAI memory maintenance flow.
 
 	Compared to the PydanticAI maintain prompt, this version:
-	- Delegates all filesystem operations to the Codex tool
+	- Uses lightweight tools for all filesystem operations
 	- Adds cross-session analysis (signal amplification, contradiction
 	  detection, gap detection)
 	- Adds hot-memory curation step
@@ -59,17 +60,25 @@ def build_oai_maintain_prompt(
 	hot_memory_path = memory_root.parent / "hot-memory.md"
 
 	return f"""\
-You are running Lerim memory maintenance — an offline refinement pass over existing memories.
-This mimics how human memory works: consolidate, strengthen important memories, forget noise.
-All filesystem operations must go through the codex tool.
+Run Lerim memory maintenance -- an offline refinement pass that consolidates,
+strengthens, and prunes existing memories.
 
 Inputs:
 - memory_root: {memory_root}
-- run_folder: {run_folder} (use this for intermediate files to manage your context)
+- run_folder: {run_folder}
 - artifact_paths: {artifact_json}
 - hot_memory_path: {hot_memory_path}
 
-Checklist:
+Tool reference:
+- memory_search(query, mode="scan"|"keyword"|"similar"|"clusters") -- unified search
+- list_files(directory, pattern) / read_file(file_path) -- read files in detail
+- archive_memory(file_path) -- soft-delete to archived/ subfolder
+- edit_memory(file_path, new_content) -- replace file content (must start with ---)
+- write_memory(primitive, title, body, ...) -- create new memories (consolidation)
+- write_hot_memory(content) -- write hot-memory.md
+- write_report(file_path, content) -- write final JSON report
+
+Checklist (complete every item):
 - scan_memories_and_summaries
 - cross_session_analysis
 - analyze_duplicates
@@ -80,144 +89,123 @@ Checklist:
 - curate_hot_memory
 - write_report
 
-Instructions:
+Steps:
 
 1. SCAN MEMORIES + SUMMARIES:
-   Use codex to read all memory files in {memory_root}/decisions/ and {memory_root}/learnings/.
-   Parse frontmatter (id, title, confidence, tags, created, updated) and body content.
-   Also read recent summaries from {memory_root}/summaries/ (last 30 days only — skip older ones).
-   Build a mental map of the project's knowledge state.
-   IMPORTANT: Process memories in chronological order (oldest "created" date first).
-   Later memories may update or supersede earlier ones, so always resolve conflicts
-   in favor of the newer memory.
+   Call memory_search(query="", mode="scan") for a compact catalog of all active memories.
+   Call memory_search(query="*", mode="keyword") for recent summaries.
+   Use read_file() ONLY for memories you need to examine in detail.
+   After this step you MUST have: a mental map of all memories, ordered by creation date.
+   IMPORTANT: Resolve conflicts in favor of the newer memory.
 
 2. CROSS-SESSION ANALYSIS:
-   Using the summaries and memories gathered in step 1, perform four analyses:
+   Perform four analyses using summaries and memories from step 1:
 
-   a) Signal Amplification:
-      Identify topics that appear in 3+ session summaries but have no corresponding
-      memories or only low-confidence ones (< 0.5). These are recurring signals worth
-      capturing. For each signal, note which summaries mentioned it and suggest whether
-      a new memory should be created or an existing one upgraded.
+   a) Signal Amplification: Topics in 3+ summaries with no memory or confidence < 0.5.
+      Note which summaries mention it. Recommend: create new or upgrade existing.
 
-   b) Contradiction Detection:
-      Find memories that conflict with each other. Check if a newer session summary
-      reversed an earlier decision. For each contradiction:
-      - If one is clearly newer and supersedes the other, archive the older one.
-      - If the contradiction is genuinely unresolved, annotate both memories with a
-        note about the conflict (via codex edit).
-      - Never silently discard contradictions.
+   b) Contradiction Detection: Memories that conflict with each other or were reversed
+      by a newer summary. Archive the older if superseded. Annotate both via edit_memory
+      if genuinely unresolved. NEVER silently discard contradictions.
 
-   c) Gap Detection:
-      Identify areas with heavy session activity (mentioned in many summaries) but
-      thin memory coverage (few or no memories on the topic). List each gap with
-      the relevant summary references.
+   c) Gap Detection: Heavy session activity but thin memory coverage. List each gap
+      with summary references.
 
-   d) Cross-Agent Patterns:
-      Session summaries include a "coding_agent" field (e.g. claude, cursor, codex,
-      opencode). Look for patterns across different agents:
-      - Decisions made in one agent that should inform work in another
-        (e.g. backend decision in Claude that frontend work in Cursor should know)
-      - Same error pattern or friction appearing across multiple agents
-      - Knowledge that exists in sessions from one agent but is missing from
-        sessions with another agent working on the same codebase
-      For each cross-agent insight, note the agents involved and the actionable
-      knowledge that should flow between them.
+   d) Cross-Agent Patterns: Session summaries include a "coding_agent" field (e.g.
+      claude, cursor, codex, opencode). Find decisions, errors, or knowledge that
+      should flow between agents working on the same codebase.
 
-   Record all findings for inclusion in the final report.
+   Record all findings for the final report.
 
 3. ANALYZE DUPLICATES:
-   Identify memories that cover the same topic or have substantially overlapping content.
-   Group them by similarity.
+   Call memory_search(query="", mode="clusters") for tag-based clusters.
+   Call memory_search(title=..., body=..., mode="similar") for semantic duplicates.
+   After this step you MUST have: grouped candidates for merge, keep, or archive.
 
 4. MERGE SIMILAR:
-   For memories with overlapping content about the same topic:
-   - Keep the most comprehensive version as the primary.
-   - Use codex to merge unique details from the secondary into the primary.
-   - Update the primary's "updated" timestamp to now.
-   - Use codex to copy the secondary to {memory_root}/archived/{{folder}}/
-     (where folder is "decisions" or "learnings"), then edit the original to mark
-     as archived.
+   For overlapping memories on the same topic:
+   1. Pick the most comprehensive as primary.
+   2. Call edit_memory() to merge unique details from secondaries into primary.
+   3. Update "updated" timestamp in frontmatter.
+   4. Call archive_memory() on each secondary.
+
+   You MUST identify at least the top-5 near-duplicate groups. Look for:
+   - Same topic with different wording
+   - Same insight from different sessions
+   - Same decision documented multiple times
+
+   For pairs: merge newer content into older file (canonical ID), archive newer.
 
 5. ARCHIVE LOW-VALUE:
-   Archive memories that are:
+   Archive via archive_memory() any memory that is:
    - Very low confidence (< 0.3)
-   - Trivial or obvious (e.g., "installed package X", "ran command Y" with no insight)
-   - Superseded by a more complete memory covering the same ground
-   Use codex to copy to archived/ folder, then edit original to mark archived.
+   - Trivial (e.g. "installed package X" with no insight)
+   - Superseded by a more complete memory
+   Also archive ALL files matching: "no-candidates-*", "memory-write-flow-*",
+   "memory-actions-report-*", "codex-tool-unavail*", "sync-run-*", "test-*",
+   or with body < 50 characters.
+   IMPORTANT: Do a second pass after the first to catch stragglers.
 
 6. DECAY CHECK:
-   Apply time-based decay using the access statistics below.
+   Apply time-based decay using access statistics.
 {access_section}
 
 7. CONSOLIDATE RELATED:
-   When you find 3+ small related memories about the same broader topic, combine
-   them into one comprehensive memory using write_memory tool:
+   When 3+ small memories cover the same broader topic, combine into one via:
    write_memory(primitive="decision"|"learning", title=..., body=...,
                 confidence=0.0-1.0, tags="tag1,tag2", kind=...)
-   kind is required for learnings: insight, procedure, friction, pitfall, or preference.
-   Archive the originals via codex.
+   kind is REQUIRED for learnings: "insight", "procedure", "friction", "pitfall", "preference".
+   Archive originals via archive_memory().
 
 8. CURATE HOT MEMORY:
-   Write a curated hot-memory file at {hot_memory_path} using codex.
-   This file serves as a fast-access summary of the most important project knowledge.
+   Call write_hot_memory(content) with a ~2000-token fast-access summary.
 
    Format:
    ```
    # Hot Memory
-   *Auto-curated by Lerim maintain — do not edit manually*
+   *Auto-curated by Lerim maintain -- do not edit manually*
 
    ## Active Decisions
-   - [decision title]: [one-line summary] (confidence: X.X)
-   ...
+   - [title]: [one-line summary] (confidence: X.X)
 
    ## Key Learnings
-   - [learning title]: [one-line summary] (confidence: X.X)
-   ...
+   - [title]: [one-line summary] (confidence: X.X)
 
    ## Recent Context
-   - [topic from recent summaries]: [brief context]
-   ...
+   - [topic]: [brief context from recent summaries]
 
    ## Watch Out
-   - [contradictions, gaps, or low-confidence areas to monitor]
-   ...
+   - [contradictions, gaps, low-confidence areas]
 
    ## Cross-Agent Insights
-   - [patterns detected across different coding agents]
-   ...
+   - [patterns across different coding agents]
    ```
 
-   Selection criteria (~2000 tokens max, 20-30 items total):
-   - Prioritize by: recency > confidence > session corroboration > access frequency
-   - Exclude contradicted or archived memories
-   - Include recent session topics from summaries (last 30 days)
-   - Each item should be a single concise line
+   Rules: ONE entry per topic (dedup). Weight last 48h heavily. Max ~10 items
+   per section. NO meta-observations about the system. Prioritize by:
+   recency > confidence > corroboration > access frequency.
 
 9. WRITE REPORT:
-   Use codex to write a JSON report to {artifact_paths["maintain_actions"]} with keys:
-   - run_id: the run folder name ("{run_folder.name}")
-   - actions: list of {{"action", "source_path", "target_path", "reason"}} dicts
-   - counts: {{"merged", "archived", "consolidated", "decayed", "unchanged"}}
-   - cross_session_analysis: {{
-       "signals": [{{"topic": "...", "summary_count": N, "recommendation": "..."}}],
-       "contradictions": [{{"memory_a": "...", "memory_b": "...", "resolution": "..."}}],
-       "gaps": [{{"topic": "...", "summary_refs": ["..."], "coverage": "..."}}],
-       "cross_agent": [{{"agents": ["claude", "cursor"], "topic": "...", "insight": "..."}}]
+   Call write_report() to write JSON to {artifact_paths["maintain_actions"]}:
+   {{
+     "run_id": "{run_folder.name}",
+     "actions": [{{"action": str, "source_path": str, "target_path": str, "reason": str}}],
+     "counts": {{"merged": N, "archived": N, "consolidated": N, "decayed": N, "unchanged": N}},
+     "cross_session_analysis": {{
+       "signals": [{{"topic": str, "summary_count": N, "recommendation": str}}],
+       "contradictions": [{{"memory_a": str, "memory_b": str, "resolution": str}}],
+       "gaps": [{{"topic": str, "summary_refs": [str], "coverage": str}}],
+       "cross_agent": [{{"agents": [str], "topic": str, "insight": str}}]
      }}
-   - All file paths must be absolute.
+   }}
+   ALL file paths MUST be absolute.
 
-Rules:
-- Use codex for ALL file reads and writes (no explore/read/write/glob/grep tools).
-- ONLY read/write files under {memory_root}/ and {run_folder}/.
-  Exception: hot-memory.md is written to {hot_memory_path}.
-- Use write_memory() for creating new memory files (consolidation).
-  Python builds markdown automatically.
-- Do NOT touch {memory_root}/summaries/ — summaries are read-only during maintain.
-  Exception: you MAY read summaries, but never write or modify them.
-- Do NOT delete files. Always archive (soft-delete via copy to archived/).
-- Be conservative: when unsure whether to merge or archive, leave it unchanged.
-- Quality over quantity: fewer good memories are better than many noisy ones.
+Constraints:
+- ONLY read/write under {memory_root}/ and {run_folder}/.
+  Exception: hot-memory.md at {hot_memory_path}.
+- Summaries ({memory_root}/summaries/) are read-only. Do NOT write or modify them.
+- Do NOT delete files. ALWAYS use archive_memory() for soft-delete.
+- When unsure whether to merge or archive, leave unchanged.
 
 Return one short plain-text completion line."""
 
@@ -256,10 +244,23 @@ if __name__ == "__main__":
 		assert "cross_agent" in prompt
 		assert "codex" in prompt
 		assert "No access data available" in prompt
-		# No explore tool references
+		# No old PydanticAI tool references
 		assert "explore()" not in prompt
-		assert "read(" not in prompt
-		assert "write(" not in prompt
+		# No standalone search tools — all consolidated into memory_search
+		assert "scan_memories()" not in prompt
+		assert "search_memories(" not in prompt
+		assert "find_similar_memories(" not in prompt
+		assert "find_merge_candidates(" not in prompt
+		# Unified memory_search referenced
+		assert "memory_search(" in prompt
+		assert 'mode="scan"' in prompt
+		assert 'mode="keyword"' in prompt
+		assert 'mode="similar"' in prompt
+		assert 'mode="clusters"' in prompt
+		# read_file() and write_report() are fine; bare read()/write() are not
+		assert "read_file" in prompt
+		assert "list_files" in prompt
+		assert "write_report" in prompt
 		# Hot memory path should be parent of memory_root
 		expected_hot = str(memory_root.parent / "hot-memory.md")
 		assert expected_hot in prompt

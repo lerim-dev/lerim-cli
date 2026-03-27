@@ -9,7 +9,6 @@ from __future__ import annotations
 from agents.extensions.models.litellm_model import LitellmModel
 
 from lerim.config.settings import Config, LLMRoleConfig, get_config
-from lerim.runtime.provider_caps import validate_provider_for_role
 from lerim.runtime.providers import (
 	_api_key_for_provider,
 	_default_api_base,
@@ -120,89 +119,8 @@ def build_oai_fallback_models(
 	]
 
 
-def build_codex_options(
-	*,
-	config: Config | None = None,
-	role: RoleName = "lead",
-	codex_provider: str | None = None,
-	codex_model: str | None = None,
-) -> tuple[dict, dict, bool]:
-	"""Build CodexOptions and ThreadOptions kwargs for codex_tool() from lerim config.
-
-	The Codex CLI requires the Responses API wire format. Providers that support it
-	natively (OpenAI, OpenRouter) are used directly. For other providers (MiniMax,
-	ZAI, Ollama, MLX, OpenCode Go), a local ResponsesProxy is needed to translate
-	Responses API → Chat Completions.
-
-	When codex_provider/codex_model are given they override the lead role's
-	provider and model for the Codex sub-agent, allowing lead and codex to
-	use different providers.
-
-	Returns:
-		(codex_options_kwargs, thread_options_kwargs, needs_proxy)
-		- needs_proxy=True means the caller must start a ResponsesProxy and set
-		  codex_options_kwargs["base_url"] to the proxy URL before use.
-		- When needs_proxy=True, codex_options_kwargs also contains "backend_url"
-		  and "backend_api_key" for constructing the proxy.
-	"""
-	cfg = config or get_config()
-	role_cfg = _role_config(cfg, role)
-
-	# Use explicit codex provider/model if provided, otherwise fall back to lead role.
-	provider = (codex_provider or role_cfg.provider).strip().lower()
-	model = codex_model or role_cfg.model
-
-	# Validate the provider can serve the codex role.
-	validate_provider_for_role(provider, "codex", model)
-
-	thread_kwargs = {
-		"model": model,
-		"approval_policy": "never",
-		"network_access_enabled": False,
-	}
-
-	# Providers with native Responses API support — use directly.
-	if provider == "openrouter":
-		codex_kwargs = {
-			"base_url": _default_api_base("openrouter", cfg) or "https://openrouter.ai/api/v1",
-			"api_key": _api_key_for_provider(cfg, "openrouter"),
-		}
-		return codex_kwargs, thread_kwargs, False
-
-	if provider == "openai":
-		codex_kwargs = {
-			"base_url": _default_api_base("openai", cfg) or None,
-			"api_key": _api_key_for_provider(cfg, "openai"),
-		}
-		return codex_kwargs, thread_kwargs, False
-
-	# Providers that need the local ResponsesProxy (Chat Completions only).
-	api_key = _api_key_for_provider(cfg, provider) or ""
-	backend_url = _default_api_base(provider, cfg)
-
-	if not backend_url:
-		defaults = {
-			"minimax": "https://api.minimax.io/v1",
-			"zai": "https://open.bigmodel.cn/api/paas/v4",
-			"ollama": "http://127.0.0.1:11434/v1",
-			"mlx": "http://127.0.0.1:8000/v1",
-			"opencode_go": "https://opencode.ai/zen/go/v1",
-		}
-		backend_url = defaults.get(provider, "")
-
-	codex_kwargs = {
-		# base_url will be set to proxy.url by the caller after starting the proxy
-		"base_url": None,
-		"api_key": "proxy-managed",
-		# Extra fields for the caller to construct the proxy
-		"backend_url": backend_url,
-		"backend_api_key": api_key,
-	}
-	return codex_kwargs, thread_kwargs, True
-
-
 if __name__ == "__main__":
-	"""Self-test: build lead model, fallback models, and codex config."""
+	"""Self-test: build lead model and fallback models."""
 	cfg = get_config()
 
 	lead_model = build_oai_model("lead", config=cfg)
@@ -213,13 +131,8 @@ if __name__ == "__main__":
 	fallbacks = build_oai_fallback_models(lead_cfg, config=cfg)
 	assert isinstance(fallbacks, list)
 
-	codex_opts, thread_opts, needs_proxy = build_codex_options(config=cfg)
-	assert "model" in thread_opts
-
 	print(
 		f"oai_providers: "
 		f"lead={cfg.lead_role.provider}/{cfg.lead_role.model} "
-		f"fallbacks={len(fallbacks)} "
-		f"codex_model={thread_opts['model']} "
-		f"needs_proxy={needs_proxy}"
+		f"fallbacks={len(fallbacks)}"
 	)

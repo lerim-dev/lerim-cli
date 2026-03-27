@@ -139,7 +139,13 @@ class _InterceptHandler(logging.Handler):
             level = _logger.level(record.levelname).name
         except ValueError:
             level = record.levelno
-        _logger.opt(exception=record.exc_info).log(level, record.getMessage())
+        try:
+            msg = record.getMessage()
+        except (TypeError, ValueError):
+            # Some SDK log messages contain stray % chars that break
+            # getMessage()'s %-formatting.  Fall back to raw message.
+            msg = str(record.msg)
+        _logger.opt(exception=record.exc_info).log(level, msg)
 
 
 def configure_logging(level: str | None = None) -> None:

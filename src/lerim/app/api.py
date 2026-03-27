@@ -38,6 +38,9 @@ from lerim.sessions.catalog import (
     count_fts_indexed,
     count_session_jobs_by_status,
     latest_service_run,
+    list_queue_jobs,
+    retry_session_job,
+    skip_session_job,
 )
 
 
@@ -150,6 +153,33 @@ def api_connect(platform: str, path: str | None = None) -> dict[str, Any]:
     """Connect a platform and return result."""
     config = get_config()
     return connect_platform(config.platforms_path, platform, custom_path=path)
+
+
+# ── Job queue management ─────────────────────────────────────────────
+
+
+def api_retry_job(run_id: str) -> dict[str, Any]:
+    """Retry a dead_letter job, returning result."""
+    ok = retry_session_job(run_id)
+    return {"retried": ok, "run_id": run_id, "queue": count_session_jobs_by_status()}
+
+
+def api_skip_job(run_id: str) -> dict[str, Any]:
+    """Skip a dead_letter job, returning result."""
+    ok = skip_session_job(run_id)
+    return {"skipped": ok, "run_id": run_id, "queue": count_session_jobs_by_status()}
+
+
+def api_queue_jobs(
+    status: str | None = None, project: str | None = None,
+) -> dict[str, Any]:
+    """List queue jobs with optional filters."""
+    jobs = list_queue_jobs(
+        status_filter=status,
+        project_filter=project,
+        failed_only=(status == "failed"),
+    )
+    return {"jobs": jobs, "total": len(jobs), "queue": count_session_jobs_by_status()}
 
 
 # ── Project management ───────────────────────────────────────────────
@@ -322,7 +352,10 @@ def _generate_compose_yml(build_local: bool = False) -> str:
 
     # Forward API keys by name only — Docker reads values from host env.
     # NEVER write secret values into the compose file.
-    env_lines = [f"      - HOME={home}"]
+    env_lines = [
+        f"      - HOME={home}",
+        "      - FASTEMBED_CACHE_PATH=/opt/lerim/models",
+    ]
     for key in _API_KEY_ENV_NAMES:
         if os.environ.get(key):
             env_lines.append(f"      - {key}")

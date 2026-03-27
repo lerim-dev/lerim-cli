@@ -2,19 +2,19 @@ FROM python:3.12-slim
 
 LABEL org.opencontainers.image.source=https://github.com/lerim-dev/lerim-cli
 
-# Install curl (healthcheck), ripgrep, and Node.js (for Codex CLI)
-RUN apt-get update && apt-get install -y --no-install-recommends curl ripgrep nodejs npm && \
+# Install curl (healthcheck) and ripgrep
+RUN apt-get update && apt-get install -y --no-install-recommends curl ripgrep && \
     apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
-
-# Install Codex CLI globally (filesystem sub-agent for the OAI agent)
-# Pin to 0.106.0 — newer versions use WebSocket transport by default
-# which doesn't work with our HTTP-only ResponsesProxy
-RUN npm install -g @openai/codex@0.106.0
 
 # Install lerim from local source
 COPY . /build
 RUN pip install --no-cache-dir /build && rm -rf /build
+
+# Pre-download the fastembed model so it's cached in the image
+# (the container has a read-only /tmp tmpfs that's too small for model downloads)
+ENV FASTEMBED_CACHE_PATH=/opt/lerim/models
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
 
 # Dashboard assets for the built-in web UI
 COPY dashboard/ /opt/lerim/dashboard/

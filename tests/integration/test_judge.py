@@ -167,20 +167,22 @@ class TestSchemaConstants:
     """Tests for JUDGE_SCHEMA_CLARITY and JUDGE_SCHEMA_COHERENCE."""
 
     def test_clarity_schema_keys(self) -> None:
-        """Clarity schema has completeness, faithfulness, clarity, reasoning."""
+        """Clarity schema has completeness, faithfulness, clarity, precision, reasoning."""
         assert set(JUDGE_SCHEMA_CLARITY["required"]) == {
             "completeness",
             "faithfulness",
             "clarity",
+            "precision",
             "reasoning",
         }
 
     def test_coherence_schema_keys(self) -> None:
-        """Coherence schema has completeness, faithfulness, coherence, reasoning."""
+        """Coherence schema has completeness, faithfulness, coherence, precision, reasoning."""
         assert set(JUDGE_SCHEMA_COHERENCE["required"]) == {
             "completeness",
             "faithfulness",
             "coherence",
+            "precision",
             "reasoning",
         }
 

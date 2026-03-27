@@ -20,7 +20,7 @@ recent_access_grace_days = 30       # recently accessed memories skip archiving
 host = "127.0.0.1"
 port = 8765
 sync_interval_minutes = 30          # sync hot path interval
-maintain_interval_minutes = 720      # 12 hours
+maintain_interval_minutes = 60       # maintain cold path interval
 sync_window_days = 7
 sync_max_sessions = 50
 parallel_pipelines = true               # run extract + summarize in the same tool turn (set false for local/Ollama models)
@@ -29,7 +29,7 @@ parallel_pipelines = true               # run extract + summarize in the same to
 provider = "opencode_go"               # opencode_go | minimax | zai | openrouter | openai | ollama
 model = "minimax-m2.5"                 # OpenCode Go models: minimax-m2.7, minimax-m2.5, kimi-k2.5, glm-5
 api_base = ""
-fallback_models = []
+fallback_models = ["minimax:minimax-m2.5"]  # auto-switch on quota/rate-limit errors
 timeout_seconds = 600
 max_iterations = 30
 max_turns_sync = 50                    # max tool calls for lead agent in sync flow
@@ -38,13 +38,6 @@ max_turns_ask = 30                     # max tool calls for lead agent in ask fl
 openrouter_provider_order = []
 thinking = true
 max_tokens = 32000
-
-[roles.codex]
-provider = "opencode_go"               # provider for Codex filesystem sub-agent
-model = "minimax-m2.5"                 # model used by Codex CLI for filesystem ops
-api_base = ""
-timeout_seconds = 600                  # per Codex call timeout
-idle_timeout_seconds = 120             # Codex idle timeout before giving up
 
 [roles.extract]
 provider = "opencode_go"
@@ -79,11 +72,11 @@ minimax = "https://api.minimax.io/v1"
 zai = "https://api.z.ai/api/coding/paas/v4"
 openai = "https://api.openai.com/v1"
 openrouter = "https://openrouter.ai/api/v1"
+opencode_go = "https://opencode.ai/zen/go/v1"
 ollama = "http://127.0.0.1:11434"
 # Docker: use "http://host.docker.internal:11434" if Ollama runs on the host.
 litellm_proxy = "http://127.0.0.1:4000"
 mlx = "http://127.0.0.1:8000/v1"
-opencode_go = "https://opencode.ai/zen/go/v1"
 auto_unload = true                     # unload Ollama models after each sync/maintain cycle to free RAM
 
 [tracing]

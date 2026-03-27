@@ -16,80 +16,70 @@ def build_oai_sync_prompt(
 ) -> str:
 	"""Build the sync prompt for the OAI agent.
 
-	Unlike the PydanticAI sync prompt, this version delegates all filesystem
-	operations to the Codex tool rather than using explore/read/write/glob/grep
-	tools directly.  The agent orchestrates the flow using:
-	  - codex: sandboxed filesystem reads and writes
-	  - write_memory: structured memory creation (decisions + learnings)
+	The agent orchestrates the flow using lightweight tools for simple
+	file operations and batch dedup for efficient similarity search:
 	  - extract_pipeline: DSPy extraction of memory candidates from trace
 	  - summarize_pipeline: DSPy summarization of the session trace
+	  - read_file / list_files: lightweight file reading
+	  - batch_dedup_candidates: batch dedup for all candidates in one call
+	  - write_memory: structured memory creation (decisions + learnings)
+	  - write_report: write JSON report files
 	"""
 	artifact_json = json.dumps(
 		{key: str(path) for key, path in artifact_paths.items()}, ensure_ascii=True
 	)
 
 	return f"""\
-Run the Lerim agent-led memory write flow.
+Run the Lerim memory-write flow for one session trace.
 
 Inputs:
 - trace_path: {trace_file}
-- memory_root_path: {memory_root}
-- run_folder_path: {run_folder}
-- artifact_paths_json: {artifact_json}
+- memory_root: {memory_root}
+- run_folder: {run_folder}
+- artifact_paths: {artifact_json}
 
 Steps (execute in order):
 
-1. SCAN EXISTING MEMORIES:
-   Use codex to scan the existing memory directories:
-   - {memory_root}/decisions/
-   - {memory_root}/learnings/
-   Read the files and build a mental map of what memories already exist.
-   Note each memory's title, tags, and confidence score.
-   If directories are empty or missing, proceed with an empty map.
+1. EXTRACT + SUMMARIZE:
+   Call extract_pipeline() and summarize_pipeline() in the SAME tool-call turn.
+   After this step you MUST have: extract artifact written, summary written.
+   If extract_pipeline returns 0 candidates, skip to step 4 (write report with empty actions).
 
-2. EXTRACT + SUMMARIZE (one turn, parallel):
-   Call extract_pipeline() and summarize_pipeline() together in the SAME tool-call turn.
-   Paths, metadata, and output locations are handled automatically.
-   Optionally pass guidance about what memories already exist to help the extract
-   pipeline avoid redundant candidates.
+2. BATCH DEDUP:
+   Call read_file(file_path="{artifact_paths["extract"]}") to get extract results.
+   Then call batch_dedup_candidates(candidates_json=<file content>).
+   After this step you MUST have: each candidate enriched with top-3 similar existing memories.
 
-3. READ EXTRACT RESULTS:
-   Use codex to read the extract artifact at {artifact_paths["extract"]}.
-   This JSON file contains the list of memory candidates produced by the
-   extraction pipeline.
+3. CLASSIFY AND WRITE:
+   For each candidate, classify using the batch dedup results:
+   - top_similarity very high AND same insight -> "no_op"
+   - related topic but candidate adds new info -> "update"
+   - no relevant match -> "add"
 
-4. DEDUPE CANDIDATES AGAINST EXISTING MEMORIES:
-   For each extracted candidate, use codex to search the existing memories
-   for duplicates.  Compare titles, bodies, and tags.  Apply this decision
-   policy for each candidate:
-   - no_op: an existing memory has the SAME primitive + title + body.
-   - update: an existing memory matches on primitive and content overlaps
-     significantly (>= 72% estimated token overlap).
-   - add: no matching memory found (new memory).
+   IMPORTANT: Err on the side of "update" over "add". Before classifying as "add",
+   explicitly name the closest existing memory and explain why it is NOT a match.
 
-5. WRITE MEMORIES (one turn, parallel):
-   Call write_memory() for every candidate classified as add or update.
-   Pass these fields:
-     write_memory(primitive="decision"|"learning", title=..., body=...,
-                   confidence=0.0-1.0, tags="tag1,tag2", kind=...)
-   kind is required for learnings: insight, procedure, friction, pitfall, or preference.
-   IMPORTANT: write_memory is the ONLY tool for creating memory files.
-   Skip candidates classified as no_op.
+   For "add": call write_memory() with all fields.
+   For "update": call write_memory() with the SAME title as the existing memory,
+   incorporating new information into the body.
+   Skip "no_op" candidates.
 
-6. WRITE REPORT:
-   Use codex to write a JSON report to {artifact_paths["memory_actions"]}
-   with this structure:
+   write_memory(primitive="decision"|"learning", title=..., body=...,
+                 confidence=0.0-1.0, tags="tag1,tag2", kind=...)
+   kind is REQUIRED for learnings: "insight", "procedure", "friction", "pitfall", or "preference".
+   write_memory is the ONLY tool for creating memory files. Do NOT write .md files directly.
+
+4. WRITE REPORT:
+   Call write_report() to write JSON to {artifact_paths["memory_actions"]}:
    {{
      "run_id": "{metadata.get("run_id", "")}",
-     "actions": [
-       {{"action": "add"|"update"|"no_op", "candidate_title": "...", "reason": "..."}}
-     ],
+     "actions": [{{"action": "add"|"update"|"no_op", "candidate_title": "...", "reason": "..."}}],
      "counts": {{"add": N, "update": N, "no_op": N}},
-     "written_memory_paths": ["<absolute path to each written memory file>"],
+     "written_memory_paths": ["<absolute path per written memory>"],
      "trace_path": "{trace_file}"
    }}
-   IMPORTANT: ALL file paths in the report MUST be absolute paths.
+   ALL file paths MUST be absolute.
 
-The summary pipeline writes directly to {memory_root}/summaries/. Do NOT write summary files yourself.
+Do NOT write summary files yourself -- summarize_pipeline handles that.
 
 Return one short plain-text completion line when finished."""

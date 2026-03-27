@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["LerimOAIAgent", "build_dspy_lm", "build_oai_model", "build_oai_context", "build_oai_model_from_role", "build_oai_fallback_models", "build_codex_options", "build_responses_proxy"]
+__all__ = ["LerimOAIAgent", "build_dspy_lm", "build_oai_model", "build_oai_context", "build_oai_model_from_role", "build_oai_fallback_models"]
 
 
 def __getattr__(name: str) -> Any:

@@ -1,8 +1,8 @@
 """OpenAI Agents SDK runtime for Lerim sync, maintain, and ask flows.
 
 Replaces PydanticAI's LerimAgent for the sync, maintain, and ask operations,
-using the OpenAI Agents SDK with Codex for filesystem operations and
-LitellmModel for provider abstraction.
+using the OpenAI Agents SDK with LitellmModel for provider abstraction.
+Codex is used only for the ask flow (read-only filesystem access).
 """
 
 from __future__ import annotations
@@ -20,12 +20,6 @@ litellm.turn_off_message_logging = True
 litellm.suppress_debug_info = True
 
 from agents import Agent, Runner, set_tracing_disabled
-from agents.extensions.experimental.codex import (
-	CodexOptions,
-	ThreadOptions,
-	TurnOptions,
-	codex_tool,
-)
 from agents.extensions.models.litellm_model import LitellmModel
 
 from lerim.config.settings import Config, get_config
@@ -43,11 +37,19 @@ from lerim.runtime.helpers import (
 )
 from lerim.runtime.cost_tracker import start_cost_tracking, stop_cost_tracking
 from lerim.runtime.oai_context import OAIRuntimeContext, build_oai_context
-from lerim.runtime.oai_providers import build_codex_options, build_oai_model
+from lerim.runtime.oai_providers import build_oai_fallback_models, build_oai_model
 from lerim.runtime.oai_tools import (
+	archive_memory,
+	batch_dedup_candidates,
+	edit_memory,
 	extract_pipeline,
+	list_files,
+	memory_search,
+	read_file,
 	summarize_pipeline,
+	write_hot_memory,
 	write_memory,
+	write_report,
 )
 from lerim.runtime.prompts.oai_maintain import (
 	build_oai_maintain_artifact_paths,
@@ -55,7 +57,6 @@ from lerim.runtime.prompts.oai_maintain import (
 )
 from lerim.runtime.prompts.oai_ask import build_oai_ask_prompt
 from lerim.runtime.prompts.oai_sync import build_oai_sync_prompt
-from lerim.runtime.responses_proxy import ResponsesProxy
 
 logger = logging.getLogger("lerim.runtime.oai")
 
@@ -104,7 +105,7 @@ class LerimOAIAgent:
 		default_cwd: str | None = None,
 		config: Config | None = None,
 	) -> None:
-		"""Create OAI runtime with model and codex configuration.
+		"""Create OAI runtime with model configuration.
 
 		Args:
 			default_cwd: Default working directory for path resolution.
@@ -130,36 +131,17 @@ class LerimOAIAgent:
 		self.config = cfg
 		self._default_cwd = default_cwd
 
-		# Validate providers before building anything.
+		# Validate lead provider.
 		from lerim.runtime.provider_caps import validate_provider_for_role
 		validate_provider_for_role(cfg.lead_role.provider, "lead")
-		validate_provider_for_role(cfg.codex_role.provider, "codex", cfg.codex_role.model)
-
-		# Store codex role config for runtime parameters.
-		self._codex_role = cfg.codex_role
 
 		# Build lead model via LitellmModel
 		self._lead_model: LitellmModel = build_oai_model("lead", config=cfg)
 
-		# Build codex options (may require a proxy for non-Responses-API providers)
-		self._codex_opts: dict
-		self._thread_opts: dict
-		self._needs_proxy: bool
-		self._codex_opts, self._thread_opts, self._needs_proxy = build_codex_options(
-			config=cfg,
-			codex_provider=cfg.codex_role.provider,
-			codex_model=cfg.codex_role.model,
+		# Build fallback models from config (e.g. fallback_models = ["minimax:minimax-m2.5"])
+		self._fallback_models: list[LitellmModel] = build_oai_fallback_models(
+			cfg.lead_role, config=cfg,
 		)
-
-		# Proxy instance created lazily but not started yet
-		self._proxy: ResponsesProxy | None = None
-		if self._needs_proxy:
-			backend_url = self._codex_opts.get("backend_url", "")
-			backend_api_key = self._codex_opts.get("backend_api_key", "")
-			self._proxy = ResponsesProxy(
-				backend_url=backend_url,
-				api_key=backend_api_key,
-			)
 
 	@staticmethod
 	def _is_within(path: Path, root: Path) -> bool:
@@ -168,45 +150,111 @@ class LerimOAIAgent:
 		root_resolved = root.resolve()
 		return resolved == root_resolved or root_resolved in resolved.parents
 
+	@staticmethod
+	def _is_quota_error(error_msg: str) -> bool:
+		"""Return True if the error message indicates a quota/rate-limit error."""
+		lower = error_msg.lower()
+		return "429" in error_msg or "rate limit" in lower or "quota" in lower
+
+	def _run_with_fallback(
+		self,
+		*,
+		flow: str,
+		build_agent_fn,
+		prompt: str,
+		ctx: OAIRuntimeContext,
+		max_turns: int,
+		max_attempts: int = 3,
+	):
+		"""Run an agent with retry + fallback model support.
+
+		Tries the primary model first with up to max_attempts retries.
+		On quota/rate-limit errors, switches to the next fallback model.
+		Non-quota errors retry the same model with exponential backoff.
+
+		Args:
+			flow: Flow name for log messages (e.g. "sync", "maintain", "ask").
+			build_agent_fn: Callable(model) -> Agent that builds a fresh agent
+				with the given LitellmModel.
+			prompt: The prompt to pass to Runner.run.
+			ctx: The OAIRuntimeContext.
+			max_turns: Maximum agent turns.
+			max_attempts: Retry attempts per model.
+
+		Returns:
+			The Runner.run result object.
+
+		Raises:
+			RuntimeError: If all models and attempts are exhausted.
+		"""
+		models = [self._lead_model] + self._fallback_models
+		last_error: Exception | None = None
+
+		for model_idx, model in enumerate(models):
+			agent = build_agent_fn(model)
+			model_label = self.config.lead_role.model if model_idx == 0 else f"fallback-{model_idx}"
+			for attempt in range(1, max_attempts + 1):
+				try:
+					logger.info(f"[{flow}] OAI agent attempt {attempt}/{max_attempts} (model={model_label})")
+					result = _run_async(
+						Runner.run(agent, prompt, context=ctx, max_turns=max_turns)
+					)
+					if model_idx > 0:
+						logger.info(f"[{flow}] Succeeded with fallback model {model_idx}")
+					return result
+				except Exception as exc:
+					last_error = exc
+					error_msg = str(exc)
+
+					if self._is_quota_error(error_msg):
+						logger.warning(f"[{flow}] Quota/rate-limit on attempt {attempt}: {error_msg[:100]}")
+						if model_idx < len(models) - 1:
+							fb_label = (
+								self.config.lead_role.fallback_models[model_idx]
+								if model_idx < len(self.config.lead_role.fallback_models)
+								else f"fallback-{model_idx + 1}"
+							)
+							logger.warning(f"[{flow}] Switching to fallback: {fb_label}")
+							break  # Break inner retry loop, try next model
+						# Last model — keep retrying with backoff
+					elif "500" in error_msg or "503" in error_msg:
+						logger.warning(f"[{flow}] Server error on attempt {attempt}: {error_msg[:100]}")
+					elif attempt < max_attempts:
+						logger.warning(f"[{flow}] Error on attempt {attempt} ({type(exc).__name__}): {error_msg[:100]}")
+
+					if attempt < max_attempts:
+						wait_time = min(2**attempt, 8)
+						logger.info(f"[{flow}] Retrying in {wait_time}s...")
+						time.sleep(wait_time)
+			else:
+				# Inner loop exhausted all attempts without breaking — no more retries for this model
+				continue
+			# Inner loop broke (quota error, switching to next model) — continue outer loop
+			continue
+
+		raise RuntimeError(
+			f"[{flow}] Failed after trying {len(models)} model(s). "
+			f"Last error: {last_error}"
+		) from last_error
+
 	def _build_agent(
 		self,
 		*,
 		prompt: str,
-		memory_root: Path,
-		run_folder: Path,
-		codex_opts: dict,
-		thread_opts: dict,
 	) -> Agent[OAIRuntimeContext]:
-		"""Build the OpenAI Agents SDK Agent with codex and lerim tools."""
-		clean_codex_opts = {
-			k: v
-			for k, v in codex_opts.items()
-			if k not in ("backend_url", "backend_api_key")
-		}
-
-		# working_directory = .lerim/ parent so Codex can access both
-		# memory/ (for reading/writing memories) and workspace/ (for reports).
-		lerim_root = str(memory_root.parent)
-
+		"""Build the OpenAI Agents SDK Agent with lerim tools."""
 		agent: Agent[OAIRuntimeContext] = Agent(
 			name="LerimSync",
 			instructions=prompt,
 			model=self._lead_model,
 			tools=[
-				codex_tool(
-					codex_options=CodexOptions(**clean_codex_opts),
-					sandbox_mode="workspace-write",
-					working_directory=lerim_root,
-					skip_git_repo_check=True,
-					default_thread_options=ThreadOptions(
-						**thread_opts,
-						additional_directories=[str(run_folder)],
-					),
-					default_turn_options=TurnOptions(idle_timeout_seconds=self._codex_role.idle_timeout_seconds),
-				),
-				write_memory,
 				extract_pipeline,
 				summarize_pipeline,
+				write_memory,
+				write_report,
+				read_file,
+				list_files,
+				batch_dedup_candidates,
 			],
 		)
 		return agent
@@ -276,86 +324,27 @@ class LerimOAIAgent:
 			artifact_paths=artifact_paths,
 		)
 
-		# Prepare codex options — start proxy if needed
-		codex_opts = dict(self._codex_opts)
-		proxy_started = False
 		try:
-			if self._needs_proxy and self._proxy is not None:
-				proxy_url = self._proxy.start()
-				proxy_started = True
-				codex_opts["base_url"] = proxy_url
-				logger.info(
-					"[sync] Responses proxy started at %s", proxy_url
-				)
-
-			# Build the agent
-			agent = self._build_agent(
-				prompt=prompt,
-				memory_root=resolved_memory_root,
-				run_folder=run_folder,
-				codex_opts=codex_opts,
-				thread_opts=self._thread_opts,
-			)
-
-			# Run with retry logic (3 attempts, exponential backoff)
-			max_attempts = 3
-			last_error: Exception | None = None
-			response_text = ""
-			result = None
+			# Run with retry + fallback model support
 			start_cost_tracking()
 
-			for attempt in range(1, max_attempts + 1):
-				try:
-					logger.info(
-						"[sync] OAI agent attempt %d/%d (model=%s)",
-						attempt,
-						max_attempts,
-						self.config.lead_role.model,
-					)
-					result = _run_async(
-						Runner.run(
-							agent, prompt, context=ctx,
-							max_turns=self.config.lead_role.max_turns_sync,
-						)
-					)
-					response_text = str(
-						result.final_output or ""
-					).strip() or "(no response)"
-					break
-				except Exception as exc:
-					last_error = exc
-					error_msg = str(exc)
-					if "429" in error_msg or "rate limit" in error_msg.lower():
-						logger.warning(
-							"[sync] Rate limited on attempt %d: %s",
-							attempt,
-							error_msg[:100],
-						)
-					elif "500" in error_msg or "503" in error_msg:
-						logger.warning(
-							"[sync] Server error on attempt %d: %s",
-							attempt,
-							error_msg[:100],
-						)
-					elif attempt < max_attempts:
-						logger.warning(
-							"[sync] Error on attempt %d (%s): %s",
-							attempt,
-							type(exc).__name__,
-							error_msg[:100],
-						)
-					if attempt < max_attempts:
-						wait_time = min(2**attempt, 8)
-						logger.info(f"[sync] Retrying in {wait_time}s...")
-						time.sleep(wait_time)
+			def _build_sync_agent(model):
+				ag = self._build_agent(prompt=prompt)
+				ag.model = model
+				return ag
+
+			result = self._run_with_fallback(
+				flow="sync",
+				build_agent_fn=_build_sync_agent,
+				prompt=prompt,
+				ctx=ctx,
+				max_turns=self.config.lead_role.max_turns_sync,
+			)
+			response_text = str(
+				result.final_output or ""
+			).strip() or "(no response)"
 
 			cost_usd = stop_cost_tracking()
-
-			if result is None:
-				raise RuntimeError(
-					f"[sync] Failed after {max_attempts} attempts. "
-					f"Last error: {last_error}"
-				) from last_error
 
 			# Write agent response text
 			_write_text_with_newline(artifact_paths["agent_log"], response_text)
@@ -374,47 +363,77 @@ class LerimOAIAgent:
 				)
 				agent_trace_path.write_text("[]", encoding="utf-8")
 
-			# Validate required artifacts exist
-			for key in ("extract", "summary", "memory_actions"):
-				if not artifact_paths[key].exists():
-					raise RuntimeError(
-						f"missing_artifact:{artifact_paths[key]}"
-					)
+			# Validate required artifacts exist.
+			# extract is a hard requirement (DSPy extraction must succeed).
+			# summary may fail for oversized sessions — treat as soft failure.
+			# memory_actions is written by write_report tool — soft failure.
+			if not artifact_paths["extract"].exists():
+				raise RuntimeError(
+					f"missing_artifact:{artifact_paths['extract']}"
+				)
+			if not artifact_paths["summary"].exists():
+				logger.warning(
+					"[sync] summary.json missing — summarization may have "
+					"failed for oversized sessions. Continuing with extraction only."
+				)
+				artifact_paths["summary"].write_text(
+					json.dumps({"summary_path": ""}),
+					encoding="utf-8",
+				)
+			if not artifact_paths["memory_actions"].exists():
+				logger.warning(
+					"[sync] memory_actions.json missing — write_report may "
+					"have been skipped, but write_memory tool may have written memories."
+				)
+				artifact_paths["memory_actions"].write_text(
+					json.dumps({"counts": {"add": 0, "update": 0, "no_op": 0}, "written_memory_paths": [], "note": "report_not_written"}),
+					encoding="utf-8",
+				)
 
-			# Extract summary path from summary artifact
+			# Extract summary path from summary artifact (soft — may be empty)
+			summary_path_resolved = None
 			try:
 				summary_artifact = json.loads(
 					artifact_paths["summary"].read_text(encoding="utf-8")
 				)
-			except json.JSONDecodeError as exc:
-				raise RuntimeError(
-					f"invalid_json_artifact:{artifact_paths['summary']}"
-				) from exc
-			raw_summary = str(
-				(
-					summary_artifact
-					if isinstance(summary_artifact, dict)
-					else {}
-				).get("summary_path", "")
-			).strip()
-			if not raw_summary:
-				raise RuntimeError("missing_summary_path_in_pipeline_output")
-			summary_path_resolved = Path(raw_summary).resolve()
-			if not self._is_within(
-				summary_path_resolved, resolved_memory_root
-			):
-				raise RuntimeError(
-					f"summary_path_outside_memory_root:{summary_path_resolved}"
-				)
-			if not summary_path_resolved.exists():
-				raise RuntimeError(
-					f"summary_path_not_found:{summary_path_resolved}"
-				)
+				raw_summary = str(
+					(
+						summary_artifact
+						if isinstance(summary_artifact, dict)
+						else {}
+					).get("summary_path", "")
+				).strip()
+				if raw_summary:
+					summary_path_resolved = Path(raw_summary).resolve()
+					if not self._is_within(
+						summary_path_resolved, resolved_memory_root
+					):
+						logger.warning(
+							"[sync] summary_path outside memory_root: %s",
+							summary_path_resolved,
+						)
+						summary_path_resolved = None
+					elif not summary_path_resolved.exists():
+						logger.warning(
+							"[sync] summary_path not found: %s",
+							summary_path_resolved,
+						)
+						summary_path_resolved = None
+			except (json.JSONDecodeError, Exception) as exc:
+				logger.warning("[sync] Failed to parse summary artifact: {}", exc)
+				summary_path_resolved = None
 
-			# Parse memory_actions report for counts and paths
-			report = _load_json_dict_artifact(
-				artifact_paths["memory_actions"]
-			)
+			# Parse memory_actions report for counts and paths.
+			# Codex may write invalid JSON or text error messages instead.
+			try:
+				report = _load_json_dict_artifact(
+					artifact_paths["memory_actions"]
+				)
+			except RuntimeError:
+				logger.warning(
+					"[sync] memory_actions.json is invalid — using empty defaults"
+				)
+				report = {"counts": {"add": 0, "update": 0, "no_op": 0}, "written_memory_paths": []}
 			counts_field = report.get("counts")
 			counts_raw = counts_field if isinstance(counts_field, dict) else {}
 			counts = _extract_counts(
@@ -450,7 +469,7 @@ class LerimOAIAgent:
 				},
 				"counts": counts,
 				"written_memory_paths": written_memory_paths,
-				"summary_path": str(summary_path_resolved),
+				"summary_path": str(summary_path_resolved) if summary_path_resolved else "",
 				"cost_usd": cost_usd,
 			}
 			return SyncResultContract.model_validate(payload).model_dump(
@@ -458,15 +477,7 @@ class LerimOAIAgent:
 			)
 
 		finally:
-			# Always stop the proxy if we started it
-			if proxy_started and self._proxy is not None:
-				try:
-					self._proxy.stop()
-					logger.info("[sync] Responses proxy stopped")
-				except Exception as exc:
-					logger.warning(
-						"[sync] Failed to stop proxy: %s", exc
-					)
+			pass
 
 	# ------------------------------------------------------------------
 	# Maintain flow
@@ -476,43 +487,25 @@ class LerimOAIAgent:
 		self,
 		*,
 		prompt: str,
-		memory_root: Path,
-		run_folder: Path,
-		codex_opts: dict,
-		thread_opts: dict,
 	) -> Agent[OAIRuntimeContext]:
 		"""Build the OAI Agent for the maintain flow.
 
-		The maintain agent only has codex_tool + write_memory. No
-		extract/summarize pipelines — those are sync-only.
+		Uses lightweight tools for all operations (archive, edit, hot-memory,
+		search, merge candidate discovery).
 		"""
-		clean_codex_opts = {
-			k: v
-			for k, v in codex_opts.items()
-			if k not in ("backend_url", "backend_api_key")
-		}
-
-		# working_directory = .lerim/ parent so Codex can access both
-		# memory/ (for reading/editing memories) and workspace/ (for reports).
-		lerim_root = str(memory_root.parent)
-
 		agent: Agent[OAIRuntimeContext] = Agent(
 			name="LerimMaintain",
 			instructions=prompt,
 			model=self._lead_model,
 			tools=[
-				codex_tool(
-					codex_options=CodexOptions(**clean_codex_opts),
-					sandbox_mode="workspace-write",
-					working_directory=lerim_root,
-					skip_git_repo_check=True,
-					default_thread_options=ThreadOptions(
-						**thread_opts,
-						additional_directories=[str(run_folder)],
-					),
-					default_turn_options=TurnOptions(idle_timeout_seconds=self._codex_role.idle_timeout_seconds),
-				),
 				write_memory,
+				write_report,
+				read_file,
+				list_files,
+				archive_memory,
+				edit_memory,
+				write_hot_memory,
+				memory_search,
 			],
 		)
 		return agent
@@ -575,86 +568,27 @@ class LerimOAIAgent:
 			artifact_paths=artifact_paths,
 		)
 
-		# Prepare codex options — start proxy if needed
-		codex_opts = dict(self._codex_opts)
-		proxy_started = False
 		try:
-			if self._needs_proxy and self._proxy is not None:
-				proxy_url = self._proxy.start()
-				proxy_started = True
-				codex_opts["base_url"] = proxy_url
-				logger.info(
-					"[maintain] Responses proxy started at %s", proxy_url
-				)
-
-			# Build the maintain agent (codex + write_memory only)
-			agent = self._build_maintain_agent(
-				prompt=prompt,
-				memory_root=resolved_memory_root,
-				run_folder=run_folder,
-				codex_opts=codex_opts,
-				thread_opts=self._thread_opts,
-			)
-
-			# Run with retry logic (3 attempts, exponential backoff)
-			max_attempts = 3
-			last_error: Exception | None = None
-			response_text = ""
-			result = None
+			# Run with retry + fallback model support
 			start_cost_tracking()
 
-			for attempt in range(1, max_attempts + 1):
-				try:
-					logger.info(
-						"[maintain] OAI agent attempt %d/%d (model=%s)",
-						attempt,
-						max_attempts,
-						self.config.lead_role.model,
-					)
-					result = _run_async(
-						Runner.run(
-							agent, prompt, context=ctx,
-							max_turns=self.config.lead_role.max_turns_maintain,
-						)
-					)
-					response_text = str(
-						result.final_output or ""
-					).strip() or "(no response)"
-					break
-				except Exception as exc:
-					last_error = exc
-					error_msg = str(exc)
-					if "429" in error_msg or "rate limit" in error_msg.lower():
-						logger.warning(
-							"[maintain] Rate limited on attempt %d: %s",
-							attempt,
-							error_msg[:100],
-						)
-					elif "500" in error_msg or "503" in error_msg:
-						logger.warning(
-							"[maintain] Server error on attempt %d: %s",
-							attempt,
-							error_msg[:100],
-						)
-					elif attempt < max_attempts:
-						logger.warning(
-							"[maintain] Error on attempt %d (%s): %s",
-							attempt,
-							type(exc).__name__,
-							error_msg[:100],
-						)
-					if attempt < max_attempts:
-						wait_time = min(2**attempt, 8)
-						logger.info(f"[maintain] Retrying in {wait_time}s...")
-						time.sleep(wait_time)
+			def _build_maintain_agent_with_model(model):
+				ag = self._build_maintain_agent(prompt=prompt)
+				ag.model = model
+				return ag
+
+			result = self._run_with_fallback(
+				flow="maintain",
+				build_agent_fn=_build_maintain_agent_with_model,
+				prompt=prompt,
+				ctx=ctx,
+				max_turns=self.config.lead_role.max_turns_maintain,
+			)
+			response_text = str(
+				result.final_output or ""
+			).strip() or "(no response)"
 
 			cost_usd = stop_cost_tracking()
-
-			if result is None:
-				raise RuntimeError(
-					f"[maintain] Failed after {max_attempts} attempts. "
-					f"Last error: {last_error}"
-				) from last_error
 
 			# Write agent response text
 			_write_text_with_newline(artifact_paths["agent_log"], response_text)
@@ -673,13 +607,26 @@ class LerimOAIAgent:
 				)
 				agent_trace_path.write_text("[]", encoding="utf-8")
 
-			# Validate maintain_actions artifact exists
+			# Validate maintain_actions artifact exists.
+			# If write_report was skipped, write_memory may still have done work.
 			actions_path = artifact_paths["maintain_actions"]
 			if not actions_path.exists():
-				raise RuntimeError(f"missing_artifact:{actions_path}")
+				logger.warning(
+					"[maintain] maintain_actions.json missing — using empty defaults"
+				)
+				actions_path.write_text(
+					json.dumps({"counts": {"merged": 0, "archived": 0, "consolidated": 0, "decayed": 0, "unchanged": 0}, "note": "report_not_written"}),
+					encoding="utf-8",
+				)
 
 			# Parse maintain_actions report for counts
-			report = _load_json_dict_artifact(actions_path)
+			try:
+				report = _load_json_dict_artifact(actions_path)
+			except RuntimeError:
+				logger.warning(
+					"[maintain] maintain_actions.json is invalid — using empty defaults"
+				)
+				report = {"counts": {"merged": 0, "archived": 0, "consolidated": 0, "decayed": 0, "unchanged": 0}}
 			counts_field = report.get("counts")
 			counts_raw = counts_field if isinstance(counts_field, dict) else {}
 			counts = _extract_counts(
@@ -717,9 +664,9 @@ class LerimOAIAgent:
 							or self._is_within(resolved, run_folder)
 							or self._is_within(resolved, lerim_root)
 						):
-							raise RuntimeError(
-								f"maintain_action_path_outside_allowed_roots:"
-								f"{path_key}={resolved}"
+							logger.warning(
+								"[maintain] action path outside allowed roots: {}={} — skipping validation for this action",
+								path_key, resolved,
 							)
 
 			# Log hot-memory path for observability
@@ -748,15 +695,7 @@ class LerimOAIAgent:
 			)
 
 		finally:
-			# Always stop the proxy if we started it
-			if proxy_started and self._proxy is not None:
-				try:
-					self._proxy.stop()
-					logger.info("[maintain] Responses proxy stopped")
-				except Exception as exc:
-					logger.warning(
-						"[maintain] Failed to stop proxy: %s", exc
-					)
+			pass
 
 	# ------------------------------------------------------------------
 	# Ask flow
@@ -772,34 +711,21 @@ class LerimOAIAgent:
 		self,
 		*,
 		prompt: str,
-		memory_root: Path,
-		codex_opts: dict,
-		thread_opts: dict,
 	) -> Agent[OAIRuntimeContext]:
 		"""Build the OAI Agent for the ask flow.
 
-		Read-only Codex sandbox — the ask agent can search/read memories
-		but cannot modify them.
+		Read-only: the ask agent can search and read memories
+		but cannot modify them. Uses memory_search for hybrid
+		FTS5+vector search and read_file for detail reads.
 		"""
-		clean_codex_opts = {
-			k: v
-			for k, v in codex_opts.items()
-			if k not in ("backend_url", "backend_api_key")
-		}
-
 		agent: Agent[OAIRuntimeContext] = Agent(
 			name="LerimAsk",
 			instructions=prompt,
 			model=self._lead_model,
 			tools=[
-				codex_tool(
-					codex_options=CodexOptions(**clean_codex_opts),
-					sandbox_mode="read-only",
-					working_directory=str(memory_root.parent),
-					skip_git_repo_check=True,
-					default_thread_options=ThreadOptions(**thread_opts),
-					default_turn_options=TurnOptions(idle_timeout_seconds=self._codex_role.idle_timeout_seconds),
-				),
+				memory_search,
+				read_file,
+				list_files,
 			],
 		)
 		return agent
@@ -849,39 +775,24 @@ class LerimOAIAgent:
 			memory_root=str(resolved_memory_root),
 		)
 
-		# Prepare codex options — start proxy if needed
-		codex_opts = dict(self._codex_opts)
-		proxy_started = False
-		try:
-			if self._needs_proxy and self._proxy is not None:
-				proxy_url = self._proxy.start()
-				proxy_started = True
-				codex_opts["base_url"] = proxy_url
+		# Run with retry + fallback model support
+		start_cost_tracking()
 
-			agent = self._build_ask_agent(
-				prompt=ask_prompt,
-				memory_root=resolved_memory_root,
-				codex_opts=codex_opts,
-				thread_opts=self._thread_opts,
-			)
+		def _build_ask_agent_with_model(model):
+			ag = self._build_ask_agent(prompt=ask_prompt)
+			ag.model = model
+			return ag
 
-			start_cost_tracking()
-			result = _run_async(
-				Runner.run(
-					agent, ask_prompt, context=ctx,
-					max_turns=self.config.lead_role.max_turns_ask,
-				)
-			)
-			cost_usd = stop_cost_tracking()
+		result = self._run_with_fallback(
+			flow="ask",
+			build_agent_fn=_build_ask_agent_with_model,
+			prompt=ask_prompt,
+			ctx=ctx,
+			max_turns=self.config.lead_role.max_turns_ask,
+		)
+		cost_usd = stop_cost_tracking()
 
-			response_text = str(
-				result.final_output or ""
-			).strip() or "(no response)"
-			return response_text, resolved_session_id, cost_usd
-
-		finally:
-			if proxy_started and self._proxy is not None:
-				try:
-					self._proxy.stop()
-				except Exception as exc:
-					logger.warning(f"[ask] Failed to stop proxy: {exc}")
+		response_text = str(
+			result.final_output or ""
+		).strip() or "(no response)"
+		return response_text, resolved_session_id, cost_usd

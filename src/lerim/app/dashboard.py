@@ -29,6 +29,9 @@ from lerim.app.api import (
     api_project_add,
     api_project_list,
     api_project_remove,
+    api_queue_jobs,
+    api_retry_job,
+    api_skip_job,
     api_status,
     api_sync,
 )
@@ -1139,15 +1142,12 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
         # -- Active background threads (sync-* / maintain-*) --
         sync_threads: list[str] = []
         maintain_threads: list[str] = []
-        proxy_thread_alive = False
         for t in threading.enumerate():
             name = t.name or ""
             if name.startswith("sync-"):
                 sync_threads.append(name)
             elif name.startswith("maintain-"):
                 maintain_threads.append(name)
-            elif "ResponsesProxy" in name or "responses-proxy" in name.lower():
-                proxy_thread_alive = True
 
         # -- Queue counts (single lightweight GROUP BY) --
         queue = count_session_jobs_by_status()
@@ -1186,14 +1186,6 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
                     or details.get("enqueued"),
             }
 
-        # -- Proxy status: check if any ResponsesProxy server thread is alive --
-        # Also look for the thread name pattern used by ThreadingHTTPServer
-        if not proxy_thread_alive:
-            for t in threading.enumerate():
-                if t.daemon and "HTTPServer" in type(t).__name__:
-                    # Cannot reliably distinguish; leave as False
-                    pass
-
         payload = {
             "timestamp": now.isoformat(),
             "sync_active": len(sync_threads) > 0,
@@ -1205,7 +1197,6 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
             "running_run_ids": running_run_ids,
             "last_sync": _format_service_run(last_sync_raw),
             "last_maintain": _format_service_run(last_maintain_raw),
-            "proxy_running": proxy_thread_alive,
         }
         self._json(payload)
 
@@ -1256,6 +1247,11 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
             "/api/memories": self._api_memories,
             "/api/config/models": self._api_config_models,
         }
+        if path == "/api/jobs/queue":
+            status_f = (query.get("status") or [None])[0]
+            project_f = (query.get("project") or [None])[0]
+            self._json(api_queue_jobs(status=status_f, project=project_f))
+            return
         no_query_handlers = {
             "/api/health": lambda: self._json(api_health()),
             "/api/status": lambda: self._json(api_status()),
@@ -1413,6 +1409,21 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
                 HTTPStatus.BAD_REQUEST if result.get("error") else HTTPStatus.OK
             )
             self._json(result, status=status_code)
+            return
+        # ── Job queue management routes ──────────────────────────────
+        if path.startswith("/api/jobs/") and path.endswith("/retry"):
+            run_id = unquote(path.split("/api/jobs/", 1)[1].rsplit("/retry", 1)[0])
+            if not run_id:
+                self._error(HTTPStatus.BAD_REQUEST, "Missing run_id in path")
+                return
+            self._json(api_retry_job(run_id))
+            return
+        if path.startswith("/api/jobs/") and path.endswith("/skip"):
+            run_id = unquote(path.split("/api/jobs/", 1)[1].rsplit("/skip", 1)[0])
+            if not run_id:
+                self._error(HTTPStatus.BAD_REQUEST, "Missing run_id in path")
+                return
+            self._json(api_skip_job(run_id))
             return
         if path == "/api/memory-graph/query":
             payload = self._read_json_body()

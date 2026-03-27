@@ -23,7 +23,7 @@ from tests.helpers import make_config
 
 
 def test_oai_sync_prompt_contains_steps(tmp_path):
-	"""Sync prompt should contain all 6 steps."""
+	"""Sync prompt should contain all 4 steps (batch dedup flow)."""
 	trace = tmp_path / "trace.jsonl"
 	trace.write_text('{"role":"user","content":"hello"}\n')
 	memory_root = tmp_path / "memory"
@@ -43,16 +43,15 @@ def test_oai_sync_prompt_contains_steps(tmp_path):
 		artifact_paths=artifact_paths,
 		metadata={"run_id": "sync-test", "trace_path": str(trace), "repo_name": "lerim"},
 	)
-	assert "SCAN EXISTING MEMORIES" in prompt
 	assert "EXTRACT + SUMMARIZE" in prompt
-	assert "READ EXTRACT RESULTS" in prompt
-	assert "DEDUPE CANDIDATES" in prompt
-	assert "WRITE MEMORIES" in prompt
+	assert "BATCH DEDUP" in prompt
+	assert "batch_dedup_candidates" in prompt
+	assert "CLASSIFY AND WRITE" in prompt
 	assert "WRITE REPORT" in prompt
 
 
-def test_oai_sync_prompt_references_codex(tmp_path):
-	"""Sync prompt should reference codex, not explore/read/write tools."""
+def test_oai_sync_prompt_references_lightweight_tools(tmp_path):
+	"""Sync prompt should reference lightweight tools for simple ops, not bare codex."""
 	trace = tmp_path / "trace.jsonl"
 	trace.write_text('{"role":"user","content":"hello"}\n')
 	prompt = build_oai_sync_prompt(
@@ -69,10 +68,13 @@ def test_oai_sync_prompt_references_codex(tmp_path):
 		},
 		metadata={"run_id": "test"},
 	)
-	assert "codex" in prompt.lower()
+	# Lightweight tools referenced for simple ops
+	assert "read_file" in prompt
+	assert "write_report" in prompt
 	assert "write_memory" in prompt
 	assert "extract_pipeline" in prompt
 	assert "summarize_pipeline" in prompt
+	assert "batch_dedup_candidates" in prompt
 	# Should NOT reference old PydanticAI tools
 	assert "explore()" not in prompt
 
@@ -119,7 +121,7 @@ def test_oai_sync_prompt_contains_decision_policy(tmp_path):
 	)
 	assert "no_op" in prompt
 	assert "update" in prompt
-	assert "72%" in prompt
+	assert "similarity" in prompt.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -143,8 +145,31 @@ def test_oai_agent_init_minimax(tmp_path):
 	agent = LerimOAIAgent(default_cwd=str(tmp_path), config=cfg)
 	assert agent.config is cfg
 	assert agent._lead_model is not None
-	assert agent._needs_proxy is True
-	assert agent._proxy is not None
+	assert agent._lead_model is not None
+
+
+def test_oai_agent_init_builds_fallback_models(tmp_path):
+	"""LerimOAIAgent should build fallback models from config."""
+	cfg = make_config(tmp_path)
+	role = LLMRoleConfig(
+		provider="minimax",
+		model="MiniMax-M2.5",
+		api_base="",
+		fallback_models=("openrouter:qwen/qwen3-coder",),
+		timeout_seconds=120,
+		max_iterations=10,
+		openrouter_provider_order=(),
+	)
+	cfg = replace(cfg, lead_role=role, minimax_api_key="test-key", openrouter_api_key="test-key")
+	agent = LerimOAIAgent(default_cwd=str(tmp_path), config=cfg)
+	assert len(agent._fallback_models) == 1
+
+
+def test_oai_agent_init_no_fallback_models(tmp_path):
+	"""LerimOAIAgent with no fallbacks configured should have empty list."""
+	cfg = make_config(tmp_path)
+	agent = LerimOAIAgent(default_cwd=str(tmp_path), config=cfg)
+	assert agent._fallback_models == []
 
 
 def test_oai_agent_init_openai_no_proxy(tmp_path):
@@ -163,8 +188,7 @@ def test_oai_agent_init_openai_no_proxy(tmp_path):
 	openai_codex = CodexRoleConfig(provider="openai", model="gpt-5-mini")
 	cfg = replace(cfg, lead_role=openai_role, codex_role=openai_codex, openai_api_key="test-key")
 	agent = LerimOAIAgent(default_cwd=str(tmp_path), config=cfg)
-	assert agent._needs_proxy is False
-	assert agent._proxy is None
+	assert agent._lead_model is not None
 
 
 def test_oai_agent_sync_missing_trace(tmp_path):
@@ -174,6 +198,184 @@ def test_oai_agent_sync_missing_trace(tmp_path):
 	agent = LerimOAIAgent(default_cwd=str(tmp_path), config=cfg)
 	with pytest.raises(FileNotFoundError, match="trace_path_missing"):
 		agent.sync(tmp_path / "nonexistent.jsonl")
+
+
+# ---------------------------------------------------------------------------
+# Quota error detection tests
+# ---------------------------------------------------------------------------
+
+
+def test_is_quota_error_429():
+	"""_is_quota_error should detect HTTP 429 status codes."""
+	assert LerimOAIAgent._is_quota_error("Error 429: Too Many Requests")
+
+
+def test_is_quota_error_rate_limit():
+	"""_is_quota_error should detect 'rate limit' text (case-insensitive)."""
+	assert LerimOAIAgent._is_quota_error("Rate Limit exceeded for model")
+
+
+def test_is_quota_error_quota():
+	"""_is_quota_error should detect 'quota' text (case-insensitive)."""
+	assert LerimOAIAgent._is_quota_error("Quota exceeded for this billing period")
+
+
+def test_is_quota_error_negative():
+	"""_is_quota_error should return False for non-quota errors."""
+	assert not LerimOAIAgent._is_quota_error("Internal server error 500")
+	assert not LerimOAIAgent._is_quota_error("Connection timeout")
+
+
+# ---------------------------------------------------------------------------
+# Fallback retry logic tests (mocked Runner, no LLM calls)
+# ---------------------------------------------------------------------------
+
+
+def test_run_with_fallback_succeeds_on_primary(tmp_path, monkeypatch):
+	"""_run_with_fallback should return on first success without trying fallbacks."""
+	cfg = make_config(tmp_path)
+	role = LLMRoleConfig(
+		provider="minimax",
+		model="MiniMax-M2.5",
+		api_base="",
+		fallback_models=("openrouter:qwen/qwen3-coder",),
+		timeout_seconds=120,
+		max_iterations=10,
+		openrouter_provider_order=(),
+	)
+	cfg = replace(cfg, lead_role=role, minimax_api_key="test-key", openrouter_api_key="test-key")
+	agent_obj = LerimOAIAgent(default_cwd=str(tmp_path), config=cfg)
+
+	class FakeResult:
+		final_output = "success"
+
+	call_count = 0
+
+	def fake_run_async(coro):
+		nonlocal call_count
+		call_count += 1
+		return FakeResult()
+
+	import lerim.runtime.oai_agent as oai_mod
+	monkeypatch.setattr(oai_mod, "_run_async", fake_run_async)
+
+	# Minimal build_agent_fn that just returns a sentinel
+	result = agent_obj._run_with_fallback(
+		flow="test",
+		build_agent_fn=lambda model: "fake-agent",
+		prompt="test prompt",
+		ctx=None,
+		max_turns=5,
+	)
+	assert result.final_output == "success"
+	assert call_count == 1  # Only one call, no fallback needed
+
+
+def test_run_with_fallback_switches_on_quota_error(tmp_path, monkeypatch):
+	"""_run_with_fallback should switch to fallback model on quota error."""
+	cfg = make_config(tmp_path)
+	role = LLMRoleConfig(
+		provider="minimax",
+		model="MiniMax-M2.5",
+		api_base="",
+		fallback_models=("openrouter:qwen/qwen3-coder",),
+		timeout_seconds=120,
+		max_iterations=10,
+		openrouter_provider_order=(),
+	)
+	cfg = replace(cfg, lead_role=role, minimax_api_key="test-key", openrouter_api_key="test-key")
+	agent_obj = LerimOAIAgent(default_cwd=str(tmp_path), config=cfg)
+
+	class FakeResult:
+		final_output = "fallback success"
+
+	models_tried = []
+
+	def fake_run_async(coro):
+		# First call raises quota error, second succeeds
+		if len(models_tried) == 0:
+			models_tried.append("primary")
+			raise RuntimeError("Error 429: Rate limit exceeded")
+		models_tried.append("fallback")
+		return FakeResult()
+
+	import lerim.runtime.oai_agent as oai_mod
+	monkeypatch.setattr(oai_mod, "_run_async", fake_run_async)
+	monkeypatch.setattr(oai_mod.time, "sleep", lambda _: None)
+
+	result = agent_obj._run_with_fallback(
+		flow="test",
+		build_agent_fn=lambda model: "fake-agent",
+		prompt="test prompt",
+		ctx=None,
+		max_turns=5,
+	)
+	assert result.final_output == "fallback success"
+	assert models_tried == ["primary", "fallback"]
+
+
+def test_run_with_fallback_raises_when_all_exhausted(tmp_path, monkeypatch):
+	"""_run_with_fallback should raise RuntimeError when all models fail."""
+	cfg = make_config(tmp_path)
+	role = LLMRoleConfig(
+		provider="minimax",
+		model="MiniMax-M2.5",
+		api_base="",
+		fallback_models=(),
+		timeout_seconds=120,
+		max_iterations=10,
+		openrouter_provider_order=(),
+	)
+	cfg = replace(cfg, lead_role=role, minimax_api_key="test-key")
+	agent_obj = LerimOAIAgent(default_cwd=str(tmp_path), config=cfg)
+
+	def fake_run_async(coro):
+		raise RuntimeError("Connection timeout")
+
+	import lerim.runtime.oai_agent as oai_mod
+	monkeypatch.setattr(oai_mod, "_run_async", fake_run_async)
+	monkeypatch.setattr(oai_mod.time, "sleep", lambda _: None)
+
+	with pytest.raises(RuntimeError, match="Failed after trying 1 model"):
+		agent_obj._run_with_fallback(
+			flow="test",
+			build_agent_fn=lambda model: "fake-agent",
+			prompt="test prompt",
+			ctx=None,
+			max_turns=5,
+		)
+
+
+def test_run_with_fallback_retries_same_model_on_non_quota_error(tmp_path, monkeypatch):
+	"""_run_with_fallback should retry same model on non-quota errors with backoff."""
+	cfg = make_config(tmp_path)
+	agent_obj = LerimOAIAgent(default_cwd=str(tmp_path), config=cfg)
+
+	class FakeResult:
+		final_output = "recovered"
+
+	attempt_count = 0
+
+	def fake_run_async(coro):
+		nonlocal attempt_count
+		attempt_count += 1
+		if attempt_count < 3:
+			raise RuntimeError("Server error 500")
+		return FakeResult()
+
+	import lerim.runtime.oai_agent as oai_mod
+	monkeypatch.setattr(oai_mod, "_run_async", fake_run_async)
+	monkeypatch.setattr(oai_mod.time, "sleep", lambda _: None)
+
+	result = agent_obj._run_with_fallback(
+		flow="test",
+		build_agent_fn=lambda model: "fake-agent",
+		prompt="test prompt",
+		ctx=None,
+		max_turns=5,
+	)
+	assert result.final_output == "recovered"
+	assert attempt_count == 3
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +435,7 @@ def test_oai_maintain_prompt_hot_memory_path(tmp_path):
 
 
 def test_oai_maintain_prompt_no_explore_tool(tmp_path):
-	"""Maintain prompt should NOT reference explore() tool — uses codex."""
+	"""Maintain prompt should NOT reference explore() tool — uses lightweight tools + codex."""
 	run_folder, artifact_paths = _make_maintain_artifacts(tmp_path)
 	prompt = build_oai_maintain_prompt(
 		memory_root=tmp_path / "memory",
@@ -242,6 +444,9 @@ def test_oai_maintain_prompt_no_explore_tool(tmp_path):
 	)
 	assert "explore()" not in prompt
 	assert "codex" in prompt.lower()
+	assert "list_files" in prompt
+	assert "read_file" in prompt
+	assert "write_report" in prompt
 
 
 def test_oai_maintain_prompt_with_access_stats(tmp_path):

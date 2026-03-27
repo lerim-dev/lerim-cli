@@ -359,6 +359,223 @@ def _cmd_memory_reset(args: argparse.Namespace) -> int:
     return 0
 
 
+def _relative_time(iso_str: str) -> str:
+	"""Convert an ISO timestamp to a human-readable relative string."""
+	try:
+		from datetime import datetime, timezone
+		dt = datetime.fromisoformat(iso_str)
+		if dt.tzinfo is None:
+			dt = dt.replace(tzinfo=timezone.utc)
+		delta = datetime.now(timezone.utc) - dt
+		secs = int(delta.total_seconds())
+		if secs < 0:
+			return "just now"
+		if secs < 60:
+			return f"{secs}s ago"
+		if secs < 3600:
+			return f"{secs // 60}m ago"
+		if secs < 86400:
+			return f"{secs // 3600}h ago"
+		return f"{secs // 86400}d ago"
+	except (ValueError, TypeError):
+		return "?"
+
+
+def _format_queue_counts(counts: dict[str, int]) -> str:
+	"""Format queue status counts into a summary string."""
+	order = ["pending", "running", "done", "failed", "dead_letter"]
+	parts = []
+	for status in order:
+		n = counts.get(status, 0)
+		if n > 0:
+			parts.append(f"{n} {status}")
+	return ", ".join(parts) if parts else "empty"
+
+
+def _resolve_project_repo_path(name: str) -> str | None:
+	"""Resolve a project name to its repo_path."""
+	config = get_config()
+	# Exact match first
+	if name in config.projects:
+		return str(Path(config.projects[name]).expanduser().resolve())
+	# Substring match
+	for pname, ppath in config.projects.items():
+		if name in pname:
+			return str(Path(ppath).expanduser().resolve())
+	return None
+
+
+def _cmd_queue(args: argparse.Namespace) -> int:
+	"""Display the session extraction queue."""
+	from lerim.sessions.catalog import list_queue_jobs, count_session_jobs_by_status
+
+	jobs = list_queue_jobs(
+		status_filter=getattr(args, "status", None),
+		project_filter=getattr(args, "project", None),
+		failed_only=getattr(args, "failed", False),
+	)
+	counts = count_session_jobs_by_status()
+
+	if args.json:
+		_emit(json.dumps({"jobs": jobs, "total": len(jobs), "queue": counts}, indent=2, default=str))
+		return 0
+
+	if not jobs:
+		_emit("Session Queue: no jobs")
+		_emit(_format_queue_counts(counts))
+		return 0
+
+	from rich.console import Console
+	from rich.table import Table
+
+	table = Table(title=f"Session Queue ({len(jobs)} jobs)")
+	table.add_column("STATUS", style="bold")
+	table.add_column("RUN ID")
+	table.add_column("PROJECT")
+	table.add_column("AGENT")
+	table.add_column("AGE")
+	table.add_column("ERROR")
+
+	status_styles = {
+		"pending": "dim white", "running": "cyan",
+		"failed": "yellow", "dead_letter": "red bold",
+		"done": "green",
+	}
+
+	for job in jobs:
+		st = str(job.get("status") or "")
+		style = status_styles.get(st, "")
+		rid = str(job.get("run_id") or "")[:8]
+		rp = str(job.get("repo_path") or "")
+		proj = Path(rp).name if rp else ""
+		agent = str(job.get("agent_type") or "")
+		age = _relative_time(str(job.get("updated_at") or ""))
+		err = str(job.get("error") or "")[:50]
+		table.add_row(f"[{style}]{st}[/{style}]", rid, proj, agent, age, err)
+
+	Console().print(table)
+	_emit(_format_queue_counts(counts))
+	if counts.get("dead_letter", 0) > 0:
+		_emit("Retry: lerim retry <run_id>  |  Retry all: lerim retry --all")
+	return 0
+
+
+def _cmd_retry(args: argparse.Namespace) -> int:
+	"""Retry dead_letter jobs."""
+	from lerim.sessions.catalog import (
+		retry_session_job, retry_project_jobs,
+		resolve_run_id_prefix, list_queue_jobs,
+		count_session_jobs_by_status,
+	)
+
+	run_id = getattr(args, "run_id", None)
+	project = getattr(args, "project", None)
+	retry_all = getattr(args, "all", False)
+
+	if retry_all:
+		dead = list_queue_jobs(status_filter="dead_letter")
+		if not dead:
+			_emit("No dead_letter jobs to retry.")
+			return 0
+		count = 0
+		for job in dead:
+			if retry_session_job(str(job["run_id"])):
+				count += 1
+		_emit(f"Retried {count} dead_letter job(s).")
+		_emit(_format_queue_counts(count_session_jobs_by_status()))
+		return 0
+
+	if project:
+		repo_path = _resolve_project_repo_path(project)
+		if not repo_path:
+			_emit(f"Project not found: {project}", file=sys.stderr)
+			return 1
+		count = retry_project_jobs(repo_path)
+		_emit(f"Retried {count} dead_letter job(s) for project {project}.")
+		_emit(_format_queue_counts(count_session_jobs_by_status()))
+		return 0
+
+	if not run_id:
+		_emit("Provide a run_id, --project, or --all.", file=sys.stderr)
+		return 2
+
+	if len(run_id) < 6:
+		_emit("Run ID prefix must be at least 6 characters.", file=sys.stderr)
+		return 2
+
+	full_id = resolve_run_id_prefix(run_id)
+	if not full_id:
+		_emit(f"Run ID not found or ambiguous: {run_id}", file=sys.stderr)
+		return 1
+
+	ok = retry_session_job(full_id)
+	if ok:
+		_emit(f"Retried: {run_id}")
+		_emit(_format_queue_counts(count_session_jobs_by_status()))
+	else:
+		_emit(f"Job {run_id} is not in dead_letter status.", file=sys.stderr)
+		return 1
+	return 0
+
+
+def _cmd_skip(args: argparse.Namespace) -> int:
+	"""Skip dead_letter jobs."""
+	from lerim.sessions.catalog import (
+		skip_session_job, skip_project_jobs,
+		resolve_run_id_prefix, list_queue_jobs,
+		count_session_jobs_by_status,
+	)
+
+	run_id = getattr(args, "run_id", None)
+	project = getattr(args, "project", None)
+	skip_all = getattr(args, "all", False)
+
+	if skip_all:
+		dead = list_queue_jobs(status_filter="dead_letter")
+		if not dead:
+			_emit("No dead_letter jobs to skip.")
+			return 0
+		count = 0
+		for job in dead:
+			if skip_session_job(str(job["run_id"])):
+				count += 1
+		_emit(f"Skipped {count} dead_letter job(s).")
+		_emit(_format_queue_counts(count_session_jobs_by_status()))
+		return 0
+
+	if project:
+		repo_path = _resolve_project_repo_path(project)
+		if not repo_path:
+			_emit(f"Project not found: {project}", file=sys.stderr)
+			return 1
+		count = skip_project_jobs(repo_path)
+		_emit(f"Skipped {count} dead_letter job(s) for project {project}.")
+		_emit(_format_queue_counts(count_session_jobs_by_status()))
+		return 0
+
+	if not run_id:
+		_emit("Provide a run_id, --project, or --all.", file=sys.stderr)
+		return 2
+
+	if len(run_id) < 6:
+		_emit("Run ID prefix must be at least 6 characters.", file=sys.stderr)
+		return 2
+
+	full_id = resolve_run_id_prefix(run_id)
+	if not full_id:
+		_emit(f"Run ID not found or ambiguous: {run_id}", file=sys.stderr)
+		return 1
+
+	ok = skip_session_job(full_id)
+	if ok:
+		_emit(f"Skipped: {run_id} -> done")
+		_emit(_format_queue_counts(count_session_jobs_by_status()))
+	else:
+		_emit(f"Job {run_id} is not in dead_letter status.", file=sys.stderr)
+		return 1
+	return 0
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     """Forward status request to the running Lerim server."""
     data = _api_get("/api/status")
@@ -371,7 +588,11 @@ def _cmd_status(args: argparse.Namespace) -> int:
         _emit(f"- connected_agents: {len(data.get('connected_agents', []))}")
         _emit(f"- memory_count: {data.get('memory_count', 0)}")
         _emit(f"- sessions_indexed_count: {data.get('sessions_indexed_count', 0)}")
-        _emit(f"- queue: {data.get('queue', {})}")
+        queue = data.get("queue", {})
+        _emit(f"- queue: {_format_queue_counts(queue)}")
+        dl = queue.get("dead_letter", 0)
+        if dl > 0:
+            _emit(f"  ! {dl} dead_letter job(s). Run: lerim queue --failed")
     return 0
 
 
@@ -1189,6 +1410,65 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status.set_defaults(func=_cmd_status)
 
+    # ── queue ─────────────────────────────────────────────────────────
+    queue = sub.add_parser(
+        "queue",
+        formatter_class=_F,
+        help="Display the session extraction queue",
+        description=(
+            "Display the session extraction queue with status, project, and age.\n"
+            "Host-only command -- reads the local SQLite catalog directly.\n\n"
+            "Examples:\n"
+            "  lerim queue                      # all active/failed jobs\n"
+            "  lerim queue --failed             # dead_letter + failed only\n"
+            "  lerim queue --status pending     # filter by status\n"
+            "  lerim queue --project lerim-cli  # filter by project\n"
+            "  lerim queue --json               # JSON output"
+        ),
+    )
+    queue.add_argument("--failed", action="store_true", help="Show only failed + dead_letter jobs.")
+    queue.add_argument("--status", help="Filter by specific status (pending, running, failed, dead_letter, done).")
+    queue.add_argument("--project", help="Filter by project name (substring match on repo_path).")
+    queue.set_defaults(func=_cmd_queue)
+
+    # ── retry ─────────────────────────────────────────────────────────
+    retry = sub.add_parser(
+        "retry",
+        formatter_class=_F,
+        help="Retry dead_letter session jobs",
+        description=(
+            "Reset dead_letter jobs to pending so the daemon re-processes them.\n"
+            "Host-only command -- modifies the local SQLite catalog directly.\n\n"
+            "Examples:\n"
+            "  lerim retry a1b2c3d4             # retry one job (prefix, min 6 chars)\n"
+            "  lerim retry --project lerim-cli  # retry all dead_letter for a project\n"
+            "  lerim retry --all                # retry all dead_letter jobs"
+        ),
+    )
+    retry.add_argument("run_id", nargs="?", help="Run ID (or prefix, min 6 chars) of the job to retry.")
+    retry.add_argument("--project", help="Retry all dead_letter jobs for a project (by name).")
+    retry.add_argument("--all", action="store_true", help="Retry all dead_letter jobs across all projects.")
+    retry.set_defaults(func=_cmd_retry)
+
+    # ── skip ──────────────────────────────────────────────────────────
+    skip = sub.add_parser(
+        "skip",
+        formatter_class=_F,
+        help="Skip dead_letter session jobs",
+        description=(
+            "Mark dead_letter jobs as done (skipped), unblocking the project queue.\n"
+            "Host-only command -- modifies the local SQLite catalog directly.\n\n"
+            "Examples:\n"
+            "  lerim skip a1b2c3d4             # skip one job (prefix, min 6 chars)\n"
+            "  lerim skip --project lerim-cli  # skip all dead_letter for a project\n"
+            "  lerim skip --all                # skip all dead_letter jobs"
+        ),
+    )
+    skip.add_argument("run_id", nargs="?", help="Run ID (or prefix, min 6 chars) of the job to skip.")
+    skip.add_argument("--project", help="Skip all dead_letter jobs for a project (by name).")
+    skip.add_argument("--all", action="store_true", help="Skip all dead_letter jobs across all projects.")
+    skip.set_defaults(func=_cmd_skip)
+
     # ── init ─────────────────────────────────────────────────────────
     init = sub.add_parser(
         "init",
@@ -1401,7 +1681,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-_SKIP_TRACING_COMMANDS = frozenset({"auth", "logs", "version", "help"})
+_SKIP_TRACING_COMMANDS = frozenset({"auth", "logs", "version", "help", "queue", "retry", "skip"})
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -239,6 +239,10 @@ def init_sessions_db() -> None:
             if name in columns:
                 continue
             conn.execute(f"ALTER TABLE session_jobs ADD COLUMN {name} {ddl}")
+        # repo_path index must be created after the column is ensured above.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_jobs_repo ON session_jobs (repo_path)"
+        )
         # Backfill non-null-ish defaults for older rows.
         now = _iso_now()
         conn.execute(
@@ -726,27 +730,52 @@ def claim_session_jobs(
                 (new_status, now_iso, now_iso, int(stale.get("id") or 0)),
             )
 
-        where_parts = [
-            "status IN (?, ?)",
-            "job_type = ?",
-            "available_at <= ?",
-            "repo_path IS NOT NULL AND repo_path != ''",
+        # Per-project ordered claiming: partition by repo_path, pick only
+        # the oldest non-terminal job per project.  If that oldest job is
+        # dead_letter the project is naturally excluded (blocked).  If it
+        # is failed with a future available_at it is also excluded (paused
+        # until retry window opens).
+        #
+        # IMPORTANT: The run_id filter is applied in the outer query, NOT
+        # inside the CTE.  The CTE must see ALL non-terminal jobs so that
+        # dead_letter blockers are always visible in the partition.
+        # Otherwise a caller could bypass blocking by targeting specific
+        # run_ids that exclude the blocker.
+        run_id_filter = ""
+        params: list[Any] = [
+            JOB_STATUS_PENDING, JOB_STATUS_FAILED, JOB_STATUS_DEAD_LETTER,
+            job_type,
         ]
-        params: list[Any] = [JOB_STATUS_PENDING, JOB_STATUS_FAILED, job_type, now_iso]
+
+        outer_params: list[Any] = [JOB_STATUS_PENDING, JOB_STATUS_FAILED, now_iso]
         if run_ids:
             placeholders = ",".join("?" for _ in run_ids)
-            where_parts.append(f"run_id IN ({placeholders})")
-            params.extend(run_ids)
+            run_id_filter = f"AND run_id IN ({placeholders})"
+            outer_params.extend(run_ids)
+        outer_params.append(limit)
+
+        params.extend(outer_params)
 
         rows = conn.execute(
             f"""
-            SELECT *
-            FROM session_jobs
-            WHERE {" AND ".join(where_parts)}
-            ORDER BY start_time ASC, available_at ASC, id ASC
+            WITH oldest_per_project AS (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY repo_path
+                    ORDER BY start_time ASC, available_at ASC, id ASC
+                ) AS rn
+                FROM session_jobs
+                WHERE status IN (?, ?, ?)
+                  AND job_type = ?
+                  AND repo_path IS NOT NULL AND repo_path != ''
+            )
+            SELECT * FROM oldest_per_project
+            WHERE rn = 1
+              AND status IN (?, ?)
+              AND available_at <= ?
+              {run_id_filter}
             LIMIT ?
             """,
-            [*params, limit],
+            params,
         ).fetchall()
 
         claimed: list[dict[str, Any]] = []
@@ -919,6 +948,168 @@ def count_session_jobs_by_status() -> dict[str, int]:
     return counts
 
 
+# ── Queue management: retry / skip / inspect ─────────────────────────
+
+
+def retry_session_job(
+	run_id: str, *, job_type: str = JOB_TYPE_EXTRACT,
+) -> bool:
+	"""Reset a dead_letter job to pending for retry.
+
+	The ``AND status = 'dead_letter'`` guard is atomic — safe against
+	concurrent daemon claiming.
+	"""
+	if not run_id:
+		return False
+	_ensure_sessions_db_initialized()
+	now = _iso_now()
+	with _connect() as conn:
+		cursor = conn.execute(
+			"""
+			UPDATE session_jobs
+			SET status = ?, attempts = 0, available_at = ?, error = NULL,
+				claimed_at = NULL, completed_at = NULL, heartbeat_at = NULL,
+				updated_at = ?
+			WHERE run_id = ? AND job_type = ? AND status = ?
+			""",
+			(JOB_STATUS_PENDING, now, now, run_id, job_type, JOB_STATUS_DEAD_LETTER),
+		)
+		conn.commit()
+	return int(cursor.rowcount or 0) > 0
+
+
+def skip_session_job(
+	run_id: str, *, job_type: str = JOB_TYPE_EXTRACT,
+) -> bool:
+	"""Mark a dead_letter job as done (skipped), unblocking the project."""
+	if not run_id:
+		return False
+	_ensure_sessions_db_initialized()
+	now = _iso_now()
+	with _connect() as conn:
+		cursor = conn.execute(
+			"""
+			UPDATE session_jobs
+			SET status = ?, completed_at = ?, updated_at = ?
+			WHERE run_id = ? AND job_type = ? AND status = ?
+			""",
+			(JOB_STATUS_DONE, now, now, run_id, job_type, JOB_STATUS_DEAD_LETTER),
+		)
+		conn.commit()
+	return int(cursor.rowcount or 0) > 0
+
+
+def retry_project_jobs(
+	repo_path: str, *, job_type: str = JOB_TYPE_EXTRACT,
+) -> int:
+	"""Retry all dead_letter jobs for a project. Returns count affected."""
+	if not repo_path:
+		return 0
+	_ensure_sessions_db_initialized()
+	now = _iso_now()
+	with _connect() as conn:
+		cursor = conn.execute(
+			"""
+			UPDATE session_jobs
+			SET status = ?, attempts = 0, available_at = ?, error = NULL,
+				claimed_at = NULL, completed_at = NULL, heartbeat_at = NULL,
+				updated_at = ?
+			WHERE repo_path = ? AND job_type = ? AND status = ?
+			""",
+			(JOB_STATUS_PENDING, now, now, repo_path, job_type, JOB_STATUS_DEAD_LETTER),
+		)
+		conn.commit()
+	return int(cursor.rowcount or 0)
+
+
+def skip_project_jobs(
+	repo_path: str, *, job_type: str = JOB_TYPE_EXTRACT,
+) -> int:
+	"""Skip all dead_letter jobs for a project. Returns count affected."""
+	if not repo_path:
+		return 0
+	_ensure_sessions_db_initialized()
+	now = _iso_now()
+	with _connect() as conn:
+		cursor = conn.execute(
+			"""
+			UPDATE session_jobs
+			SET status = ?, completed_at = ?, updated_at = ?
+			WHERE repo_path = ? AND job_type = ? AND status = ?
+			""",
+			(JOB_STATUS_DONE, now, now, repo_path, job_type, JOB_STATUS_DEAD_LETTER),
+		)
+		conn.commit()
+	return int(cursor.rowcount or 0)
+
+
+def resolve_run_id_prefix(prefix: str) -> str | None:
+	"""Resolve a short prefix to a full run_id.
+
+	Returns the full run_id if exactly one match, None otherwise.
+	Requires at least 6 characters to avoid overly broad matches.
+	"""
+	if not prefix or len(prefix) < 6:
+		return None
+	_ensure_sessions_db_initialized()
+	# Escape LIKE wildcards so user-supplied % or _ are matched literally.
+	escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+	with _connect() as conn:
+		rows = conn.execute(
+			"SELECT run_id FROM session_jobs WHERE run_id LIKE ? ESCAPE '\\' LIMIT 2",
+			(escaped + "%",),
+		).fetchall()
+	if len(rows) == 1:
+		return str(rows[0]["run_id"])
+	return None
+
+
+def list_queue_jobs(
+	*,
+	status_filter: str | None = None,
+	project_filter: str | None = None,
+	failed_only: bool = False,
+	limit: int = 50,
+) -> list[dict[str, Any]]:
+	"""List queue jobs with optional filters for CLI display.
+
+	When *failed_only* is True, shows only failed + dead_letter jobs.
+	"""
+	_ensure_sessions_db_initialized()
+	where: list[str] = []
+	params: list[Any] = []
+
+	if failed_only:
+		where.append("status IN (?, ?)")
+		params.extend([JOB_STATUS_FAILED, JOB_STATUS_DEAD_LETTER])
+	elif status_filter:
+		where.append("status = ?")
+		params.append(status_filter)
+	else:
+		# Default: show non-done jobs
+		where.append("status != ?")
+		params.append(JOB_STATUS_DONE)
+
+	if project_filter:
+		where.append("repo_path LIKE ?")
+		params.append(f"%{project_filter}%")
+
+	where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+	with _connect() as conn:
+		rows = conn.execute(
+			f"""
+			SELECT run_id, status, agent_type, repo_path, start_time,
+				   error, attempts, max_attempts, updated_at
+			FROM session_jobs
+			{where_sql}
+			ORDER BY start_time ASC, id ASC
+			LIMIT ?
+			""",
+			[*params, max(1, limit)],
+		).fetchall()
+	return rows
+
+
 def record_service_run(
     *,
     job_type: str,
@@ -996,7 +1187,7 @@ if __name__ == "__main__":
             reload_config()
             init_sessions_db()
             run_id = "selftest-run"
-            queued = enqueue_session_job(run_id, force=True)
+            queued = enqueue_session_job(run_id, force=True, repo_path=tmp)
             claimed = claim_session_jobs(limit=1, run_ids=[run_id])
             assert queued
             assert claimed and str(claimed[0].get("run_id")) == run_id

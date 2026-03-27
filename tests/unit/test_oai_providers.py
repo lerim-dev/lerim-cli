@@ -9,7 +9,6 @@ from agents.extensions.models.litellm_model import LitellmModel
 
 from lerim.config.settings import LLMRoleConfig
 from lerim.runtime.oai_providers import (
-	build_codex_options,
 	build_oai_fallback_models,
 	build_oai_model,
 	build_oai_model_from_role,
@@ -111,48 +110,3 @@ def test_build_oai_fallback_models_multiple(tmp_path):
 	result = build_oai_fallback_models(role, config=cfg)
 	assert len(result) == 2
 	assert all(isinstance(m, LitellmModel) for m in result)
-
-
-# -- Codex options tests --
-
-
-def test_build_codex_options_openrouter(tmp_path):
-	"""OpenRouter provider should use OpenRouter directly — no proxy needed."""
-	cfg = make_config(tmp_path)
-	cfg = replace(cfg, openrouter_api_key="test-or-key", lead_role=_minimax_role(provider="openrouter", model="qwen/qwen3-coder"))
-	codex_opts, thread_opts, needs_proxy = build_codex_options(config=cfg)
-	assert needs_proxy is False
-	assert codex_opts["api_key"] == "test-or-key"
-	assert "openrouter" in codex_opts["base_url"]
-	assert thread_opts["model"] == "qwen/qwen3-coder"
-
-
-def test_build_codex_options_minimax_needs_proxy(tmp_path):
-	"""MiniMax provider should need a proxy (Responses API not supported)."""
-	cfg = make_config(tmp_path)
-	cfg = replace(cfg, minimax_api_key="test-mm-key", lead_role=_minimax_role())
-	codex_opts, thread_opts, needs_proxy = build_codex_options(config=cfg)
-	assert needs_proxy is True
-	assert codex_opts["backend_api_key"] == "test-mm-key"
-	assert "minimax" in codex_opts["backend_url"]
-	assert thread_opts["model"] == "MiniMax-M2.5"
-
-
-def test_build_codex_options_openai_direct(tmp_path):
-	"""OpenAI provider should use OpenAI directly — no proxy needed."""
-	cfg = make_config(tmp_path)
-	cfg = replace(cfg, openai_api_key="test-oai-key", lead_role=_minimax_role(provider="openai", model="gpt-5-mini"))
-	codex_opts, thread_opts, needs_proxy = build_codex_options(config=cfg)
-	assert needs_proxy is False
-	assert codex_opts["api_key"] == "test-oai-key"
-	assert thread_opts["model"] == "gpt-5-mini"
-
-
-def test_build_codex_options_zai_needs_proxy(tmp_path):
-	"""ZAI provider should need a proxy."""
-	cfg = make_config(tmp_path)
-	cfg = replace(cfg, zai_api_key="test-zai-key", lead_role=_minimax_role(provider="zai", model="glm-4.7"))
-	codex_opts, thread_opts, needs_proxy = build_codex_options(config=cfg)
-	assert needs_proxy is True
-	assert codex_opts["backend_api_key"] == "test-zai-key"
-	assert thread_opts["model"] == "glm-4.7"

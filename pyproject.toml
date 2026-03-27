@@ -23,6 +23,8 @@ dependencies = [
     "litellm==1.81.13",
     "rich==14.3.3",
     "openai-agents>=0.13.1",
+    "fastembed>=0.8.0",
+    "sqlite-vec>=0.1.6",
 ]
 
 [project.urls]

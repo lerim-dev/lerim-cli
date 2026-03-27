@@ -7,7 +7,6 @@ import pytest
 
 from lerim.runtime.provider_caps import (
 	PROVIDER_CAPABILITIES,
-	codex_needs_proxy,
 	get_missing_api_key_message,
 	validate_provider_for_role,
 )
@@ -33,11 +32,6 @@ class TestValidateProviderForRole:
 		with pytest.raises(RuntimeError, match="does not support role 'summarize'"):
 			validate_provider_for_role("mlx", "summarize")
 
-	def test_all_opencode_go_models_valid_for_codex(self):
-		"""All opencode_go models should work for codex (chat completions endpoint)."""
-		for m in ["minimax-m2.7", "minimax-m2.5", "kimi-k2.5", "glm-5"]:
-			validate_provider_for_role("opencode_go", "codex", model=m)
-
 
 class TestGetMissingApiKeyMessage:
 	"""Tests for get_missing_api_key_message."""
@@ -57,16 +51,6 @@ class TestGetMissingApiKeyMessage:
 	def test_returns_none_for_provider_without_key(self):
 		"""Providers like ollama have api_key_env=None -- should return None."""
 		assert get_missing_api_key_message("ollama") is None
-
-
-class TestCodexNeedsProxy:
-	"""Tests for codex_needs_proxy."""
-
-	def test_true_for_minimax(self):
-		assert codex_needs_proxy("minimax") is True
-
-	def test_false_for_openai(self):
-		assert codex_needs_proxy("openai") is False
 
 
 class TestAllProvidersHaveLeadRole:
