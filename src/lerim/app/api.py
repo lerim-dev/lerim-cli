@@ -170,6 +170,28 @@ def api_skip_job(run_id: str) -> dict[str, Any]:
     return {"skipped": ok, "run_id": run_id, "queue": count_session_jobs_by_status()}
 
 
+def api_retry_all_dead_letter() -> dict[str, Any]:
+    """Retry all dead_letter jobs across all projects."""
+    dead = list_queue_jobs(status_filter="dead_letter")
+    retried = 0
+    for job in dead:
+        rid = str(job.get("run_id") or "")
+        if rid and retry_session_job(rid):
+            retried += 1
+    return {"retried": retried, "queue": count_session_jobs_by_status()}
+
+
+def api_skip_all_dead_letter() -> dict[str, Any]:
+    """Skip all dead_letter jobs across all projects."""
+    dead = list_queue_jobs(status_filter="dead_letter")
+    skipped = 0
+    for job in dead:
+        rid = str(job.get("run_id") or "")
+        if rid and skip_session_job(rid):
+            skipped += 1
+    return {"skipped": skipped, "queue": count_session_jobs_by_status()}
+
+
 def api_queue_jobs(
     status: str | None = None, project: str | None = None,
 ) -> dict[str, Any]:
