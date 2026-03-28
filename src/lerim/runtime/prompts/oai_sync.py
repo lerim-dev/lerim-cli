@@ -52,12 +52,21 @@ Steps (execute in order):
 
 3. CLASSIFY AND WRITE:
    For each candidate, classify using the batch dedup results:
-   - top_similarity very high AND same insight -> "no_op"
-   - related topic but candidate adds new info -> "update"
-   - no relevant match -> "add"
 
-   IMPORTANT: Err on the side of "update" over "add". Before classifying as "add",
-   explicitly name the closest existing memory and explain why it is NOT a match.
+   Classification rules (use top_similarity score from batch_dedup_candidates):
+   - top_similarity >= 0.7 AND the existing memory covers the same core topic → "no_op"
+   - top_similarity 0.4-0.7 AND same topic but candidate adds genuinely NEW information
+     not present in the existing memory → "update"
+   - top_similarity < 0.4 OR no relevant match at all → "add"
+   - top_similarity == 0.0 (no existing memories) → always "add"
+
+   IMPORTANT DEDUP RULES:
+   - Default to "no_op" when uncertain. Duplicate memories are worse than missing ones.
+   - Before classifying as "add", you MUST name the closest existing memory and
+     explain specifically what new information the candidate contributes that the
+     existing memory does NOT already contain.
+   - Before classifying as "update", verify the candidate contains concrete details
+     that are absent from the existing memory (not just rephrasing).
 
    For "add": call write_memory() with all fields.
    For "update": call write_memory() with the SAME title as the existing memory,

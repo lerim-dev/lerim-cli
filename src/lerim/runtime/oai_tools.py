@@ -671,7 +671,15 @@ def batch_dedup_candidates(
 
 	Use this in step 2 (after extract_pipeline). Pass the raw extract.json
 	content. Each candidate is enriched with its top-3 similar existing
-	memories and a top_similarity score for classification.
+	memories and a top_similarity score for dedup classification.
+
+	Interpreting top_similarity scores:
+	- 0.7+ : Very likely duplicate. Classify as "no_op" unless candidate has
+	  clearly distinct information not present in the existing memory.
+	- 0.4-0.7 : Related topic. Read both carefully. Classify as "update" if
+	  candidate adds new facts, "no_op" if it's just rephrasing.
+	- Below 0.4 : Likely a new topic. Classify as "add".
+	- 0.0 : No existing memories at all (empty store). All candidates are "add".
 
 	Returns JSON: {"count": int, "results": [{"candidate": {...},
 	  "similar_existing": [...], "top_similarity": float}]}.

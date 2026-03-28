@@ -93,6 +93,10 @@ class MemoryExtractSignature(dspy.Signature):
 
     Prefer precision over recall. Fewer high-quality items beat many weak ones.
     An empty list is a valid output when a session has no durable memories.
+
+    Title format: Start with a verb phrase ("Use X for Y") or noun phrase ("X configuration").
+    Make titles specific and self-contained — someone reading just the title should understand
+    the core decision or learning without needing the body.
     """
 
     transcript: str = dspy.InputField(
@@ -137,8 +141,8 @@ def _filter_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
         # Gate 2: Title too short (< 10 chars)
         if len(title) < 10:
             continue
-        # Gate 3: Body too thin (< 30 chars)
-        if len(body) < 30:
+        # Gate 3: Body too thin (< 50 chars) — must add substance beyond title
+        if len(body) < 50:
             continue
         # Gate 4: Tautological (body ≈ title)
         if _is_tautological(title, body):
@@ -457,7 +461,7 @@ def _extract_one_window(
     share mutable history state.
     """
     lms = configure_dspy_lms("extract")
-    extractor = dspy.Predict(MemoryExtractSignature)
+    extractor = dspy.ChainOfThought(MemoryExtractSignature)
     history_start = len(lms[0].history)
     logger.info("  Window {}/{}: extracting...", wi, total)
     w_start = time.time()

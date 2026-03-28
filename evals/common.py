@@ -33,7 +33,7 @@ def configure_dspy_from_eval(config: dict, prefix: str = "lerim_eval_") -> tuple
 
     Returns (Config, temp_dir_path).
     """
-    REQUIRED_SECTIONS = ("lead", "explorer", "extraction", "summarization")
+    REQUIRED_SECTIONS = ("lead", "extraction", "summarization")
     missing = [s for s in REQUIRED_SECTIONS if s not in config]
     if missing:
         raise ValueError(
@@ -43,7 +43,6 @@ def configure_dspy_from_eval(config: dict, prefix: str = "lerim_eval_") -> tuple
 
     section_to_role = {
         "lead": "lead",
-        "explorer": "explorer",
         "extraction": "extract",
         "summarization": "summarize",
     }

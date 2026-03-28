@@ -105,7 +105,7 @@ def _configure_from_eval(config: dict) -> tuple:
     Unlike the shared configure_dspy_from_eval, lifecycle needs extra subdirs
     (workspace, archived, summaries) so we create them here.
     """
-    REQUIRED_SECTIONS = ("lead", "explorer", "extraction", "summarization")
+    REQUIRED_SECTIONS = ("lead", "extraction", "summarization")
     missing = [s for s in REQUIRED_SECTIONS if s not in config]
     if missing:
         raise ValueError(
@@ -115,7 +115,6 @@ def _configure_from_eval(config: dict) -> tuple:
 
     section_to_role = {
         "lead": "lead",
-        "explorer": "explorer",
         "extraction": "extract",
         "summarization": "summarize",
     }
@@ -547,7 +546,7 @@ def run_lifecycle_eval(
 
         roles_cfg = {
             s: config.get(s, {})
-            for s in ("lead", "explorer", "extraction", "summarization")
+            for s in ("lead", "extraction", "summarization")
         }
         result = {
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

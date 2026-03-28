@@ -21,8 +21,8 @@ class MemoryCandidate(BaseModel):
         default=None,
         description="Subtype for learnings: insight, procedure, friction, pitfall, or preference. Must be null for decisions.",
     )
-    title: str = Field(description="Short memory title.")
-    body: str = Field(description="Memory content in plain language. Must add substantive information beyond the title.")
+    title: str = Field(description="Short descriptive title starting with a verb or noun phrase. Format: 'Use X for Y', 'Switch to X', 'X causes Y'. Max 10 words. Must be specific enough to identify the topic without reading the body.")
+    body: str = Field(description="Memory content in plain language. Must add substantive information beyond the title — include the WHY (rationale), WHAT was considered (alternatives), and CONTEXT (when this applies). Minimum 2 sentences.")
     confidence: float | None = Field(
         default=None,
         ge=0.0,

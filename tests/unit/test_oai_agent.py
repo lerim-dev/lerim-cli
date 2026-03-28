@@ -596,10 +596,12 @@ def test_oai_ask_prompt_contains_question():
 	assert "how to deploy" in prompt
 
 
-def test_oai_ask_prompt_references_codex():
-	"""Ask prompt should reference codex, not explore/grep/glob tools."""
+def test_oai_ask_prompt_references_memory_tools():
+	"""Ask prompt should reference memory_search/read_file, not codex or explore tools."""
 	prompt = build_oai_ask_prompt("test", [], [], memory_root="/tmp/memory")
-	assert "codex" in prompt.lower()
+	assert "memory_search" in prompt
+	assert "read_file" in prompt
+	assert "codex" not in prompt.lower()
 	assert "explore()" not in prompt
 
 
