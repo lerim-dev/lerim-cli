@@ -490,26 +490,39 @@ def run_sync_once(
         if no_extract:
             skipped = len(target_run_ids)
         elif not dry_run:
-            claimed = claim_session_jobs(
-                limit=claim_limit,
-                run_ids=[run_id] if run_id else None,
-            )
-            for job in claimed:
-                rp = str(job.get("repo_path") or "").strip()
-                if rp:
-                    projects.add(Path(rp).name)
-            target_run_ids = [
-                str(item.get("run_id") or "") for item in claimed if item.get("run_id")
-            ]
-            (
-                extracted,
-                failed,
-                routing_skipped,
-                learnings_new,
-                learnings_updated,
-                cost_usd,
-            ) = _process_claimed_jobs(claimed)
-            skipped += routing_skipped
+            # Process up to max_sessions by claiming in a loop.
+            # Each claim returns 1 per project (chronological ordering).
+            # After processing, claim again to get the next session.
+            total_processed = 0
+            while total_processed < claim_limit:
+                claimed = claim_session_jobs(
+                    limit=claim_limit - total_processed,
+                    run_ids=[run_id] if run_id else None,
+                )
+                if not claimed:
+                    break  # no more pending jobs
+                for job in claimed:
+                    rp = str(job.get("repo_path") or "").strip()
+                    if rp:
+                        projects.add(Path(rp).name)
+                target_run_ids.extend(
+                    str(item.get("run_id") or "") for item in claimed if item.get("run_id")
+                )
+                (
+                    batch_extracted,
+                    batch_failed,
+                    batch_skipped,
+                    batch_new,
+                    batch_updated,
+                    batch_cost,
+                ) = _process_claimed_jobs(claimed)
+                extracted += batch_extracted
+                failed += batch_failed
+                skipped += batch_skipped
+                learnings_new += batch_new
+                learnings_updated += batch_updated
+                cost_usd += batch_cost
+                total_processed += len(claimed)
 
         summary = SyncSummary(
             indexed_sessions=indexed_sessions,
