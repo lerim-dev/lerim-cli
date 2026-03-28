@@ -686,7 +686,7 @@ _CONFIG_OVERRIDE: Config | None = None
 
 
 def set_config_override(config: Config | None) -> None:
-    """Set a process-wide config override. Used by eval runners for isolation.
+    """Set a process-wide config override for isolated execution.
 
     When set, get_config() returns this instead of the cached load_config().
     Call set_config_override(None) to clear.
@@ -769,10 +769,10 @@ def _write_config_full(data: dict[str, Any]) -> Config:
     return reload_config()
 
 
-def build_eval_config(
+def build_isolated_config(
     roles_override: dict[str, dict[str, Any]], temp_data_dir: Path
 ) -> Config:
-    """Build an isolated Config for eval runners without any disk side effects.
+    """Build an isolated Config without any disk side effects.
 
     Reads base TOML layers (read-only) and env API keys, deep-merges
     roles_override into the roles section, and returns a Config with all paths
