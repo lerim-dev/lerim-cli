@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from collections import defaultdict
@@ -25,6 +26,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 import dspy
+import logfire
 
 from lerim.config.logging import logger
 from lerim.config.settings import get_config
@@ -85,6 +87,11 @@ class MemoryExtractSignature(dspy.Signature):
     - pitfall: a mistake to avoid
     - preference: a user preference, habit, convention, or style choice
 
+    CRITICAL — primitive vs kind:
+    - primitive MUST be exactly the string "decision" or "learning" and nothing else.
+    - Never put insight, procedure, friction, pitfall, or preference in primitive.
+    - Those subtype names belong in the kind field only when primitive is "learning".
+
     Confidence calibration:
     - 0.9+ = explicitly stated or decided (by user or agent)
     - 0.7-0.8 = strongly implied by behavior or accepted without objection
@@ -92,7 +99,7 @@ class MemoryExtractSignature(dspy.Signature):
     - Below 0.5 = do not extract
 
     Prefer precision over recall. Fewer high-quality items beat many weak ones.
-    An empty list is a valid output when a session has no durable memories.
+    If a session has no durable memories, return an empty list: [].
 
     Title format: Start with a verb phrase ("Use X for Y") or noun phrase ("X configuration").
     Make titles specific and self-contained — someone reading just the title should understand
@@ -106,7 +113,9 @@ class MemoryExtractSignature(dspy.Signature):
         desc="Optional lead-agent natural language guidance about focus areas, trace context, and dedupe hints"
     )
     primitives: list[MemoryCandidate] = dspy.OutputField(
-        desc="Extracted memory candidate list"
+        desc='List of memory candidates. Each item: primitive is only "decision" or "learning". '
+        'Learning subtypes (pitfall, insight, preference, procedure, friction) go in kind, not primitive. '
+        'If no candidates, return [].'
     )
 
 
@@ -449,6 +458,23 @@ def _summarize_tool_use(name: str, input_data: dict) -> str:
 	return f"[Used {name}]"
 
 
+def _is_empty_primitives_parse_error(exc: RuntimeError) -> bool:
+    """Detect when all LMs failed because the model returned empty primitives.
+
+    This happens when the LLM correctly determines no memories exist but
+    returns <primitives></primitives> instead of <primitives>[]</primitives>.
+    """
+    cause = exc.__cause__
+    if cause is None:
+        return False
+    from dspy.utils.exceptions import AdapterParseError
+
+    if not isinstance(cause, AdapterParseError):
+        return False
+    response = getattr(cause, "lm_response", "") or ""
+    return bool(re.search(r"<primitives>\s*</primitives>", response))
+
+
 def _extract_one_window(
     wi: int,
     total: int,
@@ -460,29 +486,37 @@ def _extract_one_window(
     Each call creates fresh DSPy LM instances so parallel threads never
     share mutable history state.
     """
-    lms = configure_dspy_lms("extract")
-    extractor = dspy.ChainOfThought(MemoryExtractSignature)
-    history_start = len(lms[0].history)
-    logger.info("  Window {}/{}: extracting...", wi, total)
-    w_start = time.time()
-    _, result = call_with_fallback(extractor, lms, transcript=window, guidance=guidance)
-    candidates: list[dict[str, Any]] = []
-    primitives = getattr(result, "primitives", [])
-    if isinstance(primitives, list):
-        for item in primitives:
-            if isinstance(item, MemoryCandidate):
-                candidates.append(item.model_dump(mode="json", exclude_none=True))
-            elif isinstance(item, dict):
-                candidates.append(item)
-    logger.info(
-        "  Window {}/{}: done ({:.1f}s, {} candidates)",
-        wi,
-        total,
-        time.time() - w_start,
-        len(primitives) if isinstance(primitives, list) else 0,
-    )
-    capture_dspy_cost(lms[0], history_start)
-    return candidates
+    with logfire.span("extract_window", window_index=wi, total_windows=total):
+        lms = configure_dspy_lms("extract")
+        extractor = dspy.ChainOfThought(MemoryExtractSignature)
+        history_start = len(lms[0].history)
+        logger.info("  Window {}/{}: extracting...", wi, total)
+        w_start = time.time()
+        try:
+            _, result = call_with_fallback(extractor, lms, transcript=window, guidance=guidance)
+        except RuntimeError as exc:
+            if _is_empty_primitives_parse_error(exc):
+                logger.info("  Window {}/{}: no candidates (empty primitives)", wi, total)
+                capture_dspy_cost(lms[0], history_start)
+                return []
+            raise
+        candidates: list[dict[str, Any]] = []
+        primitives = getattr(result, "primitives", [])
+        if isinstance(primitives, list):
+            for item in primitives:
+                if isinstance(item, MemoryCandidate):
+                    candidates.append(item.model_dump(mode="json", exclude_none=True))
+                elif isinstance(item, dict):
+                    candidates.append(item)
+        logger.info(
+            "  Window {}/{}: done ({:.1f}s, {} candidates)",
+            wi,
+            total,
+            time.time() - w_start,
+            len(primitives) if isinstance(primitives, list) else 0,
+        )
+        capture_dspy_cost(lms[0], history_start)
+        return candidates
 
 
 def _extract_candidates(
@@ -511,34 +545,36 @@ def _extract_candidates(
         windows = window_transcript_jsonl(transcript, max_window_tokens, overlap_tokens)
     else:
         windows = window_transcript(transcript, max_window_tokens, overlap_tokens)
-    logger.info(
-        "Extraction: {} window(s), max_window_tokens={}, max_workers={}",
-        len(windows),
-        max_window_tokens,
-        max_workers,
-    )
-    guid = guidance.strip()
-    total = len(windows)
 
-    if max_workers > 1 and total > 1:
-        # Parallel: each thread gets its own LM instances via _extract_one_window
-        effective_workers = min(max_workers, total)
-        logger.info("Extraction: parallel mode ({} workers)", effective_workers)
-        all_candidates: list[dict[str, Any]] = []
-        with ThreadPoolExecutor(max_workers=effective_workers) as pool:
-            futures = {
-                pool.submit(_extract_one_window, wi, total, window, guid): wi
-                for wi, window in enumerate(windows, 1)
-            }
-            for future in as_completed(futures):
-                all_candidates.extend(future.result())
+    with logfire.span("extract_candidates", windows=len(windows), max_workers=max_workers):
+        logger.info(
+            "Extraction: {} window(s), max_window_tokens={}, max_workers={}",
+            len(windows),
+            max_window_tokens,
+            max_workers,
+        )
+        guid = guidance.strip()
+        total = len(windows)
+
+        if max_workers > 1 and total > 1:
+            # Parallel: each thread gets its own LM instances via _extract_one_window
+            effective_workers = min(max_workers, total)
+            logger.info("Extraction: parallel mode ({} workers)", effective_workers)
+            all_candidates: list[dict[str, Any]] = []
+            with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+                futures = {
+                    pool.submit(_extract_one_window, wi, total, window, guid): wi
+                    for wi, window in enumerate(windows, 1)
+                }
+                for future in as_completed(futures):
+                    all_candidates.extend(future.result())
+            return _filter_candidates(all_candidates)
+
+        # Sequential: single-thread path (max_workers=1 or single window)
+        all_candidates = []
+        for wi, window in enumerate(windows, 1):
+            all_candidates.extend(_extract_one_window(wi, total, window, guid))
         return _filter_candidates(all_candidates)
-
-    # Sequential: single-thread path (max_workers=1 or single window)
-    all_candidates = []
-    for wi, window in enumerate(windows, 1):
-        all_candidates.extend(_extract_one_window(wi, total, window, guid))
-    return _filter_candidates(all_candidates)
 
 
 def extract_memories_from_session_file(
