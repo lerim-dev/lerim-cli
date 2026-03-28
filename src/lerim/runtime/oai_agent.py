@@ -19,7 +19,7 @@ import litellm
 litellm.turn_off_message_logging = True
 litellm.suppress_debug_info = True
 
-import logfire
+import logfire  # noqa: E402
 from agents import Agent, Runner, set_tracing_disabled  # noqa: E402
 from agents.extensions.models.litellm_model import LitellmModel  # noqa: E402
 
