@@ -68,7 +68,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             b"</body></html>"
         )
 
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+    def log_message(self, _format: str, *_args: Any) -> None:
         """Suppress default stderr logging from BaseHTTPRequestHandler."""
 
 

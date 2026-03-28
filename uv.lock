@@ -2486,6 +2486,7 @@ docs = [
 ]
 lint = [
     { name = "ruff" },
+    { name = "vulture" },
 ]
 mlx = [
     { name = "vllm-mlx" },
@@ -2528,6 +2529,7 @@ requires-dist = [
     { name = "sqlite-vec", specifier = ">=0.1.6" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
     { name = "vllm-mlx", marker = "extra == 'mlx'", specifier = ">=0.2.6" },
+    { name = "vulture", marker = "extra == 'lint'", specifier = ">=2.14" },
 ]
 provides-extras = ["mlx", "test", "lint", "docs"]
 
@@ -6484,6 +6486,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/0a/f0/fc4fcd6321d1f413654c00917f8ae0e7d8f29e4a28df3715e7a0c33c5ea0/vllm_mlx-0.2.6.tar.gz", hash = "sha256:f37d05078508921358f2603330ac4a89dc64120f172855eb69a5654b1f10bf33", size = 333537, upload-time = "2026-02-13T05:06:25.756Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d5/1d/32ef395f508e38876b3307be1ace254a37440565ba48b9e7320d42c31368/vllm_mlx-0.2.6-py3-none-any.whl", hash = "sha256:6bc4334070c5bd6201cc76d212ba611498a6498c5f244c8e6fad1d2f9cfd7b61", size = 279575, upload-time = "2026-02-13T05:06:24.553Z" },
+]
+
+[[package]]
+name = "vulture"
+version = "2.16"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tomli", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/66/3e/4d08c5903b2c0c70cad583c170cc4a663fc6a61e2ad00b711fcda61358cd/vulture-2.16.tar.gz", hash = "sha256:f8d9f6e2af03011664a3c6c240c9765b3f392917d3135fddca6d6a68d359f717", size = 52680, upload-time = "2026-03-25T14:41:27.141Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f5/be/f935130312330614811dae2ea9df3f395f6d63889eb6c2e68c14507152ee/vulture-2.16-py3-none-any.whl", hash = "sha256:6e0f1c312cef1c87856957e5c2ca9608834a7c794c2180477f30bf0e4cc58eee", size = 26993, upload-time = "2026-03-25T14:41:26.21Z" },
 ]
 
 [[package]]

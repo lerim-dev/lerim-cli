@@ -30,7 +30,9 @@ from lerim.app.api import (
     api_project_list,
     api_project_remove,
     api_queue_jobs,
+    api_retry_all_dead_letter,
     api_retry_job,
+    api_skip_all_dead_letter,
     api_skip_job,
     api_status,
     api_sync,
@@ -1427,6 +1429,12 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
             self._json(result, status=status_code)
             return
         # ── Job queue management routes ──────────────────────────────
+        if path == "/api/jobs/retry-all":
+            self._json(api_retry_all_dead_letter())
+            return
+        if path == "/api/jobs/skip-all":
+            self._json(api_skip_all_dead_letter())
+            return
         if path.startswith("/api/jobs/") and path.endswith("/retry"):
             run_id = unquote(path.split("/api/jobs/", 1)[1].rsplit("/retry", 1)[0])
             if not run_id:

@@ -12,6 +12,7 @@ PROVIDER_CAPABILITIES: dict[str, dict] = {
 	"minimax": {
 		"roles": ["lead", "extract", "summarize"],
 		"api_key_env": "MINIMAX_API_KEY",
+		"models": ["MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-M2"],
 	},
 	"opencode_go": {
 		"roles": ["lead", "extract", "summarize"],
@@ -21,6 +22,7 @@ PROVIDER_CAPABILITIES: dict[str, dict] = {
 	"zai": {
 		"roles": ["lead", "extract", "summarize"],
 		"api_key_env": "ZAI_API_KEY",
+		"models": ["glm-4.7", "glm-4.5-air", "glm-4.5"],
 	},
 	"openai": {
 		"roles": ["lead", "extract", "summarize"],
@@ -66,3 +68,18 @@ def get_missing_api_key_message(provider: str) -> str | None:
 	if env_var and not os.environ.get(env_var):
 		return f"Set {env_var} in your .env file to use provider '{provider}'"
 	return None
+
+
+def normalize_model_name(provider: str, model: str) -> str:
+	"""Return the canonical model name for a provider.
+
+	Performs case-insensitive matching against the provider's known model list.
+	Returns the correctly-cased name if found, otherwise returns the input
+	unchanged (for unknown models or providers with open-ended model lists).
+	"""
+	caps = PROVIDER_CAPABILITIES.get(provider.strip().lower(), {})
+	known = caps.get("models")
+	if not known:
+		return model
+	lookup = {m.lower(): m for m in known}
+	return lookup.get(model.strip().lower(), model)

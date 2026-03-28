@@ -58,7 +58,7 @@ Lerim is file-first and primitive-first.
 - Project memory: `<repo>/.lerim/`
 - Global fallback: `~/.lerim/`
 - Search: file-based (no index required)
-- Orchestration: OpenAI Agents SDK (`LerimOAIAgent`) with per-flow tools; non-OpenAI providers use `ResponsesProxy` + LiteLLM on the lead path
+- Orchestration: OpenAI Agents SDK (`LerimOAIAgent`) with per-flow tools; non-OpenAI providers via LiteLLM
 - Extraction/summarization: DSPy pipelines with transcript windowing
 
 ### Sync path
@@ -142,18 +142,37 @@ lerim project add .            # add current project (repeat for other repos)
 
 ### 3. Set API keys
 
-Set keys for whatever you configure under `[roles.*]`. The shipped `default.toml`
-often uses **OpenCode Go** for roles — in that case set `OPENCODE_API_KEY` (see
-[model roles](https://docs.lerim.dev/configuration/model-roles/)). If you switch
-to MiniMax, Z.AI, OpenRouter, etc., set the matching env vars instead.
+`lerim init` walks you through provider selection and saves keys to `~/.lerim/.env`.
+You can also create it manually:
 
 ```bash
-export OPENCODE_API_KEY="..."   # when using provider opencode_go (common default)
-# export MINIMAX_API_KEY="..."  # if roles use minimax
-# export ZAI_API_KEY="..."      # if you add zai as fallback
+# ~/.lerim/.env
+OPENCODE_API_KEY=your-key-here
+# Add more keys if using multiple providers or fallbacks
 ```
 
-You only need keys for providers referenced in your `[roles.*]` config.
+**Supported providers:**
+
+| Provider | Env var | Config `provider =` |
+|----------|---------|-------------------|
+| OpenCode Go | `OPENCODE_API_KEY` | `"opencode_go"` |
+| OpenRouter | `OPENROUTER_API_KEY` | `"openrouter"` |
+| OpenAI | `OPENAI_API_KEY` | `"openai"` |
+| MiniMax | `MINIMAX_API_KEY` | `"minimax"` |
+| Z.AI | `ZAI_API_KEY` | `"zai"` |
+| Anthropic | `ANTHROPIC_API_KEY` | `"anthropic"` |
+| Ollama (local) | — | `"ollama"` |
+
+**Provider and fallback configuration** in `~/.lerim/config.toml`:
+
+```toml
+[roles.lead]
+provider = "opencode_go"          # primary provider
+model = "minimax-m2.5"            # model name
+fallback_models = ["minimax:minimax-m2.5", "zai:glm-4.7"]  # auto-switch on rate limits
+```
+
+Set API keys for your primary provider and any fallbacks.
 
 ### 4. Start Lerim
 

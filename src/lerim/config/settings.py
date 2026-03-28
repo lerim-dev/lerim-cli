@@ -419,8 +419,11 @@ def _build_llm_role(
     raw: dict[str, Any], *, default_provider: str, default_model: str
 ) -> LLMRoleConfig:
     """Build one orchestration role config from TOML payload."""
+    from lerim.runtime.provider_caps import normalize_model_name
+
     provider = _to_non_empty_string(raw.get("provider")) or default_provider
     model = _to_non_empty_string(raw.get("model")) or default_model
+    model = normalize_model_name(provider, model)
     return LLMRoleConfig(
         provider=provider,
         model=model,
@@ -444,8 +447,11 @@ def _build_dspy_role(
     raw: dict[str, Any], *, default_provider: str, default_model: str
 ) -> DSPyRoleConfig:
     """Build one DSPy role config from TOML payload."""
+    from lerim.runtime.provider_caps import normalize_model_name
+
     provider = _to_non_empty_string(raw.get("provider")) or default_provider
     model = _to_non_empty_string(raw.get("model")) or default_model
+    model = normalize_model_name(provider, model)
     return DSPyRoleConfig(
         provider=provider,
         model=model,
@@ -509,7 +515,11 @@ def _migrate_platforms_json(platforms_path: Path) -> dict[str, str]:
 @lru_cache(maxsize=1)
 def load_config() -> Config:
     """Load effective config from TOML layers plus env API keys."""
-    load_dotenv()
+    # Always load ~/.lerim/.env (CWD-independent), then CWD .env as override
+    _lerim_env = Path.home() / ".lerim" / ".env"
+    if _lerim_env.is_file():
+        load_dotenv(_lerim_env)
+    load_dotenv()  # CWD search (overrides ~/.lerim/.env if both exist)
     ensure_user_config_exists()
     toml_data, sources = _load_layers()
 
@@ -682,7 +692,7 @@ _CONFIG_OVERRIDE: Config | None = None
 
 
 def set_config_override(config: Config | None) -> None:
-    """Set a process-wide config override. Used by eval runners for isolation.
+    """Set a process-wide config override for isolated execution.
 
     When set, get_config() returns this instead of the cached load_config().
     Call set_config_override(None) to clear.
@@ -765,10 +775,10 @@ def _write_config_full(data: dict[str, Any]) -> Config:
     return reload_config()
 
 
-def build_eval_config(
+def build_isolated_config(
     roles_override: dict[str, dict[str, Any]], temp_data_dir: Path
 ) -> Config:
-    """Build an isolated Config for eval runners without any disk side effects.
+    """Build an isolated Config without any disk side effects.
 
     Reads base TOML layers (read-only) and env API keys, deep-merges
     roles_override into the roles section, and returns a Config with all paths

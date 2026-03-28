@@ -59,16 +59,20 @@ def parse_fallback_spec(
 	raw: str, *, default_provider: str = "openrouter"
 ) -> FallbackSpec:
 	"""Parse fallback descriptor in the format ``provider:model`` or ``model``."""
+	from lerim.runtime.provider_caps import normalize_model_name
+
 	text = str(raw).strip()
 	if not text:
 		raise RuntimeError("fallback_model_empty")
 	if ":" not in text:
-		return FallbackSpec(provider=default_provider, model=text)
+		model = normalize_model_name(default_provider, text)
+		return FallbackSpec(provider=default_provider, model=model)
 	provider, model = text.split(":", 1)
 	provider = provider.strip().lower()
 	model = model.strip()
 	if not provider or not model:
 		raise RuntimeError(f"fallback_model_invalid:{raw}")
+	model = normalize_model_name(provider, model)
 	return FallbackSpec(provider=provider, model=model)
 
 
@@ -193,10 +197,14 @@ def build_dspy_fallback_lms(
 
 def list_provider_models(provider: str) -> list[str]:
 	"""Return static provider model suggestions for dashboard UI selections."""
+	from lerim.runtime.provider_caps import PROVIDER_CAPABILITIES
+
 	normalized = str(provider).strip().lower()
-	options = {
-		"zai": ["glm-4.7", "glm-4.5-air", "glm-4.5"],
-		"minimax": ["MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-M2"],
+	caps = PROVIDER_CAPABILITIES.get(normalized, {})
+	if "models" in caps:
+		return list(caps["models"])
+	# Open-ended providers: curated suggestions only
+	extras: dict[str, list[str]] = {
 		"openrouter": [
 			"qwen/qwen3-coder-30b-a3b-instruct",
 			"anthropic/claude-sonnet-4-5-20250929",
@@ -209,9 +217,8 @@ def list_provider_models(provider: str) -> list[str]:
 			"mlx-community/Qwen3.5-27B-4bit",
 			"mlx-community/Qwen3.5-35B-A3B-4bit",
 		],
-		"opencode_go": ["kimi-k2.5", "glm-5", "minimax-m2.7", "minimax-m2.5"],
 	}
-	return list(options.get(normalized, []))
+	return list(extras.get(normalized, []))
 
 
 if __name__ == "__main__":

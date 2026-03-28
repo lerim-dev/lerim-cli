@@ -6,9 +6,15 @@ to avoid circular import issues.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+# Learning subtypes; models sometimes emit these as `primitive`. Keep in sync with
+# VALID_KINDS in lerim.runtime.oai_tools.
+_LEARNING_KINDS_MISUSED_AS_PRIMITIVE = frozenset(
+    {"insight", "procedure", "friction", "pitfall", "preference"}
+)
 
 
 class MemoryCandidate(BaseModel):
@@ -45,6 +51,22 @@ class MemoryCandidate(BaseModel):
         default=None,
         description="Whether this approach was validated (worked), tried and didn't work (failed), or unclear (unknown). Helps contradiction detection.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_learning_kind_misused_as_primitive(cls, data: Any) -> Any:
+        """Map mistaken primitive values (learning subtypes) to primitive=learning + kind."""
+        if not isinstance(data, dict):
+            return data
+        prim = data.get("primitive")
+        if prim not in _LEARNING_KINDS_MISUSED_AS_PRIMITIVE:
+            return data
+        out = dict(data)
+        out["primitive"] = "learning"
+        kind = out.get("kind")
+        if kind is None or (isinstance(kind, str) and not kind.strip()):
+            out["kind"] = prim
+        return out
 
 
 if __name__ == "__main__":

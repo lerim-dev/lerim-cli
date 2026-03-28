@@ -128,7 +128,8 @@ def _summarize_trace(
     history_start = len(lms[0].history)
     trace_tokens = estimate_tokens(transcript)
 
-    if trace_tokens <= int(max_window_tokens * 0.85):
+    prompt_headroom = 8000  # DSPy signature + XML formatting overhead
+    if trace_tokens <= max_window_tokens - prompt_headroom:
         # Fast path: single call — trace fits in context
         logger.info("Summarization: single call ({} est. tokens)", trace_tokens)
         w_start = time.time()

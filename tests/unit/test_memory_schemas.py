@@ -44,6 +44,50 @@ def test_memory_candidate_invalid_primitive():
         )
 
 
+def test_memory_candidate_coerces_pitfall_primitive_to_learning_kind():
+    """LLMs sometimes set primitive to a learning subtype; normalize to learning + kind."""
+    c = MemoryCandidate.model_validate(
+        {
+            "primitive": "pitfall",
+            "title": "Avoid concurrent Metal",
+            "body": "vllm-mlx crashes when two requests hit Metal at once; serialize calls.",
+        }
+    )
+    assert c.primitive == "learning"
+    assert c.kind == "pitfall"
+
+
+@pytest.mark.parametrize(
+    "subtype",
+    ["insight", "procedure", "friction", "preference"],
+)
+def test_memory_candidate_coerces_all_learning_subtypes_used_as_primitive(subtype: str):
+    """Each VALID_KINDS value misplaced in primitive maps to learning + that kind."""
+    c = MemoryCandidate.model_validate(
+        {
+            "primitive": subtype,
+            "title": "x" * 12,
+            "body": "y" * 60,
+        }
+    )
+    assert c.primitive == "learning"
+    assert c.kind == subtype
+
+
+def test_memory_candidate_coerce_preserves_explicit_kind():
+    """When kind is already set, only fix primitive."""
+    c = MemoryCandidate.model_validate(
+        {
+            "primitive": "pitfall",
+            "kind": "insight",
+            "title": "x" * 12,
+            "body": "y" * 60,
+        }
+    )
+    assert c.primitive == "learning"
+    assert c.kind == "insight"
+
+
 def test_memory_candidate_confidence_bounds():
     """confidence outside [0,1] -> ValidationError."""
     with pytest.raises(ValidationError):

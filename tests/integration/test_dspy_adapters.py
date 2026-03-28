@@ -68,7 +68,7 @@ def _setup_eval_config() -> tuple[Any, Path]:
     (temp_dir / "memory").mkdir()
     (temp_dir / "index").mkdir()
 
-    from lerim.config.settings import build_eval_config, get_config, set_config_override
+    from lerim.config.settings import build_isolated_config, get_config, set_config_override
 
     # Use the active test config's provider/model (set by LERIM_TEST_PROVIDER/MODEL)
     base_cfg = get_config()
@@ -91,7 +91,7 @@ def _setup_eval_config() -> tuple[Any, Path]:
             "max_window_tokens": 150000,
         },
     }
-    cfg = build_eval_config(roles, temp_dir)
+    cfg = build_isolated_config(roles, temp_dir)
     set_config_override(cfg)
     return cfg, temp_dir
 

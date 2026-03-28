@@ -14,7 +14,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+import logfire
+
 from lerim.app.activity_log import log_activity
+from lerim.app.operation_result import OperationResult
 from lerim.config.project_scope import match_session_project
 from lerim.config.settings import get_config, reload_config
 from lerim.runtime.oai_agent import LerimOAIAgent
@@ -321,13 +324,14 @@ def _process_one_job(job: dict[str, Any]) -> dict[str, Any]:
 
     attempts = max(int(job.get("attempts") or 1), 1)
     try:
-        with _job_heartbeat(rid, heartbeat_session_job):
-            session_path = str(job.get("session_path") or "").strip()
-            if not session_path:
-                doc = fetch_session_doc(rid) or {}
-                session_path = str(doc.get("session_path") or "").strip()
-            agent = LerimOAIAgent(default_cwd=repo_path)
-            result = agent.sync(Path(session_path), memory_root=project_memory)
+        with logfire.span("process_session", run_id=rid, repo_path=repo_path):
+            with _job_heartbeat(rid, heartbeat_session_job):
+                session_path = str(job.get("session_path") or "").strip()
+                if not session_path:
+                    doc = fetch_session_doc(rid) or {}
+                    session_path = str(doc.get("session_path") or "").strip()
+                agent = LerimOAIAgent(default_cwd=repo_path)
+                result = agent.sync(Path(session_path), memory_root=project_memory)
     except Exception as exc:
         fail_session_job(
             rid,
@@ -401,16 +405,24 @@ def run_sync_once(
         try:
             lock.acquire("sync", "lerim sync")
         except LockBusyError as exc:
+            op_result = OperationResult(
+                operation="sync",
+                status="lock_busy",
+                trigger=trigger,
+                error=str(exc),
+            )
             _record_service_event(
                 record_service_run,
                 job_type="sync",
                 status="lock_busy",
                 started_at=started,
                 trigger=trigger,
-                details={"error": str(exc)},
+                details=op_result.to_details_json(),
             )
             return EXIT_LOCK_BUSY, _empty_sync_summary()
 
+    _sync_span = logfire.span("sync_cycle", trigger=trigger, max_sessions=max_sessions)
+    _sync_span.__enter__()
     try:
         record_service_run(
             job_type="sync",
@@ -490,26 +502,39 @@ def run_sync_once(
         if no_extract:
             skipped = len(target_run_ids)
         elif not dry_run:
-            claimed = claim_session_jobs(
-                limit=claim_limit,
-                run_ids=[run_id] if run_id else None,
-            )
-            for job in claimed:
-                rp = str(job.get("repo_path") or "").strip()
-                if rp:
-                    projects.add(Path(rp).name)
-            target_run_ids = [
-                str(item.get("run_id") or "") for item in claimed if item.get("run_id")
-            ]
-            (
-                extracted,
-                failed,
-                routing_skipped,
-                learnings_new,
-                learnings_updated,
-                cost_usd,
-            ) = _process_claimed_jobs(claimed)
-            skipped += routing_skipped
+            # Process up to max_sessions by claiming in a loop.
+            # Each claim returns 1 per project (chronological ordering).
+            # After processing, claim again to get the next session.
+            total_processed = 0
+            while total_processed < claim_limit:
+                claimed = claim_session_jobs(
+                    limit=claim_limit - total_processed,
+                    run_ids=[run_id] if run_id else None,
+                )
+                if not claimed:
+                    break  # no more pending jobs
+                for job in claimed:
+                    rp = str(job.get("repo_path") or "").strip()
+                    if rp:
+                        projects.add(Path(rp).name)
+                target_run_ids.extend(
+                    str(item.get("run_id") or "") for item in claimed if item.get("run_id")
+                )
+                (
+                    batch_extracted,
+                    batch_failed,
+                    batch_skipped,
+                    batch_new,
+                    batch_updated,
+                    batch_cost,
+                ) = _process_claimed_jobs(claimed)
+                extracted += batch_extracted
+                failed += batch_failed
+                skipped += batch_skipped
+                learnings_new += batch_new
+                learnings_updated += batch_updated
+                cost_usd += batch_cost
+                total_processed += len(claimed)
 
         summary = SyncSummary(
             indexed_sessions=indexed_sessions,
@@ -530,28 +555,34 @@ def run_sync_once(
             code = EXIT_FATAL
             status = "failed"
 
-        _record_service_event(
-            record_service_run,
-            job_type="sync",
+        op_result = OperationResult(
+            operation="sync",
             status=status
             if code == EXIT_OK
             else ("partial" if code == EXIT_PARTIAL else "failed"),
+            trigger=trigger,
+            indexed_sessions=indexed_sessions,
+            queued_sessions=queued_sessions,
+            extracted_sessions=extracted,
+            skipped_sessions=skipped,
+            failed_sessions=failed,
+            learnings_new=learnings_new,
+            learnings_updated=learnings_updated,
+            run_ids=target_run_ids,
+            window_start=window_start.isoformat() if window_start else None,
+            window_end=window_end.isoformat() if window_end else None,
+            dry_run=dry_run,
+            cost_usd=cost_usd,
+        )
+        _record_service_event(
+            record_service_run,
+            job_type="sync",
+            status=op_result.status,
             started_at=started,
             trigger=trigger,
-            details={
-                "indexed_sessions": indexed_sessions,
-                "queued_sessions": queued_sessions,
-                "extracted_sessions": extracted,
-                "skipped_sessions": skipped,
-                "failed_sessions": failed,
-                "learnings_new": learnings_new,
-                "learnings_updated": learnings_updated,
-                "run_ids": target_run_ids,
-                "window_start": window_start.isoformat() if window_start else None,
-                "window_end": window_end.isoformat() if window_end else None,
-                "dry_run": dry_run,
-            },
+            details=op_result.to_details_json(),
         )
+        _sync_span.set_attributes(op_result.to_span_attrs())
         if not dry_run and (extracted or learnings_new or learnings_updated):
             parts = []
             if learnings_new:
@@ -568,16 +599,23 @@ def run_sync_once(
             )
         return code, summary
     except Exception as exc:
+        op_result = OperationResult(
+            operation="sync",
+            status="failed",
+            trigger=trigger,
+            error=str(exc),
+        )
         _record_service_event(
             record_service_run,
             job_type="sync",
             status="failed",
             started_at=started,
             trigger=trigger,
-            details={"error": str(exc)},
+            details=op_result.to_details_json(),
         )
         return EXIT_FATAL, _empty_sync_summary()
     finally:
+        _sync_span.__exit__(None, None, None)
         if lock:
             lock.release()
 
@@ -595,13 +633,19 @@ def run_maintain_once(
     started = _now_iso()
 
     if dry_run:
+        op_result = OperationResult(
+            operation="maintain",
+            status="completed",
+            trigger=trigger,
+            dry_run=True,
+        )
         _record_service_event(
             record_service_run,
             job_type="maintain",
             status="completed",
             started_at=started,
             trigger=trigger,
-            details={"dry_run": True},
+            details=op_result.to_details_json(),
         )
         return EXIT_OK, {"dry_run": True}
 
@@ -609,16 +653,24 @@ def run_maintain_once(
     try:
         writer.acquire("maintain", "lerim maintain")
     except LockBusyError as exc:
+        op_result = OperationResult(
+            operation="maintain",
+            status="lock_busy",
+            trigger=trigger,
+            error=str(exc),
+        )
         _record_service_event(
             record_service_run,
             job_type="maintain",
             status="lock_busy",
             started_at=started,
             trigger=trigger,
-            details={"error": str(exc)},
+            details=op_result.to_details_json(),
         )
         return EXIT_LOCK_BUSY, {"error": str(exc)}
 
+    _maintain_span = logfire.span("maintain_cycle", trigger=trigger)
+    _maintain_span.__enter__()
     try:
         config = get_config()
         projects = config.projects or {}
@@ -634,45 +686,46 @@ def run_maintain_once(
                 continue
             project_memory = str(project_path / ".lerim" / "memory")
             try:
-                agent = LerimOAIAgent(default_cwd=str(project_path))
-                result = agent.maintain(memory_root=project_memory)
-                results[project_name] = result
-                # Include intelligence data from maintain_actions if available
-                if isinstance(result, dict) and result.get("artifacts"):
-                    actions_path = result["artifacts"].get("maintain_actions")
-                    if actions_path and Path(actions_path).exists():
-                        try:
-                            actions_report = json.loads(
-                                Path(actions_path).read_text(encoding="utf-8")
-                            )
-                            if isinstance(actions_report, dict):
-                                csa = actions_report.get("cross_session_analysis")
-                                if csa:
-                                    result["cross_session_analysis"] = csa
-                        except (json.JSONDecodeError, OSError):
-                            pass
-                # Check for hot-memory
-                hot_memory_path = Path(project_memory).parent / "hot-memory.md"
-                if hot_memory_path.exists():
-                    result["hot_memory_exists"] = True
-                # Activity log per project.
-                counts = (
-                    (result.get("counts") or {}) if isinstance(result, dict) else {}
-                )
-                parts = []
-                for key in ("merged", "archived", "consolidated", "decayed"):
-                    val = counts.get(key, 0)
-                    if val:
-                        parts.append(f"{val} {key}")
-                if parts:
-                    maintain_cost = float(result.get("cost_usd") or 0)
-                    log_activity(
-                        "maintain",
-                        project_name,
-                        ", ".join(parts),
-                        time.monotonic() - t0,
-                        cost_usd=maintain_cost,
+                with logfire.span("maintain_project", project=project_name):
+                    agent = LerimOAIAgent(default_cwd=str(project_path))
+                    result = agent.maintain(memory_root=project_memory)
+                    results[project_name] = result
+                    # Include intelligence data from maintain_actions if available
+                    if isinstance(result, dict) and result.get("artifacts"):
+                        actions_path = result["artifacts"].get("maintain_actions")
+                        if actions_path and Path(actions_path).exists():
+                            try:
+                                actions_report = json.loads(
+                                    Path(actions_path).read_text(encoding="utf-8")
+                                )
+                                if isinstance(actions_report, dict):
+                                    csa = actions_report.get("cross_session_analysis")
+                                    if csa:
+                                        result["cross_session_analysis"] = csa
+                            except (json.JSONDecodeError, OSError):
+                                pass
+                    # Check for hot-memory
+                    hot_memory_path = Path(project_memory).parent / "hot-memory.md"
+                    if hot_memory_path.exists():
+                        result["hot_memory_exists"] = True
+                    # Activity log per project.
+                    counts = (
+                        (result.get("counts") or {}) if isinstance(result, dict) else {}
                     )
+                    parts = []
+                    for key in ("merged", "archived", "consolidated", "decayed"):
+                        val = counts.get(key, 0)
+                        if val:
+                            parts.append(f"{val} {key}")
+                    if parts:
+                        maintain_cost = float(result.get("cost_usd") or 0)
+                        log_activity(
+                            "maintain",
+                            project_name,
+                            ", ".join(parts),
+                            time.monotonic() - t0,
+                            cost_usd=maintain_cost,
+                        )
             except Exception as exc:
                 failed_projects.append(project_name)
                 results[project_name] = {"error": str(exc)}
@@ -682,32 +735,45 @@ def run_maintain_once(
             if failed_projects and not (set(projects) - set(failed_projects))
             else ("partial" if failed_projects else "completed")
         )
-        details = {"projects": results}
+        op_result = OperationResult(
+            operation="maintain",
+            status=status,
+            trigger=trigger,
+            projects=results,
+        )
         _record_service_event(
             record_service_run,
             job_type="maintain",
             status=status,
             started_at=started,
             trigger=trigger,
-            details=details,
+            details=op_result.to_details_json(),
         )
+        _maintain_span.set_attributes(op_result.to_span_attrs())
         code = (
             EXIT_FATAL
             if status == "failed"
             else (EXIT_PARTIAL if status == "partial" else EXIT_OK)
         )
-        return code, details
+        return code, op_result.to_details_json()
     except Exception as exc:
+        op_result = OperationResult(
+            operation="maintain",
+            status="failed",
+            trigger=trigger,
+            error=str(exc),
+        )
         _record_service_event(
             record_service_run,
             job_type="maintain",
             status="failed",
             started_at=started,
             trigger=trigger,
-            details={"error": str(exc)},
+            details=op_result.to_details_json(),
         )
         return EXIT_FATAL, {"error": str(exc)}
     finally:
+        _maintain_span.__exit__(None, None, None)
         writer.release()
 
 

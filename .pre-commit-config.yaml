@@ -7,3 +7,13 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-push]
+  - repo: local
+    hooks:
+      - id: vulture
+        name: vulture
+        entry: vulture
+        language: python
+        additional_dependencies: [vulture>=2.14]
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

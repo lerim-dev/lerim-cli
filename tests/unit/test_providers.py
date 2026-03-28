@@ -26,6 +26,13 @@ def test_parse_fallback_spec_without_provider():
     assert spec.model == "glm-4.7-flash"
 
 
+def test_parse_fallback_spec_normalizes_minimax_casing():
+    """'minimax:minimax-m2.5' (lowercase) -> FallbackSpec with PascalCase model."""
+    spec = parse_fallback_spec("minimax:minimax-m2.5")
+    assert spec.provider == "minimax"
+    assert spec.model == "MiniMax-M2.5"
+
+
 def test_build_dspy_lm_ollama(tmp_path):
     """build_dspy_lm with ollama provider constructs 'ollama_chat/model' LM."""
     import dspy

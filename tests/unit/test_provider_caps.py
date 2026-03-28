@@ -8,6 +8,7 @@ import pytest
 from lerim.runtime.provider_caps import (
 	PROVIDER_CAPABILITIES,
 	get_missing_api_key_message,
+	normalize_model_name,
 	validate_provider_for_role,
 )
 
@@ -51,6 +52,39 @@ class TestGetMissingApiKeyMessage:
 	def test_returns_none_for_provider_without_key(self):
 		"""Providers like ollama have api_key_env=None -- should return None."""
 		assert get_missing_api_key_message("ollama") is None
+
+
+class TestNormalizeModelName:
+	"""Tests for normalize_model_name auto-correction."""
+
+	def test_minimax_lowercase_corrected(self):
+		"""lowercase minimax-m2.5 with minimax provider -> PascalCase."""
+		assert normalize_model_name("minimax", "minimax-m2.5") == "MiniMax-M2.5"
+
+	def test_minimax_correct_casing_unchanged(self):
+		"""Already correct PascalCase passes through."""
+		assert normalize_model_name("minimax", "MiniMax-M2.5") == "MiniMax-M2.5"
+
+	def test_opencode_go_lowercase_unchanged(self):
+		"""opencode_go expects lowercase and gets it back."""
+		assert normalize_model_name("opencode_go", "minimax-m2.5") == "minimax-m2.5"
+
+	def test_openrouter_passthrough(self):
+		"""Provider without a models list passes through any name."""
+		assert normalize_model_name("openrouter", "anything/here") == "anything/here"
+
+	def test_unknown_model_passthrough(self):
+		"""Unknown model for a known provider passes through unchanged."""
+		assert normalize_model_name("minimax", "custom-model-v3") == "custom-model-v3"
+
+	def test_unknown_provider_passthrough(self):
+		"""Completely unknown provider passes through."""
+		assert normalize_model_name("bogus", "some-model") == "some-model"
+
+	def test_zai_models_normalized(self):
+		"""zai provider models normalize correctly."""
+		assert normalize_model_name("zai", "GLM-4.7") == "glm-4.7"
+		assert normalize_model_name("zai", "glm-4.5-air") == "glm-4.5-air"
 
 
 class TestAllProvidersHaveLeadRole:

@@ -24,6 +24,7 @@ def test_tracing_disabled_does_nothing(mock_logfire: MagicMock) -> None:
     configure_tracing(_make_config(enabled=False))
     mock_logfire.configure.assert_not_called()
     mock_logfire.instrument_dspy.assert_not_called()
+    mock_logfire.instrument_openai_agents.assert_not_called()
     mock_logfire.instrument_httpx.assert_not_called()
 
 
@@ -31,11 +32,12 @@ def test_tracing_disabled_does_nothing(mock_logfire: MagicMock) -> None:
 def test_tracing_enabled_configures_logfire(mock_logfire: MagicMock) -> None:
     """When tracing is enabled, logfire.configure is called with service_name='lerim'."""
     configure_tracing(_make_config(enabled=True))
-    mock_logfire.configure.assert_called_once_with(
-        send_to_logfire="if-token-present",
-        service_name="lerim",
-        console=False,
-    )
+    call_kwargs = mock_logfire.configure.call_args.kwargs
+    assert call_kwargs["send_to_logfire"] == "if-token-present"
+    assert call_kwargs["service_name"] == "lerim"
+    assert call_kwargs["console"] is False
+    # Scrubbing allows 'session' fields through (coding sessions, not auth)
+    assert call_kwargs["scrubbing"] is not None
 
 
 @patch("lerim.config.tracing.logfire")
@@ -57,3 +59,14 @@ def test_tracing_httpx_on_when_configured(mock_logfire: MagicMock) -> None:
     """instrument_httpx IS called with capture_all=True when include_httpx is True."""
     configure_tracing(_make_config(enabled=True, include_httpx=True))
     mock_logfire.instrument_httpx.assert_called_once_with(capture_all=True)
+
+
+@patch("agents.tracing.set_trace_processors")
+@patch("lerim.config.tracing.logfire")
+def test_tracing_instruments_openai_agents(
+    mock_logfire: MagicMock, mock_set_processors: MagicMock,
+) -> None:
+    """instrument_openai_agents is called and default OAI processors are cleared."""
+    configure_tracing(_make_config(enabled=True))
+    mock_logfire.instrument_openai_agents.assert_called_once()
+    mock_set_processors.assert_called_once_with([])
