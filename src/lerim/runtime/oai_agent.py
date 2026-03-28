@@ -19,6 +19,7 @@ import litellm
 litellm.turn_off_message_logging = True
 litellm.suppress_debug_info = True
 
+import logfire
 from agents import Agent, Runner, set_tracing_disabled  # noqa: E402
 from agents.extensions.models.litellm_model import LitellmModel  # noqa: E402
 
@@ -91,9 +92,29 @@ def _get_event_loop() -> asyncio.AbstractEventLoop:
 
 
 def _run_async(coro):
-	"""Run an async coroutine on the persistent event loop and wait for result."""
+	"""Run an async coroutine on the persistent event loop and wait for result.
+
+	Propagates OpenTelemetry context from the calling thread so child spans
+	(OAI Agent, LLM calls, tool executions) nest under the caller's active
+	span (e.g. sync_cycle > process_session > oai_sync > Agent).
+	"""
 	loop = _get_event_loop()
-	future = asyncio.run_coroutine_threadsafe(coro, loop)
+	try:
+		from opentelemetry import context as otel_context
+		parent_ctx = otel_context.get_current()
+	except ImportError:
+		parent_ctx = None
+
+	if parent_ctx is not None:
+		async def _with_otel_ctx():
+			token = otel_context.attach(parent_ctx)
+			try:
+				return await coro
+			finally:
+				otel_context.detach(token)
+		future = asyncio.run_coroutine_threadsafe(_with_otel_ctx(), loop)
+	else:
+		future = asyncio.run_coroutine_threadsafe(coro, loop)
 	return future.result()  # blocks until done
 
 
@@ -111,8 +132,13 @@ class LerimOAIAgent:
 			default_cwd: Default working directory for path resolution.
 			config: Lerim config; loaded via get_config() if not provided.
 		"""
-		# Disable OAI SDK tracing (exports to OpenAI servers by default).
-		set_tracing_disabled(disabled=True)
+		# Only disable OAI SDK tracing when Logfire tracing is not active.
+		# When tracing IS enabled, configure_tracing() installs the Logfire
+		# wrapper (instrument_openai_agents) which routes OAI spans to Logfire
+		# instead of OpenAI servers.
+		cfg = config or get_config()
+		if not cfg.tracing_enabled:
+			set_tracing_disabled(disabled=True)
 
 		# Ensure Codex CLI has a config that disables WebSocket transport.
 		# The proxy is HTTP-only; Codex's default WebSocket mode causes 404s.
@@ -287,6 +313,17 @@ class LerimOAIAgent:
 			raise FileNotFoundError(f"trace_path_missing:{trace_file}")
 
 		repo_root = Path(self._default_cwd or Path.cwd()).expanduser().resolve()
+		with logfire.span("oai_sync", trace_path=str(trace_file), repo=repo_root.name):
+			return self._sync_inner(trace_file, repo_root, memory_root, workspace_root)
+
+	def _sync_inner(
+		self,
+		trace_file: Path,
+		repo_root: Path,
+		memory_root: str | Path | None,
+		workspace_root: str | Path | None,
+	) -> dict[str, Any]:
+		"""Inner sync logic wrapped by a Logfire span in sync()."""
 		resolved_memory_root, resolved_workspace_root = _resolve_runtime_roots(
 			config=self.config,
 			memory_root=memory_root,
@@ -531,6 +568,16 @@ class LerimOAIAgent:
 			RuntimeError: On agent failure or missing artifacts.
 		"""
 		repo_root = Path(self._default_cwd or Path.cwd()).expanduser().resolve()
+		with logfire.span("oai_maintain", repo=repo_root.name):
+			return self._maintain_inner(repo_root, memory_root, workspace_root)
+
+	def _maintain_inner(
+		self,
+		repo_root: Path,
+		memory_root: str | Path | None,
+		workspace_root: str | Path | None,
+	) -> dict[str, Any]:
+		"""Inner maintain logic wrapped by a Logfire span in maintain()."""
 		resolved_memory_root, resolved_workspace_root = _resolve_runtime_roots(
 			config=self.config,
 			memory_root=memory_root,
