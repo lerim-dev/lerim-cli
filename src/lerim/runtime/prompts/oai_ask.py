@@ -13,8 +13,7 @@ def build_oai_ask_prompt(
 ) -> str:
 	"""Build the ask prompt for the OAI agent.
 
-	Unlike the PydanticAI ask prompt, this version uses codex for all
-	filesystem search instead of grep/glob/read/explore tools.
+	Uses memory_search and read_file tools for memory retrieval.
 
 	Args:
 		question: The user's question.
@@ -54,16 +53,17 @@ Layout:
 - summaries/YYYYMMDD/HHMMSS/*.md — session summaries
 Each file: YAML frontmatter (id, title, confidence, tags, kind, created) + markdown body.
 
-Use the codex tool to search and read memory files:
-- Search by keyword across all memory files
-- List files in decisions/ or learnings/ directories
-- Read specific files to get full content
+Use the memory_search, read_file, and list_files tools to find and read memory files:
+- memory_search(mode="keyword", query="...") to search across all memory files
+- list_files(path="decisions/") or list_files(path="learnings/") to browse directories
+- read_file(path="...") to get full content of a specific file
 """
 
 	return f"""\
 Answer the user question using your memory search tools.
-- Use the codex tool to search the memory root for relevant memories.
+- Use memory_search(mode="keyword") to find relevant memories in the memory root.
 - Search project-first, then global fallback.
+- Use read_file to retrieve full content when needed.
 - Return evidence with file paths.
 - If no relevant memories exist, say that clearly.
 - Cite memory ids you used.
@@ -71,7 +71,7 @@ Answer the user question using your memory search tools.
 Question:
 {question}
 
-Pre-fetched hints (may be incomplete — always search with codex):
+Pre-fetched hints (may be incomplete — use memory_search for more):
 {context_block}
 
 Context docs:
@@ -99,12 +99,12 @@ if __name__ == "__main__":
 	)
 	assert "how to deploy" in prompt
 	assert "mem-1" in prompt
-	assert "codex" in prompt
+	assert "memory_search" in prompt
 	assert "explore()" not in prompt
 
 	prompt_mr = build_oai_ask_prompt("test", [], [], memory_root="/tmp/test/memory")
 	assert "Memory root: /tmp/test/memory" in prompt_mr
-	assert "codex" in prompt_mr
+	assert "memory_search" in prompt_mr
 	assert "decisions/*.md" in prompt_mr
 
 	print("oai_ask prompt: all self-tests passed")

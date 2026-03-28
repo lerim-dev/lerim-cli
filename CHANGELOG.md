@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.70] - 2026-03-28
+
+### Quality Improvements
+- **+41% composite quality score** via Layer 1 AutoResearch optimization
+- ChainOfThought for DSPy extraction pipeline (biggest single improvement)
+- Explicit dedup classification thresholds (0.7/0.4) in sync prompt
+- Improved MemoryCandidate schema field descriptions for better output consistency
+- Tighter post-extraction body filter (30→50 chars minimum)
+
+### Evaluation Infrastructure
+- 4 new eval runners: dedup accuracy, maintain quality, search relevance (NDCG@5), tool selection
+- LerimBench 7-dimension composite scoring with configurable weights
+- Fuzzy title matching for dedup accuracy (substring + Jaccard similarity)
+- Golden dataset support via `--golden-dir` flag
+- Deterministic extraction and summarization assertion checkers
+
+### Dashboard
+- Local bundled dashboard removed — web UI moving to https://lerim.dev
+- `lerim dashboard` shows transition message with CLI alternatives
+- API server remains for Docker container health checks
+
+### Cleanup
+- Removed stale Codex tool references from ask prompt
+- Cleaned up ResponsesProxy references in internal docs
+
 ## [0.1.69] - 2026-03-25
 
 ### Breaking

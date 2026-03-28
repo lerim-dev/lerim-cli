@@ -206,7 +206,7 @@ For Docker deployments, set `ollama = "http://host.docker.internal:11434"` in `[
 
 ## Web UI (Lerim Cloud)
 
-The browser UI (sessions, memories, pipeline, settings) lives in **[lerim-cloud](https://github.com/lerim-dev/lerim-cloud)** and is served from **[lerim.dev](https://lerim.dev)**. The `lerim` daemon still exposes a **JSON API** on `http://localhost:8765` for the CLI and for Cloud to talk to your local runtime when connected.
+The web dashboard has moved to **[lerim.dev](https://lerim.dev)**. The local bundled dashboard has been removed as of v0.1.70 -- all UI features (sessions, memories, pipeline, settings) are now part of **[Lerim Cloud](https://lerim.dev)**. The `lerim` daemon still exposes a **JSON API** on `http://localhost:8765` for the CLI and for Cloud to talk to your local runtime when connected. Running `lerim dashboard` shows a transition message with CLI alternatives.
 
 ## CLI reference
 
@@ -231,6 +231,7 @@ lerim ask "Why did we choose this?"          # query memories
 lerim sync                                  # one-shot: sync sessions + extract
 lerim maintain                              # one-shot: merge, archive, decay
 lerim status                                # runtime state
+lerim queue                                 # show pending session queue
 
 # Local commands (run on host, no server needed)
 lerim memory search "auth pattern"          # keyword search

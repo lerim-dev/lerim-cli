@@ -229,12 +229,19 @@ def _cmd_maintain(args: argparse.Namespace) -> int:
 
 
 def _cmd_dashboard(args: argparse.Namespace) -> int:
-    """Print URLs for the local API and Lerim Cloud web UI."""
-    config = get_config()
-    port = args.port or config.server_port or 8765
-    _emit(f"API (lerim serve): http://localhost:{port}/")
-    _emit("Web UI: https://lerim.dev — open Lerim Cloud while this server runs.")
-    return 0
+	"""Show dashboard transition message."""
+	print()
+	print("  Lerim Dashboard is moving to the cloud.")
+	print("  The new dashboard will be available at https://lerim.dev")
+	print()
+	print("  In the meantime, use these CLI commands:")
+	print("    lerim status     - system overview")
+	print("    lerim ask        - query your memories")
+	print("    lerim queue      - view session processing queue")
+	print("    lerim sync       - process new sessions")
+	print("    lerim maintain   - run memory maintenance")
+	print()
+	return 0
 
 
 def _cmd_memory_search(args: argparse.Namespace) -> int:
