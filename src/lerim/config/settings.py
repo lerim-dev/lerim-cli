@@ -509,7 +509,11 @@ def _migrate_platforms_json(platforms_path: Path) -> dict[str, str]:
 @lru_cache(maxsize=1)
 def load_config() -> Config:
     """Load effective config from TOML layers plus env API keys."""
-    load_dotenv()
+    # Always load ~/.lerim/.env (CWD-independent), then CWD .env as override
+    _lerim_env = Path.home() / ".lerim" / ".env"
+    if _lerim_env.is_file():
+        load_dotenv(_lerim_env)
+    load_dotenv()  # CWD search (overrides ~/.lerim/.env if both exist)
     ensure_user_config_exists()
     toml_data, sources = _load_layers()
 

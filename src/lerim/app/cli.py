@@ -603,10 +603,99 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+_PROVIDERS = [
+    ("opencode_go", "OPENCODE_API_KEY", "OpenCode Go", "Free tier available — opencode.ai"),
+    ("openrouter", "OPENROUTER_API_KEY", "OpenRouter", "Access 100+ models — openrouter.ai"),
+    ("openai", "OPENAI_API_KEY", "OpenAI", "GPT models — platform.openai.com"),
+    ("minimax", "MINIMAX_API_KEY", "MiniMax", "MiniMax models — minimax.io"),
+    ("zai", "ZAI_API_KEY", "Z.AI", "GLM models — z.ai"),
+    ("anthropic", "ANTHROPIC_API_KEY", "Anthropic", "Claude models — anthropic.com"),
+    ("ollama", "", "Ollama", "Local models — no API key needed"),
+]
+
+
+def _setup_api_keys() -> None:
+    """Interactive API key setup — saves to ~/.lerim/.env."""
+    env_path = Path.home() / ".lerim" / ".env"
+
+    # Load existing keys if any
+    existing: dict[str, str] = {}
+    if env_path.is_file():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                existing[k.strip()] = v.strip()
+
+    _emit("\n── LLM Provider Setup ──────────────────────────────")
+    _emit("")
+    _emit("  Lerim needs an LLM provider to extract memories from your sessions.")
+    _emit("  Select your provider(s) and enter API keys. You can change these")
+    _emit("  later in ~/.lerim/.env and ~/.lerim/config.toml.")
+    _emit("")
+    _emit("  Available providers:")
+    _emit("")
+    for i, (pid, env_var, name, desc) in enumerate(_PROVIDERS, 1):
+        has_key = "✓" if existing.get(env_var) else " "
+        _emit(f"  [{has_key}] {i}. {name:<14} {desc}")
+    _emit("")
+
+    answer = input("  Enter provider numbers (comma-separated, e.g. 1,3) or press Enter to skip: ").strip()
+    if not answer:
+        if existing:
+            _emit(f"  Keeping existing keys in {env_path}")
+        else:
+            _emit("  Skipped. Set API keys later in ~/.lerim/.env")
+        return
+
+    # Parse selections
+    new_keys: dict[str, str] = dict(existing)  # preserve existing
+    try:
+        indices = [int(x.strip()) - 1 for x in answer.split(",") if x.strip()]
+    except ValueError:
+        _emit("  Invalid input. Skipping API key setup.")
+        return
+
+    _emit("")
+    for idx in indices:
+        if idx < 0 or idx >= len(_PROVIDERS):
+            continue
+        pid, env_var, name, desc = _PROVIDERS[idx]
+        if not env_var:
+            _emit(f"  {name}: no API key needed (local provider)")
+            continue
+
+        current = existing.get(env_var, "")
+        masked = f" (current: ...{current[-8:]})" if current else ""
+        key = input(f"  {name} API key{masked}: ").strip()
+        if key:
+            new_keys[env_var] = key
+        elif current:
+            _emit("    Keeping existing key")
+
+    # Write ~/.lerim/.env
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# Lerim API keys — managed by `lerim init`", ""]
+    for k, v in sorted(new_keys.items()):
+        lines.append(f"{k}={v}")
+    lines.append("")
+    env_path.write_text("\n".join(lines), encoding="utf-8")
+    env_path.chmod(0o600)  # restrict permissions — secrets file
+    _emit(f"\n  Keys saved to {env_path} (permissions: 600)")
+
+
 def _cmd_init(args: argparse.Namespace) -> int:
-    """Interactive setup wizard that writes ~/.lerim/config.toml."""
-    _emit("Welcome to Lerim.\n")
-    _emit("Which coding agents do you use?")
+    """Interactive setup wizard — agents, API keys, config."""
+    _emit("")
+    _emit("  ╔═══════════════════════════════════╗")
+    _emit("  ║       Welcome to Lerim            ║")
+    _emit("  ╚═══════════════════════════════════╝")
+
+    # Step 1: Detect coding agents
+    _emit("\n── Coding Agents ──────────────────────────────────")
+    _emit("")
+    _emit("  Which coding agents do you use?")
+    _emit("")
 
     detected = detect_agents()
     selected: dict[str, str] = {}
@@ -623,23 +712,34 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
     if selected:
         write_init_config(selected)
-        _emit(f"\nConfig written to {USER_CONFIG_PATH}")
-        _emit(f"Agents: {', '.join(selected.keys())}")
+        _emit(f"\n  Config written to {USER_CONFIG_PATH}")
+        _emit(f"  Agents: {', '.join(selected.keys())}")
     else:
-        _emit("\nNo agents selected. You can add them later by editing:")
+        _emit("\n  No agents selected. Add them later in:")
         _emit(f"  {USER_CONFIG_PATH}")
 
-    # Check Docker
+    # Step 2: API keys
+    _setup_api_keys()
+
+    # Step 3: Docker check
+    _emit("\n── Docker ─────────────────────────────────────────")
+    _emit("")
     if docker_available():
-        _emit("\nDocker: found")
+        _emit("  Docker: found ✓")
     else:
-        _emit("\nDocker: not found")
+        _emit("  Docker: not found")
         _emit("  Install Docker to use `lerim up` (recommended).")
         _emit("  Or run `lerim serve` directly without Docker.")
 
-    _emit("\nNext steps:")
-    _emit("  lerim project add /path/to/repo   # register a project")
-    _emit("  lerim up                           # start the Docker service")
+    # Done
+    _emit("\n── Next Steps ─────────────────────────────────────")
+    _emit("")
+    _emit("  1. lerim project add /path/to/repo   # register a project")
+    _emit("  2. lerim up                           # start the service")
+    _emit("")
+    _emit("  Change providers:  ~/.lerim/config.toml")
+    _emit("  Change API keys:   ~/.lerim/.env")
+    _emit("")
     return 0
 
 

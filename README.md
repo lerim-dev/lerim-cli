@@ -142,39 +142,37 @@ lerim project add .            # add current project (repeat for other repos)
 
 ### 3. Set API keys
 
-Create a `.env` file in your project root (or any parent directory):
+`lerim init` walks you through provider selection and saves keys to `~/.lerim/.env`.
+You can also create it manually:
 
 ```bash
-# .env (in your project root or home directory)
+# ~/.lerim/.env
 OPENCODE_API_KEY=your-key-here
+# Add more keys if using multiple providers or fallbacks
 ```
 
-Lerim uses [OpenCode Go](https://opencode.ai) as the default provider (free tier).
-`lerim up` automatically loads `.env` via python-dotenv and passes keys to Docker.
-
-**Alternative providers** — set the matching key and update `~/.lerim/config.toml`:
+**Supported providers:**
 
 | Provider | Env var | Config `provider =` |
 |----------|---------|-------------------|
-| OpenCode Go (default) | `OPENCODE_API_KEY` | `"opencode_go"` |
-| MiniMax | `MINIMAX_API_KEY` | `"minimax"` |
-| Z.AI | `ZAI_API_KEY` | `"zai"` |
+| OpenCode Go | `OPENCODE_API_KEY` | `"opencode_go"` |
 | OpenRouter | `OPENROUTER_API_KEY` | `"openrouter"` |
 | OpenAI | `OPENAI_API_KEY` | `"openai"` |
+| MiniMax | `MINIMAX_API_KEY` | `"minimax"` |
+| Z.AI | `ZAI_API_KEY` | `"zai"` |
+| Anthropic | `ANTHROPIC_API_KEY` | `"anthropic"` |
 | Ollama (local) | — | `"ollama"` |
 
-**Fallback providers** — if the primary provider hits rate limits, Lerim automatically
-falls back. Configure in `~/.lerim/config.toml`:
+**Provider and fallback configuration** in `~/.lerim/config.toml`:
 
 ```toml
 [roles.lead]
-provider = "opencode_go"
-model = "minimax-m2.5"
-fallback_models = ["minimax:minimax-m2.5", "zai:glm-4.7"]
+provider = "opencode_go"          # primary provider
+model = "minimax-m2.5"            # model name
+fallback_models = ["minimax:minimax-m2.5", "zai:glm-4.7"]  # auto-switch on rate limits
 ```
 
-You only need API keys for providers referenced in your `[roles.*]` config and
-`fallback_models`.
+Set API keys for your primary provider and any fallbacks.
 
 ### 4. Start Lerim
 
