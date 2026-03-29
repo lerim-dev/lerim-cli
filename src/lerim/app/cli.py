@@ -1445,20 +1445,20 @@ def build_parser() -> argparse.ArgumentParser:
     memory_reset = memory_sub.add_parser(
         "reset",
         formatter_class=_F,
-        help="DESTRUCTIVE: wipe memory, workspace, and index data",
+        help="DESTRUCTIVE: wipe memory, workspace, cache, and index data",
         description=(
-            "Irreversibly delete memory/, workspace/, and index/ under the selected\n"
-            "scope, then recreate canonical empty folders.\n\n"
+            "Irreversibly delete memory/, workspace/, index/, and cache/ under the\n"
+            "selected scope, then recreate canonical empty folders.\n\n"
             "Scopes:\n"
             "  project  -- reset <repo>/.lerim/ only\n"
-            "  global   -- reset ~/.lerim/ only (includes sessions DB)\n"
+            "  global   -- reset ~/.lerim/ only (includes sessions DB + cache)\n"
             "  both     -- reset both project and global roots (default)\n\n"
-            "The sessions DB lives in global index/, so --scope project alone\n"
-            "does NOT reset the session queue. Use 'global' or 'both' for a full wipe.\n\n"
+            "The sessions DB lives in global index/, and compacted session traces\n"
+            "live in global cache/. Use 'global' or 'both' for a full wipe.\n\n"
             "Examples:\n"
             "  lerim memory reset --yes                     # wipe everything\n"
             "  lerim memory reset --scope project --yes     # project data only\n"
-            "  lerim memory reset --yes && lerim sync --max-sessions 5  # fresh start"
+            "  lerim memory reset --yes && lerim up --build  # fresh start"
         ),
     )
     memory_reset.add_argument(

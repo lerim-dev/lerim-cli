@@ -57,9 +57,14 @@ def ensure_memory_paths(paths: MemoryPaths) -> None:
 
 
 def reset_memory_root(paths: MemoryPaths) -> dict[str, list[str]]:
-    """Delete memory/index/workspace trees for a root and recreate canonical layout."""
+    """Delete memory/index/workspace/cache trees for a root and recreate canonical layout.
+
+    Also clears the adapter cache (compacted session traces) so the next sync
+    re-discovers and re-filters sessions from scratch.
+    """
     removed: list[str] = []
-    for path in (paths.memory_dir, paths.workspace_dir, paths.index_dir):
+    cache_dir = paths.data_dir / "cache"
+    for path in (paths.memory_dir, paths.workspace_dir, paths.index_dir, cache_dir):
         if path.exists():
             if path.is_dir():
                 shutil.rmtree(path, ignore_errors=True)
