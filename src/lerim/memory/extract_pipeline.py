@@ -76,6 +76,7 @@ class MemoryExtractSignature(dspy.Signature):
     ✓ User: "use tabs for indentation" → preference (user STATED)
     ✓ Agent: "vllm-mlx crashes with concurrent Metal requests" → pitfall (DISCOVERED through debugging)
     ✓ User asked to research pitch deck structure → agent synthesized: "Best decks follow problem-solution-traction-ask arc" → insight (RESEARCHED and CONCLUDED for this project)
+    ✓ User: "don't mock the database in tests" → feedback. Body: "WHY: mocked tests passed but prod migration failed. HOW TO APPLY: integration tests must hit real database."
     ✗ Agent: "The config file has sync_interval = 10" → just REPORTED a config value
     ✗ Agent: "The extraction pipeline uses DSPy Predict" → just DESCRIBED existing code
     ✗ Agent: "B2B SaaS typically converts at 5-7%" → UNSOLICITED generic statistic, not tied to a user question
