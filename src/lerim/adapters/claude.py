@@ -234,6 +234,21 @@ def iter_sessions(
         entries = load_jsonl_dict_lines(path)
         if not entries:
             continue
+
+        # Skip subagent/sidechain transcripts — their content flows back to
+        # the parent session via tool results, so extracting from both would
+        # double-count. Also skip tiny sessions (< 6 conversation turns) which
+        # are typically eval judge calls or trivial interactions.
+        is_sidechain = any(e.get("isSidechain") for e in entries[:5])
+        if is_sidechain:
+            continue
+        conv_turns = sum(
+            1 for e in entries
+            if e.get("type") in ("user", "assistant")
+        )
+        if conv_turns < 6:
+            continue
+
         started_at: datetime | None = None
         repo_name: str | None = None
         cwd: str | None = None

@@ -169,26 +169,15 @@ def test_iter_sessions_window_filtering(tmp_path):
 
 def test_iter_sessions_skips_known_ids(tmp_path):
     """iter_sessions skips sessions whose run_id is already known."""
-    _write_claude_jsonl(
-        tmp_path / "known.jsonl",
-        [
-            {
-                "type": "user",
-                "message": {"content": "hi"},
-                "timestamp": "2026-02-20T10:00:00Z",
-            },
-        ],
-    )
-    _write_claude_jsonl(
-        tmp_path / "new.jsonl",
-        [
-            {
-                "type": "user",
-                "message": {"content": "hi"},
-                "timestamp": "2026-02-20T10:00:00Z",
-            },
-        ],
-    )
+    # Sessions need >= 6 conversation turns to pass the min-turn filter
+    _turns = [
+        {"type": "user", "message": {"content": f"msg {i}"}, "timestamp": "2026-02-20T10:00:00Z"}
+        if i % 2 == 0 else
+        {"type": "assistant", "message": {"content": f"reply {i}"}, "timestamp": "2026-02-20T10:00:00Z"}
+        for i in range(8)
+    ]
+    _write_claude_jsonl(tmp_path / "known.jsonl", _turns)
+    _write_claude_jsonl(tmp_path / "new.jsonl", _turns)
     # Skip "known" by providing its ID
     records = iter_sessions(
         traces_dir=tmp_path,
