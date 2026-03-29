@@ -80,6 +80,13 @@ class MemoryExtractSignature(dspy.Signature):
     ✗ Agent: "The extraction pipeline uses DSPy Predict" → just DESCRIBED existing code
     ✗ Agent: "B2B SaaS typically converts at 5-7%" → UNSOLICITED generic statistic, not tied to a user question
 
+    QUALITY BAR for each candidate:
+    - Atomic: ONE decision or learning per candidate. Don't bundle multiple items.
+    - Actionable: must change how an agent behaves in a future session.
+    - Context-independent: understandable without the original conversation.
+    - Structured body: lead with the rule/fact, then WHY, then HOW TO APPLY.
+    - Durable: still relevant weeks or months later, not tied to a specific moment.
+
     Kind (for learnings only):
     - insight: a reusable observation or pattern
     - procedure: a step-by-step fix or workflow
