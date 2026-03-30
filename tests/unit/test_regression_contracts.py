@@ -101,3 +101,5 @@ def test_memory_frontmatter_schema_keys():
     assert MemoryType.learning in MEMORY_FRONTMATTER_SCHEMA
     assert "id" in MEMORY_FRONTMATTER_SCHEMA[MemoryType.decision]
     assert "kind" in MEMORY_FRONTMATTER_SCHEMA[MemoryType.learning]
+    assert "source_speaker" in MEMORY_FRONTMATTER_SCHEMA[MemoryType.decision]
+    assert "durability" in MEMORY_FRONTMATTER_SCHEMA[MemoryType.learning]

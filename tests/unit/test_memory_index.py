@@ -156,6 +156,9 @@ def test_find_similar(index: MemoryIndex, memory_root: Path) -> None:
 	)
 	assert len(results) >= 1
 	assert results[0]["memory_id"] == "deploy-k8s"
+	assert "fused_score" in results[0]
+	assert "similarity" in results[0]
+	assert "lexical_similarity" in results[0]
 
 
 # ── test_incremental_skip ────────────────────────────────────────────────
@@ -468,6 +471,7 @@ def test_vector_search_returns_metadata(index: MemoryIndex, memory_root: Path) -
 	assert r["kind"] == "architectural"
 	assert r["confidence"] == 0.95
 	assert "distance" in r
+	assert "similarity" in r
 
 
 # ── test_tag_edges_built ────────────────────────────────────────────────

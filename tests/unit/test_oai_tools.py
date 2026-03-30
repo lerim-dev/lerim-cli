@@ -101,6 +101,28 @@ def test_write_memory_valid_learning(tmp_path):
 	assert "kind: insight" in content
 
 
+def test_write_memory_persists_rich_metadata(tmp_path):
+	"""write_memory should persist source_speaker, durability, and outcome."""
+	ctx = _make_ctx(tmp_path)
+	result = _call_write_memory(
+		ctx,
+		primitive="learning",
+		title="Queue retries can fail safely",
+		body="Use bounded retries for flaky queue workers.",
+		confidence=0.85,
+		tags="queue,reliability",
+		kind="pitfall",
+		source_speaker="user",
+		durability="permanent",
+		outcome="worked",
+	)
+	parsed = json.loads(result)
+	content = Path(parsed["file_path"]).read_text()
+	assert "source_speaker: user" in content
+	assert "durability: permanent" in content
+	assert "outcome: worked" in content
+
+
 def test_write_memory_tags_parsed(tmp_path):
 	"""Comma-separated tags string should be parsed into list."""
 	ctx = _make_ctx(tmp_path)
@@ -174,6 +196,20 @@ def test_write_memory_learning_invalid_kind(tmp_path):
 	)
 	assert result.startswith("ERROR:")
 	assert "kind" in result
+
+
+def test_write_memory_invalid_source_speaker(tmp_path):
+	"""Unknown source_speaker should return an ERROR string."""
+	ctx = _make_ctx(tmp_path)
+	result = _call_write_memory(
+		ctx,
+		primitive="decision",
+		title="Bad source speaker",
+		body="Should fail.",
+		source_speaker="system",
+	)
+	assert result.startswith("ERROR:")
+	assert "source_speaker" in result
 
 
 def test_write_memory_empty_title(tmp_path):
@@ -975,6 +1011,12 @@ def test_batch_dedup_with_list(tmp_path):
 		assert "candidate" in r
 		assert "similar_existing" in r
 		assert "top_similarity" in r
+	assert parsed["results"][0]["top_similarity"] > 0
+	if parsed["results"][0]["similar_existing"]:
+		top = parsed["results"][0]["similar_existing"][0]
+		assert "fused_score" in top
+		assert "similarity" in top
+		assert "lexical_similarity" in top
 
 
 def test_batch_dedup_with_dict_candidates_key(tmp_path):

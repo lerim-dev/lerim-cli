@@ -42,6 +42,8 @@ MEMORY_FRONTMATTER_SCHEMA: dict[MemoryType, list[str]] = {
         "updated",
         "source",
         "confidence",
+        "source_speaker",
+        "durability",
         "tags",
     ],
     MemoryType.learning: [
@@ -52,6 +54,8 @@ MEMORY_FRONTMATTER_SCHEMA: dict[MemoryType, list[str]] = {
         "source",
         "kind",
         "confidence",
+        "source_speaker",
+        "durability",
         "tags",
     ],
 }
@@ -108,6 +112,8 @@ class MemoryRecord(MemoryCandidate):
             "updated": self.updated.isoformat(),
             "source": self.source,
             "confidence": self.confidence,
+            "source_speaker": self.source_speaker,
+            "durability": self.durability,
             "tags": list(self.tags),
         }
         if self.primitive == MemoryType.learning:

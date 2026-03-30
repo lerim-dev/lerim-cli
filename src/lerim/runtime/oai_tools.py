@@ -44,6 +44,9 @@ from lerim.memory.summarization_pipeline import (
 from lerim.runtime.oai_context import OAIRuntimeContext
 
 VALID_KINDS = {"insight", "procedure", "friction", "pitfall", "preference"}
+VALID_SOURCE_SPEAKERS = {"user", "agent", "both"}
+VALID_DURABILITY = {"permanent", "project", "session"}
+VALID_OUTCOMES = {"worked", "failed", "unknown"}
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -78,6 +81,9 @@ def _write_memory_impl(
 	confidence: float = 0.8,
 	tags: str = "",
 	kind: str = "",
+	source_speaker: str = "both",
+	durability: str = "project",
+	outcome: str = "",
 ) -> str:
 	"""Core write_memory logic — separated for direct unit testing."""
 	ctx = wrapper.context
@@ -109,6 +115,27 @@ def _write_memory_impl(
 			"Example: write_memory(primitive='learning', title='...', body='...', kind='insight')"
 		)
 
+	effective_source_speaker = source_speaker.strip() or "both"
+	if effective_source_speaker not in VALID_SOURCE_SPEAKERS:
+		return (
+			f"ERROR: source_speaker={effective_source_speaker!r} is invalid. "
+			f"Must be one of: {', '.join(sorted(VALID_SOURCE_SPEAKERS))}."
+		)
+
+	effective_durability = durability.strip() or "project"
+	if effective_durability not in VALID_DURABILITY:
+		return (
+			f"ERROR: durability={effective_durability!r} is invalid. "
+			f"Must be one of: {', '.join(sorted(VALID_DURABILITY))}."
+		)
+
+	effective_outcome = outcome.strip() or None
+	if effective_outcome is not None and effective_outcome not in VALID_OUTCOMES:
+		return (
+			f"ERROR: outcome={effective_outcome!r} is invalid. "
+			f"Must be one of: {', '.join(sorted(VALID_OUTCOMES))}."
+		)
+
 	tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
 	try:
@@ -119,6 +146,9 @@ def _write_memory_impl(
 			confidence=confidence,
 			tags=tag_list,
 			kind=effective_kind,
+			source_speaker=cast(Literal["user", "agent", "both"], effective_source_speaker),
+			durability=cast(Literal["permanent", "project", "session"], effective_durability),
+			outcome=cast(Literal["worked", "failed", "unknown"] | None, effective_outcome),
 			id=slugify(title),
 			source=ctx.run_id,
 		)
@@ -126,7 +156,8 @@ def _write_memory_impl(
 		return (
 			f"ERROR: Invalid memory fields: {exc}. "
 			"Required: primitive ('decision'|'learning'), title (non-empty string), body (non-empty string). "
-			"Optional: confidence (0.0-1.0, default 0.8), tags (comma-separated), kind (required for learnings)."
+			"Optional: confidence (0.0-1.0, default 0.8), tags (comma-separated), "
+			"kind (required for learnings), source_speaker, durability, outcome."
 		)
 
 	mem_type = MemoryType(record.primitive)
@@ -155,6 +186,9 @@ def write_memory(
 	confidence: float = 0.8,
 	tags: str = "",
 	kind: str = "",
+	source_speaker: str = "both",
+	durability: str = "project",
+	outcome: str = "",
 ) -> str:
 	"""Create a memory file (decision or learning) under memory_root.
 
@@ -170,8 +204,22 @@ def write_memory(
 		confidence: Float 0.0-1.0. Default 0.8. Higher = more certain.
 		tags: Comma-separated tags. Example: "queue,reliability".
 		kind: Required for learnings. One of: "friction", "insight", "pitfall", "preference", "procedure".
+		source_speaker: Who originated the memory: "user", "agent", or "both".
+		durability: Expected lifespan: "permanent", "project", or "session".
+		outcome: Optional validation status: "worked", "failed", or "unknown".
 	"""
-	return _write_memory_impl(wrapper, primitive, title, body, confidence, tags, kind)
+	return _write_memory_impl(
+		wrapper,
+		primitive,
+		title,
+		body,
+		confidence,
+		tags,
+		kind,
+		source_speaker,
+		durability,
+		outcome,
+	)
 
 
 @function_tool
@@ -600,7 +648,7 @@ def memory_search(
 	  Use primitive= to filter by "decision" or "learning".
 	mode="keyword": BM25-ranked keyword search. Returns {mode, query, count, results}.
 	mode="similar": Find memories similar to a candidate for dedup. Pass title + body + tags.
-	  Returns {mode, count, results: [{title, score, ...}]}.
+	  Returns {mode, count, results: [{title, similarity, lexical_similarity, fused_score, ...}]}.
 	mode="clusters": Find groups of related memories sharing tags for merge review.
 	  Returns {mode, cluster_count, clusters: [{size, memories}]}.
 
@@ -653,10 +701,18 @@ def _batch_dedup_candidates_impl(
 		c_body = c.get("body", "")
 		c_tags = ",".join(c.get("tags", [])) if isinstance(c.get("tags"), list) else str(c.get("tags", ""))
 		similar = index.find_similar(c_title, c_body, tags=c_tags, limit=3)
+		top_similarity = 0.0
+		if similar:
+			top = similar[0]
+			top_similarity = float(
+				top.get("similarity")
+				or top.get("lexical_similarity")
+				or 0.0
+			)
 		enriched.append({
 			"candidate": c,
 			"similar_existing": similar,
-			"top_similarity": similar[0].get("score", 0) if similar else 0,
+			"top_similarity": top_similarity,
 		})
 
 	return json.dumps({"count": len(enriched), "results": enriched}, default=str)
@@ -674,11 +730,13 @@ def batch_dedup_candidates(
 	memories and a top_similarity score for dedup classification.
 
 	Interpreting top_similarity scores:
-	- 0.7+ : Very likely duplicate. Classify as "no_op" unless candidate has
+	- top_similarity uses normalized 0.0-1.0 similarity (prefer semantic similarity,
+	  fall back to lexical overlap when vector data is unavailable).
+	- 0.75+ : Very likely duplicate. Classify as "no_op" unless candidate has
 	  clearly distinct information not present in the existing memory.
-	- 0.4-0.7 : Related topic. Read both carefully. Classify as "update" if
+	- 0.45-0.75 : Related topic. Read both carefully. Classify as "update" if
 	  candidate adds new facts, "no_op" if it's just rephrasing.
-	- Below 0.4 : Likely a new topic. Classify as "add".
+	- Below 0.45 : Likely a new topic. Classify as "add".
 	- 0.0 : No existing memories at all (empty store). All candidates are "add".
 
 	Returns JSON: {"count": int, "results": [{"candidate": {...},

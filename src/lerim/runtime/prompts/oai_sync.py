@@ -54,10 +54,12 @@ Steps (execute in order):
    For each candidate, classify using the batch dedup results:
 
    Classification rules (use top_similarity score from batch_dedup_candidates):
-   - top_similarity >= 0.7 AND the existing memory covers the same core topic → "no_op"
-   - top_similarity 0.4-0.7 AND same topic but candidate adds genuinely NEW information
+   - top_similarity is normalized 0.0-1.0 similarity. It prefers semantic similarity and
+     falls back to lexical overlap when vector similarity is unavailable.
+   - top_similarity >= 0.75 AND the existing memory covers the same core topic → "no_op"
+   - top_similarity 0.45-0.75 AND same topic but candidate adds genuinely NEW information
      not present in the existing memory → "update"
-   - top_similarity < 0.4 OR no relevant match at all → "add"
+   - top_similarity < 0.45 OR no relevant match at all → "add"
    - top_similarity == 0.0 (no existing memories) → always "add"
 
    IMPORTANT DEDUP RULES:
@@ -73,8 +75,14 @@ Steps (execute in order):
    incorporating new information into the body.
    Skip "no_op" candidates.
 
+   Preserve the extracted candidate metadata when writing:
+   - source_speaker: "user" | "agent" | "both"
+   - durability: "permanent" | "project" | "session"
+   - outcome: "worked" | "failed" | "unknown" (optional)
+
    write_memory(primitive="decision"|"learning", title=..., body=...,
-                 confidence=0.0-1.0, tags="tag1,tag2", kind=...)
+                 confidence=0.0-1.0, tags="tag1,tag2", kind=...,
+                 source_speaker=..., durability=..., outcome=...)
    kind is REQUIRED for learnings: "insight", "procedure", "friction", "pitfall", or "preference".
    write_memory is the ONLY tool for creating memory files. Do NOT write .md files directly.
 

@@ -102,6 +102,8 @@ def test_memory_record_to_frontmatter_dict():
         "updated",
         "source",
         "confidence",
+        "source_speaker",
+        "durability",
         "tags",
     }
     assert set(fm.keys()) == expected_keys

@@ -70,6 +70,38 @@ def _extract_terms(text: str, max_terms: int = 10) -> list[str]:
 	return terms
 
 
+def _normalize_similarity(value: float) -> float:
+	"""Clamp a similarity-like value into the 0.0-1.0 range."""
+	return max(0.0, min(1.0, float(value)))
+
+
+def _cosine_similarity_from_distance(distance: float | None) -> float | None:
+	"""Convert sqlite-vec cosine distance into normalized similarity."""
+	if distance is None:
+		return None
+	try:
+		return _normalize_similarity(1.0 - float(distance))
+	except (TypeError, ValueError):
+		return None
+
+
+def _term_set(text: str) -> set[str]:
+	"""Return normalized content terms for overlap scoring."""
+	return set(_extract_terms(text, max_terms=32))
+
+
+def _token_overlap_similarity(left: str, right: str) -> float:
+	"""Cheap lexical similarity using Jaccard overlap over content terms."""
+	left_terms = _term_set(left)
+	right_terms = _term_set(right)
+	if not left_terms or not right_terms:
+		return 0.0
+	union = left_terms | right_terms
+	if not union:
+		return 0.0
+	return _normalize_similarity(len(left_terms & right_terms) / len(union))
+
+
 # ── embedding helpers ────────────────────────────────────────────────────
 
 _EMBED_MODEL = None
@@ -477,6 +509,7 @@ class MemoryIndex:
 				d.memory_id,
 				d.title,
 				d.tags,
+				d.body,
 				d.confidence,
 				d.primitive,
 				d.kind,
@@ -523,7 +556,7 @@ class MemoryIndex:
 			placeholders = ", ".join("?" for _ in ids)
 			meta_rows = conn.execute(
 				f"""
-				SELECT memory_id, title, tags, confidence, primitive, kind, file_path
+				SELECT memory_id, title, tags, body, confidence, primitive, kind, file_path
 				FROM memory_docs WHERE memory_id IN ({placeholders})
 				""",
 				ids,
@@ -536,6 +569,7 @@ class MemoryIndex:
 				if mid in meta_by_id:
 					row = dict(meta_by_id[mid])
 					row["distance"] = vr["distance"]
+					row["similarity"] = _cosine_similarity_from_distance(vr.get("distance"))
 					results.append(row)
 			return results
 
@@ -577,20 +611,37 @@ class MemoryIndex:
 		k = 60
 		rrf_scores: dict[str, float] = {}
 		data: dict[str, dict[str, Any]] = {}
+		candidate_text = f"{title}\n{tags}\n{body}"
 
 		for rank, r in enumerate(fts_results):
 			mid = r["memory_id"]
 			rrf_scores[mid] = rrf_scores.get(mid, 0) + 1 / (k + rank)
-			data.setdefault(mid, r)
+			row = dict(r)
+			existing_text = f"{row.get('title', '')}\n{row.get('tags', '')}\n{row.get('body', '')}"
+			row["lexical_similarity"] = _token_overlap_similarity(candidate_text, existing_text)
+			data.setdefault(mid, row)
 
 		for rank, r in enumerate(vec_results):
 			mid = r["memory_id"]
 			rrf_scores[mid] = rrf_scores.get(mid, 0) + 1 / (k + rank)
-			data.setdefault(mid, r)
+			row = dict(r)
+			existing_text = f"{row.get('title', '')}\n{row.get('tags', '')}\n{row.get('body', '')}"
+			row["lexical_similarity"] = _token_overlap_similarity(candidate_text, existing_text)
+			data.setdefault(mid, row)
 
 		# Sort by fused score descending, return top-limit.
 		ranked = sorted(rrf_scores, key=lambda mid: rrf_scores[mid], reverse=True)[:limit]
-		return [data[mid] for mid in ranked]
+		results: list[dict[str, Any]] = []
+		for mid in ranked:
+			row = dict(data[mid])
+			row["fused_score"] = round(rrf_scores[mid], 6)
+			row["similarity"] = _normalize_similarity(
+				row.get("similarity")
+				or row.get("lexical_similarity")
+				or 0.0
+			)
+			results.append(row)
+		return results
 
 	# ── scan ─────────────────────────────────────────────────────────────
 
