@@ -340,31 +340,61 @@ def _process_one_job(job: dict[str, Any]) -> dict[str, Any]:
         )
         return {"status": "failed"}
     counts = result.get("counts") or {}
+    # Extract memory actions with full metadata for activity feed
+    memory_actions: list[dict] = []
+    for path in result.get("written_memory_paths") or []:
+        p = Path(path)
+        fname = p.stem if path else ""
+        title = fname[9:].replace("-", " ") if len(fname) > 9 and fname[8] == "-" else fname.replace("-", " ")
+        primitive = "decision" if "/decisions/" in str(path) else "learning"
+        ma: dict = {
+            "action": "add",
+            "title": title,
+            "primitive": primitive,
+            "session_run_id": rid,
+        }
+        # Read frontmatter for full metadata
+        if p.exists():
+            try:
+                import frontmatter
+                post = frontmatter.load(str(p))
+                ma["title"] = post.metadata.get("title", title)
+                ma["body"] = post.content.strip()
+                ma["confidence"] = float(post.metadata.get("confidence", 0))
+                ma["tags"] = post.metadata.get("tags", [])
+                ma["source_speaker"] = post.metadata.get("source_speaker", "")
+                ma["durability"] = post.metadata.get("durability", "")
+                ma["kind"] = post.metadata.get("kind", "")
+            except Exception:
+                pass
+        memory_actions.append(ma)
     complete_session_job(rid)
     return {
         "status": "extracted",
         "learnings_new": int(counts.get("add") or 0),
         "learnings_updated": int(counts.get("update") or 0),
+        "memory_actions": memory_actions,
         "cost_usd": float(result.get("cost_usd") or 0),
     }
 
 
 def _process_claimed_jobs(
     claimed: list[dict[str, Any]],
-) -> tuple[int, int, int, int, int, float]:
+) -> tuple[int, int, int, int, int, list[dict[str, str]], float]:
     """Process claimed jobs sequentially in chronological order.
 
     Jobs are already sorted oldest-first by ``claim_session_jobs``.
     Sequential processing ensures that later sessions can correctly
     update or supersede memories created by earlier ones.
 
-    Returns (extracted, failed, skipped, new, updated, cost_usd).
+    Returns (extracted, failed, skipped, new, updated, memory_actions, cost_usd).
     """
     extracted = 0
     failed = 0
     skipped = 0
     learnings_new = 0
     learnings_updated = 0
+    memory_actions: list[dict[str, str]] = []
     cost_usd = 0.0
     for job in claimed:
         result = _process_one_job(job)
@@ -372,12 +402,13 @@ def _process_claimed_jobs(
             extracted += 1
             learnings_new += result.get("learnings_new", 0)
             learnings_updated += result.get("learnings_updated", 0)
+            memory_actions.extend(result.get("memory_actions", []))
             cost_usd += result.get("cost_usd", 0.0)
         elif result["status"] == "failed":
             failed += 1
         elif result["status"] == "skipped":
             skipped += 1
-    return extracted, failed, skipped, learnings_new, learnings_updated, cost_usd
+    return extracted, failed, skipped, learnings_new, learnings_updated, memory_actions, cost_usd
 
 
 def run_sync_once(
@@ -495,6 +526,7 @@ def run_sync_once(
         failed = 0
         learnings_new = 0
         learnings_updated = 0
+        all_memory_actions: list[dict[str, str]] = []
         cost_usd = 0.0
         projects: set[str] = set()
         claim_limit = max(max_sessions, 1)
@@ -526,6 +558,7 @@ def run_sync_once(
                     batch_skipped,
                     batch_new,
                     batch_updated,
+                    batch_actions,
                     batch_cost,
                 ) = _process_claimed_jobs(claimed)
                 extracted += batch_extracted
@@ -533,6 +566,7 @@ def run_sync_once(
                 skipped += batch_skipped
                 learnings_new += batch_new
                 learnings_updated += batch_updated
+                all_memory_actions.extend(batch_actions)
                 cost_usd += batch_cost
                 total_processed += len(claimed)
 
@@ -568,6 +602,7 @@ def run_sync_once(
             failed_sessions=failed,
             learnings_new=learnings_new,
             learnings_updated=learnings_updated,
+            memory_actions=all_memory_actions,
             run_ids=target_run_ids,
             window_start=window_start.isoformat() if window_start else None,
             window_end=window_end.isoformat() if window_end else None,

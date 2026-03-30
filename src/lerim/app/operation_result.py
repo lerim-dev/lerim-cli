@@ -26,6 +26,7 @@ class OperationResult:
 	failed_sessions: int = 0
 	learnings_new: int = 0
 	learnings_updated: int = 0
+	memory_actions: list[dict[str, str]] = field(default_factory=list)
 	run_ids: list[str] = field(default_factory=list)
 	window_start: str | None = None
 	window_end: str | None = None
