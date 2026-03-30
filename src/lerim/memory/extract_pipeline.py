@@ -1,11 +1,12 @@
-"""Extraction pipeline for session transcripts using Predict + windowing.
+"""Extraction pipeline for session transcripts using DSPy modules + windowing.
 
-session file (.jsonl/.json) -> read text -> window (if needed) -> dspy.Predict
--> concat candidates from all windows.
+session file (.jsonl/.json) -> read text -> window (if needed) -> dspy.ChainOfThought
+-> deterministic pre-filter -> LLM consolidation -> LLM quality gate.
 
 Traces are compacted by adapters (tool outputs stripped), so most traces fit in a
-single window. Windowing is a fallback for unusually large sessions. No merge or
-deduplication — the downstream maintain path handles that.
+single window. Windowing is a fallback for unusually large sessions. Post-extraction,
+an LLM consolidation pass merges semantic duplicates across windows, and a quality
+gate drops low-value candidates before the sync agent sees them.
 
 When max_workers > 1, windows are processed in parallel via ThreadPoolExecutor.
 Each thread gets its own DSPy LM instances for thread safety.
@@ -167,9 +168,187 @@ def _filter_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
         # Gate 5: Session-durability items dropped
         if durability == "session":
             continue
+        # Gate 6: Learnings must carry a valid kind
+        primitive = str(item.get("primitive") or "").strip()
+        kind = str(item.get("kind") or "").strip()
+        if primitive == "learning" and kind not in {
+            "insight", "procedure", "friction", "pitfall", "preference"
+        }:
+            continue
 
         filtered.append(item)
     return filtered
+
+
+class ConsolidateCandidatesSignature(dspy.Signature):
+	"""Merge near-duplicate memory candidates extracted from overlapping transcript windows.
+
+	You receive candidates from overlapping windows of the SAME session. Adjacent
+	windows share ~20% text overlap, so the same insight may appear in different
+	wording across windows.
+
+	For each group of semantic duplicates:
+	- Keep the version with the richest, most structured body (WHY + HOW TO APPLY)
+	- Use the highest confidence score from the group
+	- Union all tags from duplicates
+	- If source_speaker differs across duplicates, use "both"
+	- If durability differs, keep the more durable (permanent > project > session)
+	- Preserve the most specific title
+
+	Candidates covering DIFFERENT topics must remain separate — do not merge
+	unrelated items. If no duplicates exist, return the input unchanged.
+	"""
+
+	candidates: list[MemoryCandidate] = dspy.InputField(
+		desc="All memory candidates extracted from overlapping transcript windows of one session",
+	)
+	unique_candidates: list[MemoryCandidate] = dspy.OutputField(
+		desc="Deduplicated set — duplicates merged, unique items unchanged. Same MemoryCandidate schema.",
+	)
+
+
+class QualityGateSignature(dspy.Signature):
+	"""Filter memory candidates to keep only high-quality, durable items worth persisting.
+
+	Score each candidate against these criteria:
+	1. Atomic: covers ONE decision or learning, not bundled
+	2. Actionable: would change how an agent behaves in a future session
+	3. Context-independent: understandable without the original conversation
+	4. Structured body: rule/fact → WHY → HOW TO APPLY
+	5. Durable: still relevant weeks or months later
+
+	DROP a candidate if it:
+	- Fails 2+ criteria above
+	- Contains generic knowledge any LLM already knows
+	- Is code-derivable (could be learned by reading the codebase or git log)
+	- Bundles multiple unrelated decisions/learnings
+	- Is ephemeral (specific line numbers, PR comments, TODO items)
+
+	KEEP a candidate that passes the future-self test: "Would this genuinely help
+	the user or their coding agent in a future session on this project?"
+
+	Do NOT rewrite or modify candidates. Return accepted candidates exactly as
+	received. This is a filter, not a rewriter.
+	"""
+
+	candidates: list[MemoryCandidate] = dspy.InputField(
+		desc="Consolidated memory candidates to evaluate for quality",
+	)
+	accepted: list[MemoryCandidate] = dspy.OutputField(
+		desc="High-quality candidates that pass all criteria. Subset of input, unmodified.",
+	)
+
+
+class MemoryExtractionPipeline(dspy.Module):
+	"""Three-stage memory extraction: extract → consolidate → quality gate.
+
+	Stage 1 (extract): Run per transcript window, produces raw candidates.
+	Stage 2 (consolidate): Merge semantic duplicates across overlapping windows.
+	Stage 3 (quality_gate): Drop low-quality candidates using LLM judgment.
+
+	All three stages are optimizable by DSPy (MIPROv2, BootstrapFewShot, etc.).
+	"""
+
+	def __init__(self):
+		super().__init__()
+		self.extract = dspy.ChainOfThought(MemoryExtractSignature)
+		self.consolidate = dspy.ChainOfThought(ConsolidateCandidatesSignature)
+		self.quality_gate = dspy.ChainOfThought(QualityGateSignature)
+
+	def forward(self, windows: list[str], guidance: str = "") -> dspy.Prediction:
+		# Stage 1: Extract from each window
+		all_candidates: list[dict[str, Any]] = []
+		for window in windows:
+			result = self.extract(transcript=window, guidance=guidance)
+			primitives = result.primitives
+			if isinstance(primitives, list):
+				for item in primitives:
+					if isinstance(item, MemoryCandidate):
+						all_candidates.append(item.model_dump(mode="json", exclude_none=True))
+					elif isinstance(item, dict):
+						all_candidates.append(item)
+
+		# Deterministic pre-filter (cheap, catches obvious junk)
+		filtered = _filter_candidates(all_candidates)
+		if not filtered:
+			return dspy.Prediction(primitives=[])
+
+		# Stage 2: Consolidate cross-window duplicates
+		if len(filtered) > 1:
+			result = self.consolidate(candidates=filtered)
+			unique = result.unique_candidates
+			if isinstance(unique, list) and unique:
+				filtered = _to_dicts(unique)
+
+		# Stage 3: Quality gate
+		result = self.quality_gate(candidates=filtered)
+		accepted = result.accepted
+		if isinstance(accepted, list):
+			return dspy.Prediction(primitives=_to_dicts(accepted))
+
+		return dspy.Prediction(primitives=filtered)
+
+
+def _to_dicts(items: list) -> list[dict[str, Any]]:
+	"""Normalize MemoryCandidate or dict items to plain dicts."""
+	result: list[dict[str, Any]] = []
+	for item in items:
+		if isinstance(item, MemoryCandidate):
+			result.append(item.model_dump(mode="json", exclude_none=True))
+		elif isinstance(item, dict):
+			result.append(item)
+	return result
+
+
+def _consolidate_and_gate(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+	"""Run LLM consolidation and quality gate on extracted candidates.
+
+	Stage 2: Merge semantic duplicates across overlapping windows.
+	Stage 3: Drop low-quality candidates using LLM judgment.
+
+	Falls back gracefully — if either stage fails, the previous result is kept.
+	"""
+	if not candidates:
+		return []
+
+	lms = configure_dspy_lms("extract")
+	pipeline = MemoryExtractionPipeline()
+
+	# Stage 2: Consolidate cross-window duplicates
+	if len(candidates) > 1:
+		with logfire.span("consolidate_candidates", count=len(candidates)):
+			pre_count = len(candidates)
+			history_start = len(lms[0].history)
+			try:
+				_, result = call_with_fallback(
+					pipeline.consolidate, lms, candidates=candidates,
+				)
+				unique = result.unique_candidates
+				if isinstance(unique, list) and unique:
+					candidates = _to_dicts(unique)
+				logger.info("Consolidation: {} → {} candidates", pre_count, len(candidates))
+			except Exception:
+				logger.warning("Consolidation failed, keeping {} pre-filtered candidates", pre_count)
+			finally:
+				capture_dspy_cost(lms[0], history_start)
+
+	# Stage 3: Quality gate
+	with logfire.span("quality_gate", count=len(candidates)):
+		history_start = len(lms[0].history)
+		try:
+			_, result = call_with_fallback(
+				pipeline.quality_gate, lms, candidates=candidates,
+			)
+			accepted = result.accepted
+			if isinstance(accepted, list):
+				candidates = _to_dicts(accepted)
+			logger.info("Quality gate: {} accepted", len(candidates))
+		except Exception:
+			logger.warning("Quality gate failed, keeping {} consolidated candidates", len(candidates))
+		finally:
+			capture_dspy_cost(lms[0], history_start)
+
+	return candidates
 
 
 def _format_transcript_for_extraction(raw: str) -> str:
@@ -218,8 +397,8 @@ def _format_transcript_for_extraction(raw: str) -> str:
 def _detect_trace_format(lines: list[dict]) -> str:
 	"""Detect which agent produced this trace by inspecting line structure."""
 	for obj in lines[:5]:  # check first 5 lines
-		# Claude: has "type" in ("user","assistant") and "message" key
-		if obj.get("type") in ("user", "assistant") and "message" in obj:
+		# Claude: has "type" in ("user","assistant","human") and "message" key
+		if obj.get("type") in ("user", "assistant", "human") and "message" in obj:
 			return "claude"
 		# Codex: has "type" in ("event_msg","response_item","session_meta")
 		if obj.get("type") in ("event_msg", "response_item", "session_meta"):
@@ -246,11 +425,12 @@ def _format_claude_line(obj: dict) -> str | None:
 	role = msg.get("role", entry_type)
 	content = msg.get("content")
 
-	if role == "user":
+	if role in ("user", "human"):
 		text = _extract_content_text(content, skip_tool_results=True)
 		if text:
 			return f"[USER]\n{text}"
-	elif role == "assistant":
+	elif role in ("assistant", "ai"):
+		# "ai" is used by some LangChain-style traces
 		text = _extract_content_text(content, skip_tool_results=False)
 		if text:
 			return f"[ASSISTANT]\n{text}"
@@ -536,7 +716,7 @@ def _extract_candidates(
 
     When max_workers > 1 and multiple windows exist, processes windows in
     parallel via ThreadPoolExecutor. Otherwise falls back to sequential.
-    No merge or deduplication — maintain handles that downstream.
+    Applies deterministic filtering, LLM consolidation, and LLM quality gate.
     """
     if not transcript.strip():
         return []
@@ -576,13 +756,13 @@ def _extract_candidates(
                 }
                 for future in as_completed(futures):
                     all_candidates.extend(future.result())
-            return _filter_candidates(all_candidates)
+            return _consolidate_and_gate(_filter_candidates(all_candidates))
 
         # Sequential: single-thread path (max_workers=1 or single window)
         all_candidates = []
         for wi, window in enumerate(windows, 1):
             all_candidates.extend(_extract_one_window(wi, total, window, guid))
-        return _filter_candidates(all_candidates)
+        return _consolidate_and_gate(_filter_candidates(all_candidates))
 
 
 def extract_memories_from_session_file(
