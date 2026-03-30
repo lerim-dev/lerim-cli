@@ -1,12 +1,12 @@
-"""Trace summarization pipeline using Predict.
+"""Trace summarization pipeline using DSPy modules + parallel MapReduce.
 
 Outputs markdown-frontmatter-ready metadata + summary.
 When --memory-root is provided, writes the summary markdown file
 directly to memory_root/summaries/YYYYMMDD/HHMMSS/{slug}.md using python-frontmatter.
 
 Traces are compacted by adapters (tool outputs stripped), so most traces fit in a
-single LLM call. For rare oversized traces, a sequential refine/fold pattern
-processes chunks in order and accumulates into a single summary.
+single LLM call. For oversized traces, a parallel MapReduce with tree reduction
+summarizes chunks concurrently, then merges them hierarchically.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -36,6 +37,7 @@ from lerim.memory.utils import (
     window_transcript,
     window_transcript_jsonl,
 )
+from lerim.memory.extract_pipeline import _format_transcript_for_extraction
 from lerim.runtime.cost_tracker import capture_dspy_cost
 from lerim.sessions import catalog as session_db
 
@@ -88,20 +90,284 @@ class TraceSummarySignature(dspy.Signature):
     )
 
 
-class RefineSummarySignature(dspy.Signature):
-    """Refine a session summary with the next chunk of the trace.
+class ChunkFacetSignature(dspy.Signature):
+	"""Extract a lightweight facet from one chunk of a session transcript.
 
-    You have a running summary from earlier chunks and a new chunk of the trace.
-    Update the summary to incorporate new information from this chunk while
-    preserving important details from the running summary.
-    """
+	Produce a BRIEF bullet-point summary of what happened in this chunk.
+	3-5 bullets max. Focus on:
+	- Decisions made (by user or agent)
+	- Problems encountered and how they were resolved
+	- Key tools or files involved
+	- Outcomes and results
 
-    running_summary: str = dspy.InputField(desc="Summary from previous chunks (JSON)")
-    trace_chunk: str = dspy.InputField(desc="Next chunk of the session trace")
-    chunk_position: str = dspy.InputField(desc="e.g. 'chunk 2 of 4'")
-    summary_payload: TraceSummaryCandidate = dspy.OutputField(
-        desc="Updated summary incorporating the new chunk"
-    )
+	Be extremely concise — this will be merged with other chunk facets to
+	produce a full session summary. Do NOT write full paragraphs.
+	"""
+
+	transcript: str = dspy.InputField(
+		desc="One chunk of a session transcript",
+	)
+	chunk_position: str = dspy.InputField(
+		desc="e.g. 'chunk 3 of 73' — helps orient within the session",
+	)
+	facet: str = dspy.OutputField(
+		desc="3-5 bullet points capturing key events, decisions, and outcomes from this chunk. Max 80 words.",
+	)
+	tags: list[str] = dspy.OutputField(
+		desc="2-5 topic tags for this chunk",
+	)
+
+
+class SynthesizeSummarySignature(dspy.Signature):
+	"""Synthesize a full session summary from ordered chunk facets.
+
+	You receive lightweight facets (bullet points) from consecutive chunks
+	of the SAME coding session, in chronological order. Produce a coherent
+	structured summary of the ENTIRE session.
+
+	The facets are brief — your job is to weave them into a narrative that
+	reads as one coherent story, not a list of per-chunk bullets.
+	"""
+
+	ordered_facets: str = dspy.InputField(
+		desc="Chronologically ordered chunk facets, formatted as 'Chunk N: [bullets]\\n...'",
+	)
+	summary_payload: TraceSummaryCandidate = dspy.OutputField(
+		desc="Full session summary with title, description, user_intent, session_narrative, and tags",
+	)
+
+
+class MergeFacetsSignature(dspy.Signature):
+	"""Merge multiple chunk facets into a condensed intermediate facet.
+
+	Used in tree reduction when too many facets to fit in one synthesis call.
+	Combine the input facets into a single, slightly longer facet that
+	preserves the key events and decisions from all inputs.
+	"""
+
+	ordered_facets: str = dspy.InputField(
+		desc="Chronologically ordered chunk facets to merge",
+	)
+	chunk_range: str = dspy.InputField(
+		desc="Which portion these facets cover, e.g. 'chunks 1-8 of 73'",
+	)
+	merged_facet: str = dspy.OutputField(
+		desc="Condensed facet covering all input chunks. 5-10 bullet points, max 150 words.",
+	)
+	tags: list[str] = dspy.OutputField(
+		desc="Combined topic tags from all merged chunks",
+	)
+
+
+class TraceSummarizationPipeline(dspy.Module):
+	"""Two-phase summarization: parallel map (tiny facets) → reduce (synthesize).
+
+	Map: Extract lightweight facets from each chunk (3-5 bullets, ~80 words each).
+	Reduce: If all facets fit in context, single synthesis call. Otherwise tree merge
+	        facets down, then synthesize.
+
+	All signatures are optimizable by DSPy (MIPROv2, BootstrapFewShot, etc.).
+	"""
+
+	def __init__(self):
+		super().__init__()
+		self.extract_facet = dspy.Predict(ChunkFacetSignature)
+		self.merge_facets = dspy.Predict(MergeFacetsSignature)
+		self.synthesize = dspy.Predict(SynthesizeSummarySignature)
+
+	def forward(self, windows: list[str], guidance: str = "") -> dspy.Prediction:
+		# Map: extract tiny facet per chunk
+		facets: list[dict[str, Any]] = []
+		for i, window in enumerate(windows, 1):
+			result = self.extract_facet(
+				transcript=window,
+				chunk_position=f"chunk {i} of {len(windows)}",
+			)
+			facets.append({
+				"chunk": i,
+				"facet": str(result.facet),
+				"tags": list(result.tags) if isinstance(result.tags, list) else [],
+			})
+
+		if not facets:
+			raise RuntimeError("map_phase_produced_no_facets")
+
+		# Reduce: tree merge if needed, then synthesize
+		formatted = _format_facets(facets)
+		result = self.synthesize(ordered_facets=formatted)
+		return dspy.Prediction(summary_payload=result.summary_payload)
+
+
+def _format_facets(facets: list[dict[str, Any]]) -> str:
+	"""Format facets as readable text for synthesis/merge input."""
+	parts: list[str] = []
+	for f in facets:
+		parts.append(f"Chunk {f['chunk']}:\n{f['facet']}")
+	return "\n\n".join(parts)
+
+
+def _extract_one_facet(
+	wi: int,
+	total: int,
+	window: str,
+) -> dict[str, Any] | None:
+	"""Extract a lightweight facet from one chunk (thread-safe).
+
+	Returns None if extraction fails (chunk is skipped in reduce phase).
+	"""
+	lms = configure_dspy_lms("summarize")
+	extractor = dspy.Predict(ChunkFacetSignature)
+	history_start = len(lms[0].history)
+	w_start = time.time()
+	try:
+		_, result = call_with_fallback(
+			extractor, lms,
+			transcript=window,
+			chunk_position=f"chunk {wi} of {total}",
+		)
+		logger.info("  Map {}/{}: done ({:.1f}s)", wi, total, time.time() - w_start)
+		capture_dspy_cost(lms[0], history_start)
+		return {
+			"chunk": wi,
+			"facet": str(result.facet),
+			"tags": list(result.tags) if isinstance(result.tags, list) else [],
+		}
+	except Exception:
+		logger.warning("  Map {}/{}: failed ({:.1f}s), skipping", wi, total, time.time() - w_start)
+		capture_dspy_cost(lms[0], history_start)
+		return None
+
+
+def _merge_facet_batch(
+	facets: list[dict[str, Any]],
+	batch_idx: int,
+	level: int,
+) -> dict[str, Any] | None:
+	"""Merge a batch of facets into one condensed facet (thread-safe)."""
+	lms = configure_dspy_lms("summarize")
+	merger = dspy.Predict(MergeFacetsSignature)
+	history_start = len(lms[0].history)
+	w_start = time.time()
+	chunk_range = f"chunks {facets[0]['chunk']}-{facets[-1]['chunk']}"
+	try:
+		_, result = call_with_fallback(
+			merger, lms,
+			ordered_facets=_format_facets(facets),
+			chunk_range=chunk_range,
+		)
+		all_tags: list[str] = []
+		for f in facets:
+			all_tags.extend(f.get("tags", []))
+		merged_tags = list(result.tags) if isinstance(result.tags, list) else all_tags
+		logger.info("  Reduce L{} group {}: done ({:.1f}s)", level, batch_idx + 1, time.time() - w_start)
+		capture_dspy_cost(lms[0], history_start)
+		return {
+			"chunk": facets[0]["chunk"],
+			"facet": str(result.merged_facet),
+			"tags": sorted(set(merged_tags)),
+		}
+	except Exception:
+		logger.warning("  Reduce L{} group {}: failed ({:.1f}s)", level, batch_idx + 1, time.time() - w_start)
+		capture_dspy_cost(lms[0], history_start)
+		return None
+
+
+def _map_and_reduce(
+	windows: list[str],
+	guidance: str,
+	max_workers: int,
+	facet_context_budget: int = 80000,
+	batch_size: int = 10,
+) -> TraceSummaryCandidate:
+	"""Parallel map (tiny facets) → optional tree reduce → final synthesis.
+
+	Map phase: Extract lightweight facets from each chunk in parallel (~80 words each).
+	Reduce phase: If all facets fit in context budget, single synthesis call.
+	              Otherwise, tree-merge facets down until they fit, then synthesize.
+	"""
+	total = len(windows)
+
+	# ── Map phase: parallel facet extraction ──
+	logger.info("Summarization: {} windows (map-reduce), {} workers", total, max_workers)
+	facet_slots: list[dict[str, Any] | None] = [None] * total
+
+	if max_workers > 1 and total > 1:
+		effective_workers = min(max_workers, total)
+		with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+			futures = {
+				pool.submit(_extract_one_facet, wi, total, window): wi
+				for wi, window in enumerate(windows, 1)
+			}
+			for future in as_completed(futures):
+				wi = futures[future]
+				facet_slots[wi - 1] = future.result()
+	else:
+		for wi, window in enumerate(windows, 1):
+			facet_slots[wi - 1] = _extract_one_facet(wi, total, window)
+
+	# Filter out failed chunks, preserving order
+	facets = [f for f in facet_slots if f is not None]
+	if not facets:
+		raise RuntimeError("map_phase_produced_no_facets")
+	logger.info("Map phase: {}/{} facets extracted", len(facets), total)
+
+	# ── Reduce phase: tree merge if facets exceed context budget ──
+	formatted = _format_facets(facets)
+	est_tokens = estimate_tokens(formatted)
+	level = 0
+
+	while est_tokens > facet_context_budget and len(facets) > 1:
+		logger.info("Reduce level {}: {} facets (~{} tokens, budget {})", level, len(facets), est_tokens, facet_context_budget)
+		batches: list[list[dict[str, Any]]] = []
+		for i in range(0, len(facets), batch_size):
+			batches.append(facets[i : i + batch_size])
+
+		next_level: list[dict[str, Any] | None] = [None] * len(batches)
+		multi_batches = [(idx, b) for idx, b in enumerate(batches) if len(b) > 1]
+		single_batches = [(idx, b[0]) for idx, b in enumerate(batches) if len(b) == 1]
+
+		for idx, facet in single_batches:
+			next_level[idx] = facet
+
+		if max_workers > 1 and len(multi_batches) > 1:
+			effective_workers = min(max_workers, len(multi_batches))
+			with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+				merge_futures = {
+					pool.submit(_merge_facet_batch, batch, batch_idx, level): orig_idx
+					for batch_idx, (orig_idx, batch) in enumerate(multi_batches)
+				}
+				for future in as_completed(merge_futures):
+					orig_idx = merge_futures[future]
+					next_level[orig_idx] = future.result()
+		else:
+			for batch_idx, (orig_idx, batch) in enumerate(multi_batches):
+				next_level[orig_idx] = _merge_facet_batch(batch, batch_idx, level)
+
+		facets = [f for f in next_level if f is not None]
+		if not facets:
+			raise RuntimeError(f"reduce_level_{level}_produced_no_facets")
+		formatted = _format_facets(facets)
+		est_tokens = estimate_tokens(formatted)
+		level += 1
+
+	# ── Synthesis: produce final TraceSummaryCandidate from facets ──
+	logger.info("Synthesis: {} facets (~{} tokens)", len(facets), est_tokens)
+	lms = configure_dspy_lms("summarize")
+	synthesizer = dspy.Predict(SynthesizeSummarySignature)
+	history_start = len(lms[0].history)
+	w_start = time.time()
+	_, result = call_with_fallback(
+		synthesizer, lms, ordered_facets=formatted,
+	)
+	logger.info("Synthesis: done ({:.1f}s)", time.time() - w_start)
+	capture_dspy_cost(lms[0], history_start)
+
+	payload = result.summary_payload
+	if isinstance(payload, TraceSummaryCandidate):
+		return payload
+	if isinstance(payload, dict):
+		return TraceSummaryCandidate.model_validate(payload)
+	raise RuntimeError("synthesis_produced_invalid_payload")
 
 
 def _summarize_trace(
@@ -118,6 +384,13 @@ def _summarize_trace(
     """
     if not transcript.strip():
         raise RuntimeError("session_trace_empty")
+    # Pre-process: convert agent JSONL to clean conversation format.
+    # Strips tool outputs, metadata noise, adds [USER]/[ASSISTANT] labels.
+    # Typically reduces trace size by 10-12x (e.g. 13MB → 1.1MB).
+    if "\n{" in transcript:
+        formatted = _format_transcript_for_extraction(transcript)
+        if formatted.strip() and formatted != transcript:
+            transcript = formatted
     config = get_config()
     max_window_tokens = config.summarize_role.max_window_tokens
     overlap_tokens = config.summarize_role.window_overlap_tokens
@@ -139,51 +412,24 @@ def _summarize_trace(
         )
         logger.info("Summarization: done ({:.1f}s)", time.time() - w_start)
     else:
-        # Slow path: refine/fold — process chunks sequentially
+        # Parallel path: MapReduce with tree reduction
         if "\n{" in transcript:
             windows = window_transcript_jsonl(
                 transcript, max_window_tokens, overlap_tokens
             )
         else:
             windows = window_transcript(transcript, max_window_tokens, overlap_tokens)
-        logger.info(
-            "Summarization: {} windows (refine/fold), {} est. tokens",
-            len(windows),
-            trace_tokens,
-        )
 
-        # First chunk: full summarization
+        max_workers = config.summarize_role.max_workers
         w_start = time.time()
-        summarizer = dspy.Predict(TraceSummarySignature)
-        _, result = call_with_fallback(
-            summarizer, lms, transcript=windows[0], guidance=guid
-        )
-        logger.info("  Chunk 1/{}: done ({:.1f}s)", len(windows), time.time() - w_start)
+        candidate = _map_and_reduce(windows, guid, max_workers)
+        logger.info("Summarization: done ({:.1f}s, {} windows)", time.time() - w_start, len(windows))
 
-        # Subsequent chunks: refine with running summary
-        refiner = dspy.Predict(RefineSummarySignature)
-        for i, window in enumerate(windows[1:], 2):
-            running = getattr(result, "summary_payload", None)
-            if isinstance(running, TraceSummaryCandidate):
-                running_json = running.model_dump_json()
-            elif isinstance(running, dict):
-                running_json = json.dumps(running)
-            else:
-                running_json = str(running)
-            w_start = time.time()
-            _, result = call_with_fallback(
-                refiner,
-                lms,
-                running_summary=running_json,
-                trace_chunk=window,
-                chunk_position=f"chunk {i} of {len(windows)}",
-            )
-            logger.info(
-                "  Chunk {}/{}: done ({:.1f}s)",
-                i,
-                len(windows),
-                time.time() - w_start,
-            )
+        # _map_and_reduce returns TraceSummaryCandidate directly — wrap for
+        # the unified payload extraction below.
+        class _Result:
+            summary_payload = candidate
+        result = _Result()
 
     capture_dspy_cost(lms[0], history_start)
 
