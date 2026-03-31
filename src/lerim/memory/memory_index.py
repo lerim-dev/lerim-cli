@@ -627,7 +627,12 @@ class MemoryIndex:
 			row = dict(r)
 			existing_text = f"{row.get('title', '')}\n{row.get('tags', '')}\n{row.get('body', '')}"
 			row["lexical_similarity"] = _token_overlap_similarity(candidate_text, existing_text)
-			data.setdefault(mid, row)
+			if mid in data:
+				# Merge vector cosine similarity into the existing FTS row
+				# so dual-hit results preserve both signals.
+				data[mid]["similarity"] = row.get("similarity")
+			else:
+				data[mid] = row
 
 		# Sort by fused score descending, return top-limit.
 		ranked = sorted(rrf_scores, key=lambda mid: rrf_scores[mid], reverse=True)[:limit]
@@ -635,11 +640,11 @@ class MemoryIndex:
 		for mid in ranked:
 			row = dict(data[mid])
 			row["fused_score"] = round(rrf_scores[mid], 6)
-			row["similarity"] = _normalize_similarity(
-				row.get("similarity")
-				or row.get("lexical_similarity")
-				or 0.0
-			)
+			# Use the strongest similarity signal available.
+			row["similarity"] = _normalize_similarity(max(
+				float(row.get("similarity") or 0.0),
+				float(row.get("lexical_similarity") or 0.0),
+			))
 			results.append(row)
 		return results
 

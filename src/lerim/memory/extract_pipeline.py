@@ -45,48 +45,68 @@ from lerim.sessions import catalog as session_db
 class MemoryExtractSignature(dspy.Signature):
     """Extract reusable memory candidates from this coding-agent session transcript.
 
+    HARD GATE — ask for EVERY candidate before including it:
+    "If an agent read this memory at the start of a future session on this project,
+    would it CONCRETELY change a decision the agent makes?"
+    If the answer is "no" or "probably not" — do NOT extract it.
+
     THE FUTURE-SELF TEST: Only extract items that would help the user or their
     coding agent in a FUTURE session. If the information is obtainable by reading
     the codebase, git log, or documentation, do NOT extract it.
 
     DO NOT EXTRACT:
-    - Facts the assistant learned by READING code, configs, or docs (these are code-derivable).
-      Example: "The default port is 8765" or "The pipeline uses DSPy Predict" — just reporting what exists.
-    - Generic industry knowledge or benchmarks the user did NOT specifically request
-    - Ephemeral task details (specific slide edits, line-number fixes, PR comments, TODO items)
-    - Items where the body merely restates the title
-    - Version-specific changelogs or release notes (git log has these)
-    - Raw web search results that were not synthesized into a conclusion or decision
+    - Facts the assistant learned by READING code, configs, or docs (code-derivable).
+    - Implementation details that will be visible in the codebase once committed
+      (config values, timeout numbers, CLI commands, tool settings, hook args).
+    - Generic programming knowledge any experienced developer already knows
+      (debounce inputs, use pre-push hooks, cache API responses).
+    - Ephemeral task details (line-number fixes, PR comments, TODO items).
+    - Items where the body merely restates the title without adding WHY or HOW.
+    - Version-specific changelogs or release notes (git log has these).
+    - Raw web search results that were not synthesized into a conclusion.
+    - Observations that are self-evident or tautological ("keep high-value items",
+      "archive low-value items", "merge duplicates into one").
+    - Architecture or workflow descriptions ("the pipeline has 6 steps",
+      "extraction runs via DSPy") — these describe WHAT exists, not WHY.
+    - Specific numbers that will change soon (eval scores, trace counts,
+      timeout values, weight coefficients) unless the RATIONALE is the point.
 
     EXTRACT (high-value items only):
     - Decisions: choices about how to build, structure, or design things — by the user OR by the
       agent during implementation. If the agent chose an approach and the user didn't object, that
-      is a team decision worth remembering. Includes strategic, product, and business decisions,
-      not just code decisions.
+      is a team decision worth remembering. Includes strategic, product, and business decisions.
     - Preferences: coding style, tool preferences, workflow habits (usually user-originated)
     - Hard-won insights: non-obvious lessons learned through debugging or painful experience
     - Friction: recurring blockers, time-wasters, tool failures worth remembering
     - Pitfalls: mistakes to avoid that are NOT obvious from reading the code
     - Procedures: multi-step workarounds that would otherwise be forgotten
-    - Research conclusions: when the user explicitly requested research on a topic and the session
-      produced synthesized findings that inform project direction. Extract the conclusion, not the
-      raw data.
+    - Research conclusions: when the user explicitly requested research and the session
+      produced synthesized findings that inform project direction.
 
     EXAMPLES — extract vs skip:
-    ✓ Agent: "I'll use SQLite for the session catalog" → decision (agent CHOSE an approach)
-    ✓ User: "use tabs for indentation" → preference (user STATED)
-    ✓ Agent: "vllm-mlx crashes with concurrent Metal requests" → pitfall (DISCOVERED through debugging)
-    ✓ User asked to research pitch deck structure → agent synthesized: "Best decks follow problem-solution-traction-ask arc" → insight (RESEARCHED and CONCLUDED for this project)
-    ✓ User: "don't mock the database in tests" → feedback. Body: "WHY: mocked tests passed but prod migration failed. HOW TO APPLY: integration tests must hit real database."
-    ✗ Agent: "The config file has sync_interval = 10" → just REPORTED a config value
-    ✗ Agent: "The extraction pipeline uses DSPy Predict" → just DESCRIBED existing code
-    ✗ Agent: "B2B SaaS typically converts at 5-7%" → UNSOLICITED generic statistic, not tied to a user question
+    ✓ "Use SQLite for the session catalog" → decision (agent CHOSE an approach, WHY matters)
+    ✓ "use tabs for indentation" → preference (user STATED)
+    ✓ "vllm-mlx crashes with concurrent Metal requests" → pitfall (DISCOVERED through debugging)
+    ✓ "Restrictive extraction rules always backfire — 5 experiments ALL regressed" → insight (QUANTIFIED and NON-OBVIOUS)
+    ✓ "don't mock the database in tests" → preference. WHY: mocked tests passed but prod migration failed.
+    ✗ "The config file has sync_interval = 10" → REPORTED a config value (code-derivable)
+    ✗ "The extraction pipeline uses DSPy Predict" → DESCRIBED existing code (code-derivable)
+    ✗ "B2B SaaS typically converts at 5-7%" → UNSOLICITED generic statistic
+    ✗ "Debounce search input by 300ms" → IMPLEMENTATION DETAIL readable from code
+    ✗ "Pre-commit hook needs --hook-type pre-push" → TOOL CONFIG, belongs in docs
+    ✗ "Use timeout 2400 for eval with 327 traces" → EPHEMERAL NUMBERS that will change
+    ✗ "Eval formula v1 was wrong" → DEAD CODE, v1 no longer exists
+    ✗ "Accept empty cross-session analysis" → OBVIOUS, wouldn't change any behavior
+    ✗ "Merge duplicate topics into comprehensive target" → GENERIC ADVICE, title says it all
+    ✗ "Sync workflow processes sessions in 6 steps" → ARCHITECTURE DESCRIPTION, code has this
 
     QUALITY BAR for each candidate:
+    - Actionable: MUST change how an agent behaves in a future session. This is non-negotiable.
     - Atomic: ONE decision or learning per candidate. Don't bundle multiple items.
-    - Actionable: must change how an agent behaves in a future session.
     - Context-independent: understandable without the original conversation.
-    - Structured body: lead with the rule/fact, then WHY, then HOW TO APPLY.
+    - Structured body: the body must add information NOT present in the title.
+      Lead with the rule/fact, then WHY, then HOW TO APPLY.
+      Target: 2-4 sentences. The reader is an expert programmer — focus on the non-obvious WHY.
     - Durable: still relevant weeks or months later, not tied to a specific moment.
 
     Kind (for learnings only):
@@ -102,10 +122,21 @@ class MemoryExtractSignature(dspy.Signature):
     - Those subtype names belong in the kind field only when primitive is "learning".
 
     Confidence calibration:
-    - 0.9+ = explicitly stated or decided (by user or agent)
-    - 0.7-0.8 = strongly implied by behavior or accepted without objection
-    - 0.5-0.6 = inferred, uncertain
-    - Below 0.5 = do not extract
+    - 0.9+ = the user or agent EXPLICITLY stated this verbatim.
+             Only for direct quotes like "I decided X" or "always use Y".
+    - 0.75-0.85 = strongly implied by consistent behavior across multiple turns,
+                   or agent chose and user accepted without objection.
+    - 0.55-0.70 = inferred from a single turn. Reasonable interpretation but unconfirmed.
+    - 0.3-0.5 = weak signal. Only extract if the topic is highly unusual or novel.
+    - Below 0.3 = do not extract.
+    SELF-CHECK: If you assigned 0.8+ to more than half your candidates, re-examine
+    each and ask: "Did the user literally say this, or am I interpreting?"
+
+    Durability calibration:
+    - permanent: user preferences, identity, and convictions (about the person)
+    - project: architecture decisions with rationale NOT in code (the WHY behind a choice)
+    - session: specific numbers, eval results, current scores, version-specific bugs,
+      tool config values, CLI commands (things about THIS moment)
 
     Prefer precision over recall. Fewer high-quality items beat many weak ones.
     If a session has no durable memories, return an empty list: [].
@@ -153,8 +184,8 @@ def _filter_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
         confidence = item.get("confidence")
         durability = str(item.get("durability") or "project")
 
-        # Gate 1: Drop low-confidence (< 0.5)
-        if isinstance(confidence, (int, float)) and confidence < 0.5:
+        # Gate 1: Drop low-confidence (< 0.3)
+        if isinstance(confidence, (int, float)) and confidence < 0.3:
             continue
         # Gate 2: Title too short (< 10 chars)
         if len(title) < 10:
@@ -175,6 +206,14 @@ def _filter_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
             "insight", "procedure", "friction", "pitfall", "preference"
         }:
             continue
+
+        # Normalize tags: lowercase, hyphenated, deduplicated.
+        tags = item.get("tags", [])
+        if isinstance(tags, list):
+            item["tags"] = sorted(set(
+                t.strip().lower().replace(" ", "-")
+                for t in tags if t and t.strip()
+            ))
 
         filtered.append(item)
     return filtered
@@ -210,22 +249,30 @@ class ConsolidateCandidatesSignature(dspy.Signature):
 class QualityGateSignature(dspy.Signature):
 	"""Filter memory candidates to keep only high-quality, durable items worth persisting.
 
-	Score each candidate against these criteria:
+	HARD GATES (fail ANY one → DROP immediately):
+	- NOT actionable: would not concretely change how an agent behaves in a future session.
+	  Ask: "What would an agent do DIFFERENTLY after reading this?" If no clear answer → DROP.
+	- Code-derivable: the information exists in the codebase, git log, docs, or config files.
+	- Generic knowledge: any experienced programmer already knows this.
+	- Self-evident / tautological: the observation is obvious and the body just restates the title.
+
+	SOFT CRITERIA (fail 2+ → DROP):
 	1. Atomic: covers ONE decision or learning, not bundled
-	2. Actionable: would change how an agent behaves in a future session
-	3. Context-independent: understandable without the original conversation
-	4. Structured body: rule/fact → WHY → HOW TO APPLY
-	5. Durable: still relevant weeks or months later
+	2. Context-independent: understandable without the original conversation
+	3. Structured body: adds WHY and HOW beyond what the title says
+	4. Durable: still relevant weeks or months later, not tied to specific numbers or versions
+	5. Information-dense: body adds substance, not just rephrasing the title
 
-	DROP a candidate if it:
-	- Fails 2+ criteria above
-	- Contains generic knowledge any LLM already knows
-	- Is code-derivable (could be learned by reading the codebase or git log)
-	- Bundles multiple unrelated decisions/learnings
-	- Is ephemeral (specific line numbers, PR comments, TODO items)
+	DROP examples:
+	- "Debounce search input by 300ms" → code-derivable config value
+	- "Accept empty cross-session analysis" → self-evident, changes nothing
+	- "Sync workflow has 6 steps" → architecture description, read the code
+	- "Use timeout 2400 for 327 traces" → ephemeral numbers, will change
+	- "Merge duplicates into comprehensive target" → generic advice, obvious
 
-	KEEP a candidate that passes the future-self test: "Would this genuinely help
-	the user or their coding agent in a future session on this project?"
+	KEEP examples:
+	- "Restrictive extraction rules always backfire" → non-obvious, quantified, changes approach
+	- "Replace app-level sandboxing with Docker kernel isolation" → architecture WHY not in code
 
 	Do NOT rewrite or modify candidates. Return accepted candidates exactly as
 	received. This is a filter, not a rewriter.

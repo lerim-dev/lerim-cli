@@ -704,10 +704,9 @@ def _batch_dedup_candidates_impl(
 		top_similarity = 0.0
 		if similar:
 			top = similar[0]
-			top_similarity = float(
-				top.get("similarity")
-				or top.get("lexical_similarity")
-				or 0.0
+			top_similarity = max(
+				float(top.get("similarity") or 0.0),
+				float(top.get("lexical_similarity") or 0.0),
 			)
 		enriched.append({
 			"candidate": c,
