@@ -58,18 +58,25 @@ class MemoryExtractSignature(dspy.Signature):
     - Facts the assistant learned by READING code, configs, or docs (code-derivable).
     - Implementation details that will be visible in the codebase once committed
       (config values, timeout numbers, CLI commands, tool settings, hook args).
-    - Generic programming knowledge any experienced developer already knows
-      (debounce inputs, use pre-push hooks, cache API responses).
-    - Ephemeral task details (line-number fixes, PR comments, TODO items).
+    - Generic programming practices any senior developer with 5+ years already knows:
+      debouncing, caching, pagination, client-side vs server-side filtering, URL state
+      management, REST conventions, "keep it simple". If a senior dev wouldn't need
+      to be told this → skip.
+    - Bug reports: specific defects, crashes, or error conditions that will be fixed in code.
+      A bug is NOT friction. Friction persists structurally; a bug gets a fix.
+      Test: "After this bug is fixed, is this memory still useful?" If no → skip.
+    - Directives, tasks, or TODO items: "run X", "do Y next", "we should Z later".
+      A decision records WHY something was chosen; a directive records WHAT to do next.
+      Test: "Does this explain a choice with rationale, or just say what to do?" If latter → skip.
     - Items where the body merely restates the title without adding WHY or HOW.
-    - Version-specific changelogs or release notes (git log has these).
-    - Raw web search results that were not synthesized into a conclusion.
     - Observations that are self-evident or tautological ("keep high-value items",
       "archive low-value items", "merge duplicates into one").
     - Architecture or workflow descriptions ("the pipeline has 6 steps",
       "extraction runs via DSPy") — these describe WHAT exists, not WHY.
     - Specific numbers that will change soon (eval scores, trace counts,
       timeout values, weight coefficients) unless the RATIONALE is the point.
+    - Version-specific changelogs or release notes (git log has these).
+    - Raw web search results that were not synthesized into a conclusion.
 
     EXTRACT (high-value items only):
     - Decisions: choices about how to build, structure, or design things — by the user OR by the
@@ -99,15 +106,30 @@ class MemoryExtractSignature(dspy.Signature):
     ✗ "Accept empty cross-session analysis" → OBVIOUS, wouldn't change any behavior
     ✗ "Merge duplicate topics into comprehensive target" → GENERIC ADVICE, title says it all
     ✗ "Sync workflow processes sessions in 6 steps" → ARCHITECTURE DESCRIPTION, code has this
+    ✗ "Runner times out at 900 seconds" → BUG REPORT, will be fixed in code
+    ✗ "Scorer returns 0.0 for valid inputs" → BUG REPORT, one-time defect
+    ✗ "Run 10 hours of optimization rounds" → DIRECTIVE/TODO, not a decision or learning
+    ✗ "Use client-side filtering for small datasets" → GENERIC, any senior dev knows this
+    ✗ "Store filter state in URL search params" → GENERIC, standard web pattern
+    ✗ "Use simple solutions by default" → GENERIC, truism with no project specificity
+    ✓ "LLMs over-constrain with restrictive rules — 5 experiments all regressed" → FRICTION, structural and recurring
 
     QUALITY BAR for each candidate:
     - Actionable: MUST change how an agent behaves in a future session. This is non-negotiable.
     - Atomic: ONE decision or learning per candidate. Don't bundle multiple items.
     - Context-independent: understandable without the original conversation.
     - Structured body: the body must add information NOT present in the title.
-      Lead with the rule/fact, then WHY, then HOW TO APPLY.
-      Target: 2-4 sentences. The reader is an expert programmer — focus on the non-obvious WHY.
+      Lead with the rule/fact, then WHY (what would go wrong otherwise?),
+      then HOW TO APPLY (a concrete action for future sessions).
+      HOW TO APPLY must describe a DIFFERENT action than the title statement.
+      If it would just restate the title, omit HOW TO APPLY entirely.
+      Target: 2-4 sentences. Focus on the non-obvious WHY.
     - Durable: still relevant weeks or months later, not tied to a specific moment.
+
+    DECISION vs LEARNING test:
+    - Decision: "We chose X because Y." Someone MADE A CHOICE between alternatives.
+    - Learning: "We discovered/observed X." Someone LEARNED SOMETHING.
+    Test: "Was there a moment of choosing?" → decision. "A moment of discovering?" → learning.
 
     Kind (for learnings only):
     - insight: a reusable observation or pattern
@@ -122,15 +144,18 @@ class MemoryExtractSignature(dspy.Signature):
     - Those subtype names belong in the kind field only when primitive is "learning".
 
     Confidence calibration:
-    - 0.9+ = the user or agent EXPLICITLY stated this verbatim.
-             Only for direct quotes like "I decided X" or "always use Y".
-    - 0.75-0.85 = strongly implied by consistent behavior across multiple turns,
+    - 0.9+ = the user or agent EXPLICITLY stated this verbatim using clear language
+             like "I decided", "always use", "never do". Direct quotes only.
+             MAXIMUM 1 candidate per session at 0.9+. If you have more, demote all but the strongest.
+    - 0.75-0.85 = strongly implied by consistent behavior across MULTIPLE turns,
                    or agent chose and user accepted without objection.
     - 0.55-0.70 = inferred from a single turn. Reasonable interpretation but unconfirmed.
-    - 0.3-0.5 = weak signal. Only extract if the topic is highly unusual or novel.
+    - 0.3-0.5 = weak signal. Only extract if highly unusual or novel.
     - Below 0.3 = do not extract.
-    SELF-CHECK: If you assigned 0.8+ to more than half your candidates, re-examine
-    each and ask: "Did the user literally say this, or am I interpreting?"
+    SELF-CHECK: After generating candidates, re-read each and ask:
+    1. "Would a senior dev with 5+ years need to be told this?" If no → remove it entirely.
+    2. "Is this specific to THIS project or general engineering?" If general → remove.
+    3. If more than 50% of candidates are 0.8+ confidence, demote each by 0.10.
 
     Durability calibration:
     - permanent: user preferences, identity, and convictions (about the person)
@@ -253,8 +278,14 @@ class QualityGateSignature(dspy.Signature):
 	- NOT actionable: would not concretely change how an agent behaves in a future session.
 	  Ask: "What would an agent do DIFFERENTLY after reading this?" If no clear answer → DROP.
 	- Code-derivable: the information exists in the codebase, git log, docs, or config files.
-	- Generic knowledge: any experienced programmer already knows this.
+	- Generic knowledge: any senior developer with 5+ years already knows this.
+	  MUST drop: general UX patterns (debouncing, pagination, caching), basic architecture
+	  choices (client vs server filtering), standard web patterns (URL state), truisms
+	  ("keep it simple", "prefer simple solutions").
 	- Self-evident / tautological: the observation is obvious and the body just restates the title.
+	- Bug report: describes a specific defect, crash, or error that will be fixed.
+	  Test: "After someone fixes this, is the memory still useful?" If no → DROP.
+	- Directive / TODO: tells the agent what to do next rather than capturing a decision or learning.
 
 	SOFT CRITERIA (fail 2+ → DROP):
 	1. Atomic: covers ONE decision or learning, not bundled
@@ -269,10 +300,16 @@ class QualityGateSignature(dspy.Signature):
 	- "Sync workflow has 6 steps" → architecture description, read the code
 	- "Use timeout 2400 for 327 traces" → ephemeral numbers, will change
 	- "Merge duplicates into comprehensive target" → generic advice, obvious
+	- "Runner times out at 900s" → bug report, will be fixed
+	- "Scorer returns 0.0" → bug report, one-time defect
+	- "Use client-side filtering for small datasets" → generic, any dev knows this
+	- "Use simple solutions by default" → generic truism
+	- "Run 10 hours of optimization" → directive/TODO, not a decision
 
 	KEEP examples:
 	- "Restrictive extraction rules always backfire" → non-obvious, quantified, changes approach
 	- "Replace app-level sandboxing with Docker kernel isolation" → architecture WHY not in code
+	- "LLMs over-constrain with restrictive rules — 5 experiments regressed" → friction, structural
 
 	Do NOT rewrite or modify candidates. Return accepted candidates exactly as
 	received. This is a filter, not a rewriter.

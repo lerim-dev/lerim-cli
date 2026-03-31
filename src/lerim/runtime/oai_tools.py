@@ -731,11 +731,11 @@ def batch_dedup_candidates(
 	Interpreting top_similarity scores:
 	- top_similarity uses normalized 0.0-1.0 similarity (prefer semantic similarity,
 	  fall back to lexical overlap when vector data is unavailable).
-	- 0.75+ : Very likely duplicate. Classify as "no_op" unless candidate has
+	- 0.65+ : Very likely duplicate. Classify as "no_op" unless candidate has
 	  clearly distinct information not present in the existing memory.
-	- 0.45-0.75 : Related topic. Read both carefully. Classify as "update" if
-	  candidate adds new facts, "no_op" if it's just rephrasing.
-	- Below 0.45 : Likely a new topic. Classify as "add".
+	- 0.40-0.65 : Related topic. Read both carefully. Classify as "update" if
+	  candidate adds genuinely new facts, "no_op" if it's just rephrasing.
+	- Below 0.40 : Likely a new topic. Classify as "add".
 	- 0.0 : No existing memories at all (empty store). All candidates are "add".
 
 	Returns JSON: {"count": int, "results": [{"candidate": {...},

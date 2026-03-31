@@ -56,10 +56,10 @@ Steps (execute in order):
    Classification rules (use top_similarity score from batch_dedup_candidates):
    - top_similarity is normalized 0.0-1.0 similarity. It prefers semantic similarity and
      falls back to lexical overlap when vector similarity is unavailable.
-   - top_similarity >= 0.75 AND the existing memory covers the same core topic → "no_op"
-   - top_similarity 0.45-0.75 AND same topic but candidate adds genuinely NEW information
+   - top_similarity >= 0.65 AND the existing memory covers the same core topic → "no_op"
+   - top_similarity 0.40-0.65 AND same topic but candidate adds genuinely NEW information
      not present in the existing memory → "update"
-   - top_similarity < 0.45 OR no relevant match at all → "add"
+   - top_similarity < 0.40 OR no relevant match at all → "add"
    - top_similarity == 0.0 (no existing memories) → always "add"
 
    IMPORTANT DEDUP RULES:
@@ -67,8 +67,14 @@ Steps (execute in order):
    - Before classifying as "add", you MUST name the closest existing memory and
      explain specifically what new information the candidate contributes that the
      existing memory does NOT already contain.
-   - Before classifying as "update", verify the candidate contains concrete details
-     that are absent from the existing memory (not just rephrasing).
+   - Before classifying as "update", verify the candidate contains at least ONE concrete
+     fact (a specific tool name, error message, workaround, or rationale) that is
+     completely ABSENT from the existing memory. Rephrasing the same insight from a
+     different angle is NOT new information — classify as "no_op" instead.
+   - TOPIC SATURATION: If batch_dedup shows 2+ existing memories with similarity > 0.40
+     on the same topic, the topic is already well-covered. Default to "no_op" unless
+     the candidate contains information that CONTRADICTS or SIGNIFICANTLY extends ALL
+     existing memories on that topic.
 
    For "add": call write_memory() with all fields.
    For "update": call write_memory() with the SAME title as the existing memory,
