@@ -6,7 +6,7 @@ detailed traces (model calls, tool calls, tokens, timing) go through OTel spans.
 
 ## What gets traced
 
-When tracing is enabled, Logfire records spans for work instrumented at startup (see **What happens at startup** below). The lead runtime uses the OpenAI Agents SDK (`Runner.run`); **built-in OpenAI Agents SDK tracing is disabled** in `LerimOAIAgent` so traces are not exported to OpenAI’s hosted tracing by default.
+When tracing is enabled, Logfire records spans for work instrumented at startup (see **What happens at startup** below). The lead runtime uses DSPy ReAct modules (`SyncAgent`, `MaintainAgent`, `AskAgent`); `logfire.instrument_dspy()` covers all agent and pipeline activity.
 
 Typical visibility:
 
@@ -102,7 +102,7 @@ is constructed. This:
 Open [logfire.pydantic.dev](https://logfire.pydantic.dev) and select your project.
 You'll see:
 
-- **Timeline** -- DSPy and HTTP-related activity as spans (lead SDK tracing disabled; use `agent_trace.json` in run folders for full tool turns)
+- **Timeline** -- DSPy ReAct agents and HTTP-related activity as spans (use `agent_trace.json` in run folders for full tool turns)
 - **Span tree** -- nested spans from DSPy and optional httpx
 - **Token usage** -- per-span token counts
 - **Timing** -- latency for each operation

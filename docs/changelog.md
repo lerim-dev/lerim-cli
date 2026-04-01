@@ -8,11 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- **Migrated from PydanticAI to OpenAI Agents SDK** -- the lead agent now runs on the OpenAI Agents SDK. Non-OpenAI providers are supported via `ResponsesProxy` (translates Responses API to Chat Completions via LiteLLM).
-- **Removed explorer subagent** -- search, read, and writes go through OpenAI Agents SDK tools on the lead agent (e.g. `read_file`, `list_files`, `memory_search`, `write_memory`) instead of a nested explorer.
+- **Migrated from PydanticAI to DSPy ReAct** -- the lead agent now runs on DSPy ReAct modules (`SyncAgent`, `MaintainAgent`, `AskAgent`). All providers are supported via `dspy.LM` through unified `providers.py`.
+- **Removed explorer subagent** -- search, read, and writes go through DSPy ReAct tool functions on the lead agent (e.g. `read_file`, `list_files`, `memory_search`, `write_memory`) instead of a nested explorer.
 - Removed `max_explorers` config option (no longer applicable).
 - Removed `[roles.explorer]` config section.
-- Runtime module reorganized: `agent.py` replaced by `oai_agent.py`, `tools.py`/`subagents.py` replaced by `oai_tools.py`, `oai_providers.py`, `oai_context.py`, `responses_proxy.py`, `helpers.py`.
+- Runtime module reorganized: `agent.py` replaced by `runtime.py`, `tools.py`/`subagents.py` replaced by `tools.py`, `providers.py`, `context.py`, `helpers.py`.
 
 ### Removed
 

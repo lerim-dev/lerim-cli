@@ -167,7 +167,7 @@ HTTP server and daemon loop configuration.
 Four roles control which LLM handles each task. See [Model Roles](model-roles.md)
 for a full breakdown.
 
-**Orchestration role** (`lead`) -- used by OpenAI Agents SDK agents:
+**Orchestration role** (`lead`) -- used by DSPy ReAct agent modules:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -180,7 +180,7 @@ for a full breakdown.
 | `openrouter_provider_order` | list | `[]` | OpenRouter-specific provider ordering preference. |
 | `thinking` | bool | `true` | Enable model thinking/reasoning. Set `false` for non-reasoning models. |
 
-**Codex role** (`codex`) — optional; parsed for Cloud / future use. **Not** consumed by `LerimOAIAgent` at runtime today.
+**Codex role** (`codex`) -- optional; parsed for Cloud / future use. **Not** consumed by `LerimRuntime` at runtime today.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|

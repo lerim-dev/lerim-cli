@@ -57,12 +57,12 @@ flowchart TD
 
 The sync path processes new agent sessions and turns them into memories.
 
-**Agent / tools view** — the lead runtime is an OpenAI Agents SDK agent whose tools call DSPy (extract/summarize roles) and write to disk:
+**Agent / tools view** -- the lead runtime is a DSPy ReAct agent whose tools call DSPy (extract/summarize roles) and write to disk:
 
 ```mermaid
 flowchart TB
     subgraph lead["Lead"]
-        OAI[LerimOAIAgent · OpenAI Agents SDK]
+        RT[LerimRuntime · DSPy ReAct]
     end
     subgraph syncTools["Sync tools"]
         ep[extract_pipeline]
@@ -76,12 +76,12 @@ flowchart TB
         ex[roles.extract]
         su[roles.summarize]
     end
-    OAI --> ep
-    OAI --> sp
-    OAI --> bd
-    OAI --> wm
-    OAI --> wr
-    OAI --> rf
+    RT --> ep
+    RT --> sp
+    RT --> bd
+    RT --> wm
+    RT --> wr
+    RT --> rf
     ep -.-> ex
     sp -.-> su
 ```
@@ -107,7 +107,7 @@ The maintain path refines existing memories offline.
 ```mermaid
 flowchart TB
     subgraph lead_m["Lead"]
-        OAI_m[LerimOAIAgent · OpenAI Agents SDK]
+        RT_m[LerimRuntime · DSPy ReAct]
     end
     subgraph maintainTools["Maintain tools"]
         ms[memory_search]
@@ -118,13 +118,13 @@ flowchart TB
         wr2[write_report]
         rf2["read_file · list_files"]
     end
-    OAI_m --> ms
-    OAI_m --> ar
-    OAI_m --> em
-    OAI_m --> wh
-    OAI_m --> wm2
-    OAI_m --> wr2
-    OAI_m --> rf2
+    RT_m --> ms
+    RT_m --> ar
+    RT_m --> em
+    RT_m --> wh
+    RT_m --> wm2
+    RT_m --> wr2
+    RT_m --> rf2
 ```
 
 **Pipeline steps** (what the maintainer is instructed to do):

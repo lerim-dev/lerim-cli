@@ -37,7 +37,7 @@ This is **agent context amnesia**, and it's the biggest productivity drain in AI
 Lerim solves this by:
 
 - :material-sync: **Watching** your agent sessions across all supported coding agents
-- :material-brain: **Extracting** decisions and learnings automatically using LLM pipelines (DSPy + OpenAI Agents SDK)
+- :material-brain: **Extracting** decisions and learnings automatically using LLM pipelines (DSPy ReAct)
 - :material-file-document: **Storing** everything as plain markdown files in your repo (`.lerim/`)
 - :material-refresh: **Refining** knowledge continuously — merges duplicates, archives stale entries, applies time-based decay
 - :material-graph: **Connecting** learnings into a context graph — related decisions and patterns are linked
@@ -184,7 +184,7 @@ Lerim reads session transcripts, extracts decisions and learnings via DSPy pipel
 ```mermaid
 flowchart TB
     subgraph lead["Lead"]
-        OAI[LerimOAIAgent · OpenAI Agents SDK]
+        RT[LerimRuntime · DSPy ReAct]
     end
     subgraph syncTools["Sync tools"]
         ep[extract_pipeline]
@@ -198,12 +198,12 @@ flowchart TB
         ex[roles.extract]
         su[roles.summarize]
     end
-    OAI --> ep
-    OAI --> sp
-    OAI --> bd
-    OAI --> wm
-    OAI --> wr
-    OAI --> rf
+    RT --> ep
+    RT --> sp
+    RT --> bd
+    RT --> wm
+    RT --> wr
+    RT --> rf
     ep -.-> ex
     sp -.-> su
 ```
@@ -219,7 +219,7 @@ Offline refinement merges duplicates, archives low-value entries, consolidates r
 ```mermaid
 flowchart TB
     subgraph lead_m["Lead"]
-        OAI_m[LerimOAIAgent · OpenAI Agents SDK]
+        RT_m[LerimRuntime · DSPy ReAct]
     end
     subgraph maintainTools["Maintain tools"]
         ms[memory_search]
@@ -230,13 +230,13 @@ flowchart TB
         wr2[write_report]
         rf2["read_file · list_files"]
     end
-    OAI_m --> ms
-    OAI_m --> ar
-    OAI_m --> em
-    OAI_m --> wh
-    OAI_m --> wm2
-    OAI_m --> wr2
-    OAI_m --> rf2
+    RT_m --> ms
+    RT_m --> ar
+    RT_m --> em
+    RT_m --> wh
+    RT_m --> wm2
+    RT_m --> wr2
+    RT_m --> rf2
 ```
 
 </div>

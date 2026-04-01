@@ -1,12 +1,12 @@
 # Model Roles
 
-Lerim separates **orchestration** (OpenAI Agents SDK lead), **DSPy extraction**, and **DSPy summarization**. A **`[roles.codex]`** block is also parsed for config (e.g. Cloud UI); it is **not** consumed by `LerimOAIAgent` at runtime today.
+Lerim separates **orchestration** (DSPy ReAct lead), **DSPy extraction**, and **DSPy summarization**. A **`[roles.codex]`** block is also parsed for config (e.g. Cloud UI); it is **not** consumed by `LerimRuntime` at runtime today.
 
 ## Runtime roles
 
 | Role | Runtime | Purpose | Default model |
 |------|---------|---------|---------------|
-| `lead` | OpenAI Agents SDK | Orchestrates sync/maintain/ask via tools (`write_memory`, `extract_pipeline`, `memory_search`, …); only path that writes memory | See `default.toml` |
+| `lead` | DSPy ReAct | Orchestrates sync/maintain/ask via tools (`write_memory`, `extract_pipeline`, `memory_search`, ...); only path that writes memory | See `default.toml` |
 | `extract` | DSPy | Extracts decision and learning candidates from session transcripts | See `default.toml` |
 | `summarize` | DSPy | Generates structured session summaries from transcripts | See `default.toml` |
 
@@ -25,7 +25,7 @@ flowchart LR
 	Lead --> Tools[SDK_tools]
 ```
 
-Tools include DSPy pipeline tools invoked by the lead agent and filesystem/search helpers as defined in `src/lerim/runtime/oai_tools.py`.
+Tools include DSPy pipeline tools invoked by the lead agent and filesystem/search helpers as defined in `src/lerim/runtime/tools.py`.
 
 ## Role configuration
 
@@ -46,8 +46,8 @@ Each role is configured under `[roles.<name>]` in your TOML config.
 	```
 
 	The lead agent is the only component allowed to write memory files. It
-	orchestrates the full sync, maintain, and ask flows. Uses `LitellmModel`
-	via the OpenAI Agents SDK to support non-OpenAI providers.
+	orchestrates the full sync, maintain, and ask flows. Uses `dspy.LM`
+	through unified `providers.py` to support all providers.
 
 === "Extract"
 
@@ -99,15 +99,14 @@ Each role is configured under `[roles.<name>]` in your TOML config.
 	idle_timeout_seconds = 120
 	```
 
-	This block is loaded for config visibility (e.g. Cloud) and future use. **Changing it does not affect the current OpenAI Agents SDK lead runtime.**
+	This block is loaded for config visibility (e.g. Cloud) and future use. **Changing it does not affect the current DSPy ReAct lead runtime.**
 
-## Non-OpenAI providers and ResponsesProxy
+## Provider support
 
-The OpenAI Agents SDK natively uses the OpenAI Responses API. To support
-non-OpenAI providers (MiniMax, Z.AI, Ollama, etc.), Lerim uses a
-`ResponsesProxy` that translates Responses API calls into standard Chat
-Completions API calls via LiteLLM. This is transparent -- you configure
-providers the same way as before.
+All providers (MiniMax, Z.AI, Ollama, OpenAI, Anthropic, OpenRouter, etc.) are
+supported through `dspy.LM` via unified `providers.py`. No proxy layer is
+needed -- `dspy.LM` handles Chat Completions natively for all backends.
+Configuration is the same across providers.
 
 ## Switching providers
 

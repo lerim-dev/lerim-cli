@@ -27,7 +27,7 @@
 Lerim is the **context graph layer** for coding agents -- it watches sessions, extracts the reasoning behind decisions, and builds a shared context graph across agents, projects, and teams.
 
 - **Watches** your agent sessions across all supported coding agents
-- **Extracts** the reasoning behind decisions -- the *why*, not just the *what* -- using LLM pipelines (DSPy + OpenAI Agents SDK)
+- **Extracts** the reasoning behind decisions -- the *why*, not just the *what* -- using LLM pipelines (DSPy ReAct)
 - **Stores** everything as plain markdown files in your repo (`.lerim/`)
 - **Refines** knowledge continuously -- merges duplicates, archives stale entries, applies time-based decay
 - **Connects** learnings into a context graph -- related decisions and patterns are linked
@@ -58,17 +58,17 @@ Lerim is file-first and primitive-first.
 - Project memory: `<repo>/.lerim/`
 - Global fallback: `~/.lerim/`
 - Search: file-based (no index required)
-- Orchestration: OpenAI Agents SDK (`LerimOAIAgent`) with per-flow tools; non-OpenAI providers via LiteLLM
+- Orchestration: DSPy ReAct (`LerimRuntime`) with per-flow tools; all providers via `dspy.LM`
 - Extraction/summarization: DSPy pipelines with transcript windowing
 
 ### Sync path
 
-Runtime shape: one **lead agent** (OpenAI Agents SDK) calls **tools**; `extract_pipeline` / `summarize_pipeline` run **DSPy** with your `[roles.extract]` and `[roles.summarize]` models.
+Runtime shape: one **lead agent** (DSPy ReAct) calls **tools**; `extract_pipeline` / `summarize_pipeline` run **DSPy** with your `[roles.extract]` and `[roles.summarize]` models.
 
 ```mermaid
 flowchart TB
     subgraph lead["Lead"]
-        OAI[LerimOAIAgent · OpenAI Agents SDK]
+        RT[LerimRuntime · DSPy ReAct]
     end
     subgraph syncTools["Sync tools"]
         ep[extract_pipeline]
@@ -82,12 +82,12 @@ flowchart TB
         ex[roles.extract]
         su[roles.summarize]
     end
-    OAI --> ep
-    OAI --> sp
-    OAI --> bd
-    OAI --> wm
-    OAI --> wr
-    OAI --> rf
+    RT --> ep
+    RT --> sp
+    RT --> bd
+    RT --> wm
+    RT --> wr
+    RT --> rf
     ep -.-> ex
     sp -.-> su
 ```
@@ -101,7 +101,7 @@ Same **lead agent** pattern; **maintain** tools only (no DSPy pipelines on this 
 ```mermaid
 flowchart TB
     subgraph lead_m["Lead"]
-        OAI_m[LerimOAIAgent · OpenAI Agents SDK]
+        RT_m[LerimRuntime · DSPy ReAct]
     end
     subgraph maintainTools["Maintain tools"]
         ms[memory_search]
@@ -112,13 +112,13 @@ flowchart TB
         wr2[write_report]
         rf2["read_file · list_files"]
     end
-    OAI_m --> ms
-    OAI_m --> ar
-    OAI_m --> em
-    OAI_m --> wh
-    OAI_m --> wm2
-    OAI_m --> wr2
-    OAI_m --> rf2
+    RT_m --> ms
+    RT_m --> ar
+    RT_m --> em
+    RT_m --> wh
+    RT_m --> wm2
+    RT_m --> wr2
+    RT_m --> rf2
 ```
 
 The maintainer prompt guides merge, archive, consolidate, decay, and hot-memory — the agent chooses **how** to use the tools above.
@@ -298,7 +298,7 @@ tests/run_tests.sh all
 
 ### Tracing (OpenTelemetry)
 
-When enabled, tracing uses Logfire (OpenTelemetry): DSPy is instrumented; optional httpx captures LLM HTTP traffic. Built-in OpenAI Agents SDK cloud tracing is disabled in the runtime so spans are not exported to OpenAI by default.
+When enabled, tracing uses Logfire (OpenTelemetry): `logfire.instrument_dspy()` covers all DSPy ReAct agents, extraction, and summarization; optional httpx captures raw LLM HTTP traffic.
 
 ```bash
 # Enable tracing

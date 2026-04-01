@@ -28,22 +28,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Cleanup
 - Removed stale Codex tool references from ask prompt
-- Cleaned up ResponsesProxy references in internal docs
+- Cleaned up stale OAI SDK / ResponsesProxy references in internal docs
 
 ## [0.1.69] - 2026-03-25
 
 ### Breaking
 
-- Removed PydanticAI dependency — all agent operations now use OpenAI Agents SDK.
+- Removed PydanticAI dependency -- all agent operations now use DSPy ReAct.
 - Removed explorer subagent — replaced by Codex filesystem sub-agent.
 - Removed custom filesystem tools (read, write, edit, glob, grep) — Codex handles all filesystem ops.
 - Removed `[roles.explorer]` config section (kept in default.toml for compatibility but unused).
 
 ### Added
 
-- OpenAI Agents SDK with LitellmModel for multi-provider support (MiniMax, ZAI, OpenRouter, OpenAI, Ollama, MLX).
+- DSPy ReAct with `dspy.LM` for multi-provider support (MiniMax, ZAI, OpenRouter, OpenAI, Ollama, MLX).
 - Codex tool as intelligent filesystem sub-agent with kernel-level sandboxing.
-- ResponsesProxy — built-in Responses API → Chat Completions proxy for non-OpenAI providers (no external proxy needed).
+- Unified `providers.py` -- all providers use `dspy.LM` natively (no proxy layer needed).
 - Cross-session intelligence in maintain: signal amplification, contradiction detection, gap detection.
 - Cross-agent knowledge synthesis: detects patterns across Claude, Cursor, Codex, OpenCode sessions.
 - Hot-memory curation: auto-generated `.lerim/hot-memory.md` (~2000 tokens) with Active Decisions, Key Learnings, Recent Context, Watch Out.
