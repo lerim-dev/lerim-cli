@@ -8,7 +8,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 
-from lerim.config.settings import CodexRoleConfig, Config, DSPyRoleConfig, LLMRoleConfig
+from lerim.config.settings import AgentRoleConfig, CodexRoleConfig, Config, DSPyRoleConfig
 
 
 def make_config(base: Path) -> Config:
@@ -33,7 +33,7 @@ def make_config(base: Path) -> Config:
         server_port=8765,
         sync_interval_minutes=5,
         maintain_interval_minutes=5,
-        lead_role=LLMRoleConfig(
+        lead_role=AgentRoleConfig(
             provider="openrouter",
             model="x-ai/grok-4.1-fast",
             api_base="",

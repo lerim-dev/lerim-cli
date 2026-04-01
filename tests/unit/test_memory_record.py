@@ -130,3 +130,35 @@ def test_memory_type_folders():
     assert MEMORY_TYPE_FOLDERS[MemoryType.decision] == "decisions"
     assert MEMORY_TYPE_FOLDERS[MemoryType.learning] == "learnings"
     assert MEMORY_TYPE_FOLDERS[MemoryType.summary] == "summaries"
+
+
+def test_memory_record_outcome_in_frontmatter():
+	"""MemoryRecord with outcome should include it in frontmatter."""
+	r = MemoryRecord(
+		id="test",
+		primitive="learning",
+		kind="pitfall",
+		title="Test",
+		body="Content",
+		confidence=0.8,
+		outcome="failed",
+		source="test-run",
+	)
+	fm = r.to_frontmatter_dict()
+	assert fm["outcome"] == "failed"
+	md = r.to_markdown()
+	assert "outcome: failed" in md
+
+
+def test_memory_record_no_outcome_in_frontmatter():
+	"""MemoryRecord without outcome should not include it in frontmatter."""
+	r = MemoryRecord(
+		id="test",
+		primitive="decision",
+		title="Test",
+		body="Content",
+		confidence=0.9,
+		source="test-run",
+	)
+	fm = r.to_frontmatter_dict()
+	assert "outcome" not in fm

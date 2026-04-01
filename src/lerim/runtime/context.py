@@ -1,7 +1,7 @@
-"""Context object for OpenAI Agents SDK agent runs.
+"""Runtime context for lerim agent runs.
 
-Frozen dataclass replacing PydanticAI's RuntimeToolContext for the new
-OpenAI Agents SDK runtime. Passed to tools via RunContextWrapper.
+Frozen dataclass passed to tool functions. Each run gets its own context
+with resolved paths, config, and artifact locations.
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from lerim.config.settings import Config
 
 
 @dataclass(frozen=True)
-class OAIRuntimeContext:
-	"""Per-run context passed to OpenAI Agents SDK tools via RunContextWrapper."""
+class RuntimeContext:
+	"""Per-run context passed to tool functions."""
 
 	config: Config
 	repo_root: Path
@@ -27,7 +27,7 @@ class OAIRuntimeContext:
 	artifact_paths: dict[str, Path] | None = None
 
 
-def build_oai_context(
+def build_context(
 	*,
 	repo_root: str | Path,
 	memory_root: str | Path | None = None,
@@ -38,11 +38,11 @@ def build_oai_context(
 	config: Config | None = None,
 	trace_path: str | Path | None = None,
 	artifact_paths: dict[str, Path] | None = None,
-) -> OAIRuntimeContext:
-	"""Build canonical runtime context for one OpenAI Agents SDK run."""
+) -> RuntimeContext:
+	"""Build canonical runtime context for one agent run."""
 	from lerim.config.settings import get_config
 	cfg = config or get_config()
-	return OAIRuntimeContext(
+	return RuntimeContext(
 		config=cfg,
 		repo_root=Path(repo_root).expanduser().resolve(),
 		memory_root=Path(memory_root).expanduser().resolve() if memory_root else None,

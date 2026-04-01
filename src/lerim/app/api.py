@@ -32,8 +32,8 @@ from lerim.config.settings import (
     _write_config_full,
     USER_CONFIG_PATH,
 )
-from lerim.runtime.oai_agent import LerimOAIAgent
-from lerim.runtime.prompts.oai_ask import build_oai_ask_prompt, looks_like_auth_error
+from lerim.runtime.runtime import LerimRuntime
+from lerim.runtime.helpers import looks_like_auth_error
 from lerim.sessions.catalog import (
     count_fts_indexed,
     count_session_jobs_by_status,
@@ -63,12 +63,9 @@ def api_ask(question: str, limit: int = 12) -> dict[str, Any]:
     """Run one ask query against the runtime agent and return result dict."""
     config = get_config()
     memory_root = str(config.memory_dir)
-    hits: list[dict[str, Any]] = []
-    context_docs: list[dict[str, Any]] = []
-    prompt = build_oai_ask_prompt(question, hits, context_docs, memory_root=memory_root)
-    agent = LerimOAIAgent()
+    agent = LerimRuntime()
     response, session_id, cost_usd = agent.ask(
-        prompt, cwd=str(Path.cwd()), memory_root=memory_root
+        question, cwd=str(Path.cwd()), memory_root=memory_root
     )
     error = looks_like_auth_error(response)
     return {

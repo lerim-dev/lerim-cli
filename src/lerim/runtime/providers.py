@@ -7,10 +7,9 @@ from typing import Literal
 
 import dspy
 
-from lerim.config.settings import Config, DSPyRoleConfig, LLMRoleConfig, get_config
+from lerim.config.settings import Config, DSPyRoleConfig, get_config
 
-RoleName = Literal["lead"]
-DSPyRoleName = Literal["extract", "summarize"]
+DSPyRoleName = Literal["extract", "summarize", "lead"]
 
 
 @dataclass(frozen=True)
@@ -21,13 +20,22 @@ class FallbackSpec:
 	model: str
 
 
-def _role_config(config: Config, role: RoleName) -> LLMRoleConfig:
-	"""Return orchestration role config from runtime config."""
-	return config.lead_role
-
-
 def _dspy_role_config(config: Config, role: DSPyRoleName) -> DSPyRoleConfig:
 	"""Return DSPy role config from runtime config."""
+	if role == "lead":
+		lead = config.lead_role
+		return DSPyRoleConfig(
+			provider=lead.provider,
+			model=lead.model,
+			api_base=lead.api_base,
+			timeout_seconds=lead.timeout_seconds,
+			max_window_tokens=0,
+			window_overlap_tokens=0,
+			openrouter_provider_order=lead.openrouter_provider_order,
+			fallback_models=lead.fallback_models,
+			thinking=lead.thinking,
+			max_tokens=lead.max_tokens,
+		)
 	return config.extract_role if role == "extract" else config.summarize_role
 
 

@@ -6,11 +6,11 @@ from pathlib import Path
 
 
 from lerim.config.settings import (
+    AgentRoleConfig,
     Config,
     DSPyRoleConfig,
-    LLMRoleConfig,
+    _build_agent_role,
     _build_dspy_role,
-    _build_llm_role,
     _deep_merge,
     _require_float,
     _require_int,
@@ -87,13 +87,13 @@ def test_type_conversion_non_empty_string():
 
 
 def test_role_config_construction():
-    """_build_llm_role produces LLMRoleConfig from explicit config values."""
-    role = _build_llm_role(
+    """_build_agent_role produces AgentRoleConfig from explicit config values."""
+    role = _build_agent_role(
         {"timeout_seconds": 300, "max_iterations": 10},
         default_provider="openrouter",
         default_model="qwen/qwen3-coder-30b-a3b-instruct",
     )
-    assert isinstance(role, LLMRoleConfig)
+    assert isinstance(role, AgentRoleConfig)
     assert role.provider == "openrouter"
     assert role.model == "qwen/qwen3-coder-30b-a3b-instruct"
     assert role.timeout_seconds == 300

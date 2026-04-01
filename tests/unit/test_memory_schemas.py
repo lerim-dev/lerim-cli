@@ -133,3 +133,26 @@ def test_memory_candidate_json_schema():
     assert "properties" in schema
     assert "primitive" in schema["properties"]
     assert "body" in schema["properties"]
+
+
+def test_memory_candidate_outcome_field():
+	"""MemoryCandidate should support the outcome field."""
+	c = MemoryCandidate(
+		primitive="learning",
+		kind="insight",
+		title="Test",
+		body="Test content",
+		confidence=0.8,
+		outcome="worked",
+	)
+	assert c.outcome == "worked"
+
+
+def test_memory_candidate_outcome_default_none():
+	"""MemoryCandidate outcome should default to None."""
+	c = MemoryCandidate(
+		primitive="decision",
+		title="Test",
+		body="Test content",
+	)
+	assert c.outcome is None

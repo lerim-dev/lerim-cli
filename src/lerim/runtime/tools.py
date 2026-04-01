@@ -1,28 +1,30 @@
-"""OpenAI Agents SDK tools for lerim agent runs.
+"""DSPy ReAct tools for lerim agent runs.
+
+Each function takes RuntimeContext as its first parameter.
+Bind with functools.partial(fn, ctx) before passing to dspy.ReAct.
 
 Tools:
 - write_memory: structured memory creation with lerim-specific validation
-- extract_pipeline: calls DSPy extraction (not a filesystem tool)
-- summarize_pipeline: calls DSPy summarization (not a filesystem tool)
+- extract_pipeline: calls DSPy extraction
+- summarize_pipeline: calls DSPy summarization
 - write_report: write a JSON report file to the workspace
 - read_file: read a file from within allowed directories
+- list_files: list files matching a glob pattern
 - archive_memory: move a memory file to archived/ subdirectory
-- edit_memory: replace a memory file's content (frontmatter + body)
-- write_hot_memory: write the hot-memory.md file at memory_root parent
-- memory_search: composite search tool (scan/keyword/similar/clusters in one call)
-- batch_dedup_candidates: batch dedup for all extract candidates in a single call
-
-Simple reads/writes use the lightweight tools above.
+- edit_memory: replace a memory file's content
+- write_hot_memory: write the hot-memory.md fast-access summary
+- memory_search: composite search (scan/keyword/similar/clusters)
+- batch_dedup_candidates: batch dedup for all extract candidates
 """
 
 from __future__ import annotations
 
+import inspect
 import json
 import shutil
+from functools import wraps
 from pathlib import Path
-from typing import Literal, cast
-
-from agents import RunContextWrapper, function_tool
+from typing import Callable, Literal, cast
 
 from lerim.memory.access_tracker import (
 	extract_memory_id,
@@ -41,7 +43,7 @@ from lerim.memory.summarization_pipeline import (
 	summarize_trace_from_session_file,
 	write_summary_markdown,
 )
-from lerim.runtime.oai_context import OAIRuntimeContext
+from lerim.runtime.context import RuntimeContext
 
 VALID_KINDS = {"insight", "procedure", "friction", "pitfall", "preference"}
 VALID_SOURCE_SPEAKERS = {"user", "agent", "both"}
@@ -49,16 +51,12 @@ VALID_DURABILITY = {"permanent", "project", "session"}
 VALID_OUTCOMES = {"worked", "failed", "unknown"}
 
 
-def _is_within(path: Path, root: Path) -> bool:
-	"""Return whether path is equal to or inside root."""
-	resolved = path.resolve()
-	root_resolved = root.resolve()
-	return resolved == root_resolved or root_resolved in resolved.parents
+from lerim.runtime.helpers import is_within as _is_within
 
 
 def _record_memory_access(
 	*,
-	ctx: OAIRuntimeContext,
+	ctx: RuntimeContext,
 	file_path: Path,
 ) -> None:
 	"""Record memory access event for tracking and decay."""
@@ -73,8 +71,8 @@ def _record_memory_access(
 	record_access(ctx.config.memories_db_path, mem_id, str(ctx.memory_root))
 
 
-def _write_memory_impl(
-	wrapper,
+def write_memory(
+	ctx: RuntimeContext,
 	primitive: str,
 	title: str,
 	body: str,
@@ -85,9 +83,24 @@ def _write_memory_impl(
 	durability: str = "project",
 	outcome: str = "",
 ) -> str:
-	"""Core write_memory logic — separated for direct unit testing."""
-	ctx = wrapper.context
+	"""Create a memory file (decision or learning) under memory_root.
 
+	Use this as the ONLY way to persist new memories. Call once per candidate
+	classified as "add" or "update" in the classify step.
+
+	Returns JSON: {"file_path": str, "bytes": int, "primitive": str}.
+
+	Args:
+		primitive: "decision" or "learning" (singular, lowercase). No other values accepted.
+		title: Short descriptive title. Used to generate the filename slug.
+		body: Memory content in plain text or markdown.
+		confidence: Float 0.0-1.0. Default 0.8. Higher = more certain.
+		tags: Comma-separated tags. Example: "queue,reliability".
+		kind: Required for learnings. One of: "friction", "insight", "pitfall", "preference", "procedure".
+		source_speaker: Who originated the memory: "user", "agent", or "both".
+		durability: Expected lifespan: "permanent", "project", or "session".
+		outcome: Optional validation status: "worked", "failed", or "unknown".
+	"""
 	if not ctx.memory_root:
 		return "ERROR: memory_root is not set in runtime context."
 
@@ -177,54 +190,8 @@ def _write_memory_impl(
 	})
 
 
-@function_tool
-def write_memory(
-	wrapper: RunContextWrapper[OAIRuntimeContext],
-	primitive: str,
-	title: str,
-	body: str,
-	confidence: float = 0.8,
-	tags: str = "",
-	kind: str = "",
-	source_speaker: str = "both",
-	durability: str = "project",
-	outcome: str = "",
-) -> str:
-	"""Create a memory file (decision or learning) under memory_root.
-
-	Use this as the ONLY way to persist new memories. Call once per candidate
-	classified as "add" or "update" in the classify step.
-
-	Returns JSON: {"file_path": str, "bytes": int, "primitive": str}.
-
-	Args:
-		primitive: "decision" or "learning" (singular, lowercase). No other values accepted.
-		title: Short descriptive title. Used to generate the filename slug.
-		body: Memory content in plain text or markdown.
-		confidence: Float 0.0-1.0. Default 0.8. Higher = more certain.
-		tags: Comma-separated tags. Example: "queue,reliability".
-		kind: Required for learnings. One of: "friction", "insight", "pitfall", "preference", "procedure".
-		source_speaker: Who originated the memory: "user", "agent", or "both".
-		durability: Expected lifespan: "permanent", "project", or "session".
-		outcome: Optional validation status: "worked", "failed", or "unknown".
-	"""
-	return _write_memory_impl(
-		wrapper,
-		primitive,
-		title,
-		body,
-		confidence,
-		tags,
-		kind,
-		source_speaker,
-		durability,
-		outcome,
-	)
-
-
-@function_tool
 def extract_pipeline(
-	wrapper: RunContextWrapper[OAIRuntimeContext],
+	ctx: RuntimeContext,
 	guidance: str = "",
 ) -> str:
 	"""Extract memory candidates from the session trace using DSPy.
@@ -238,8 +205,6 @@ def extract_pipeline(
 		guidance: Focus instructions for extraction. Default: extract user
 		          decisions/preferences, skip generic web search noise.
 	"""
-	ctx = wrapper.context
-
 	if not ctx.trace_path or not ctx.artifact_paths:
 		return "ERROR: trace_path and artifact_paths required in runtime context."
 
@@ -267,9 +232,8 @@ def extract_pipeline(
 	})
 
 
-@function_tool
 def summarize_pipeline(
-	wrapper: RunContextWrapper[OAIRuntimeContext],
+	ctx: RuntimeContext,
 	guidance: str = "",
 ) -> str:
 	"""Summarize the session trace using DSPy and write a markdown summary.
@@ -282,8 +246,6 @@ def summarize_pipeline(
 	Args:
 		guidance: Optional focus areas for the summarization pass.
 	"""
-	ctx = wrapper.context
-
 	if not ctx.memory_root:
 		return "ERROR: memory_root required for summarization pipeline."
 
@@ -319,9 +281,8 @@ def summarize_pipeline(
 	})
 
 
-@function_tool
 def write_report(
-	ctx: RunContextWrapper[OAIRuntimeContext],
+	ctx: RuntimeContext,
 	file_path: str,
 	content: str,
 ) -> str:
@@ -337,7 +298,7 @@ def write_report(
 		content: Valid JSON string. Invalid JSON is rejected.
 	"""
 	resolved = Path(file_path).resolve()
-	run_folder = ctx.context.run_folder
+	run_folder = ctx.run_folder
 	if not run_folder:
 		return "Error: run_folder is not set in runtime context"
 	if not _is_within(resolved, run_folder):
@@ -351,35 +312,29 @@ def write_report(
 	return f"Report written to {file_path}"
 
 
-@function_tool
 def read_file(
-	ctx: RunContextWrapper[OAIRuntimeContext],
+	ctx: RuntimeContext,
 	file_path: str,
 ) -> str:
-	"""Read a file's full text content. Only files under memory_root or run_folder are allowed.
+	"""Read a file's full text content. Only files under memory_root, run_folder, or extra_read_roots are allowed.
 
 	Use this to inspect memory files, extract artifacts, or summaries in detail.
 
 	Returns the file content as a string, or "Error: ..." on failure.
 
 	Args:
-		file_path: Absolute path to the file. Must be under memory_root or run_folder.
+		file_path: Absolute path to the file. Must be under memory_root, run_folder, or extra_read_roots.
 	"""
 	resolved = Path(file_path).resolve()
-	run_folder = ctx.context.run_folder
-	memory_root = ctx.context.memory_root
-	allowed = False
-	if run_folder and _is_within(resolved, run_folder):
-		allowed = True
-	if memory_root and _is_within(resolved, memory_root):
-		allowed = True
-	if not allowed:
-		roots = []
-		if memory_root:
-			roots.append(str(memory_root))
-		if run_folder:
-			roots.append(str(run_folder))
-		return f"Error: path {file_path} is outside allowed roots: {', '.join(roots)}"
+	allowed_roots: list[Path] = []
+	if ctx.memory_root:
+		allowed_roots.append(ctx.memory_root)
+	if ctx.run_folder:
+		allowed_roots.append(ctx.run_folder)
+	for extra in (ctx.extra_read_roots or ()):
+		allowed_roots.append(extra)
+	if not any(_is_within(resolved, root) for root in allowed_roots):
+		return f"Error: path {file_path} is outside allowed roots: {', '.join(str(r) for r in allowed_roots)}"
 	if not resolved.exists():
 		return f"Error: file not found: {file_path}"
 	if not resolved.is_file():
@@ -387,13 +342,12 @@ def read_file(
 	return resolved.read_text(encoding="utf-8")
 
 
-@function_tool
 def list_files(
-	ctx: RunContextWrapper[OAIRuntimeContext],
+	ctx: RuntimeContext,
 	directory: str,
 	pattern: str = "*.md",
 ) -> str:
-	"""List file paths matching a glob pattern under memory_root or run_folder.
+	"""List file paths matching a glob pattern under memory_root, run_folder, or extra_read_roots.
 
 	Use this to discover memory files or artifacts before reading them.
 
@@ -404,20 +358,15 @@ def list_files(
 		pattern: Glob pattern to filter files. Default "*.md".
 	"""
 	resolved = Path(directory).resolve()
-	run_folder = ctx.context.run_folder
-	memory_root = ctx.context.memory_root
-	allowed = False
-	if run_folder and _is_within(resolved, run_folder):
-		allowed = True
-	if memory_root and _is_within(resolved, memory_root):
-		allowed = True
-	if not allowed:
-		roots = []
-		if memory_root:
-			roots.append(str(memory_root))
-		if run_folder:
-			roots.append(str(run_folder))
-		return f"Error: directory {directory} is outside allowed roots: {', '.join(roots)}"
+	allowed_roots: list[Path] = []
+	if ctx.memory_root:
+		allowed_roots.append(ctx.memory_root)
+	if ctx.run_folder:
+		allowed_roots.append(ctx.run_folder)
+	for extra in (ctx.extra_read_roots or ()):
+		allowed_roots.append(extra)
+	if not any(_is_within(resolved, root) for root in allowed_roots):
+		return f"Error: directory {directory} is outside allowed roots: {', '.join(str(r) for r in allowed_roots)}"
 	if not resolved.exists():
 		return "[]"
 	if not resolved.is_dir():
@@ -426,13 +375,19 @@ def list_files(
 	return json.dumps(files)
 
 
-def _archive_memory_impl(
-	wrapper,
+def archive_memory(
+	ctx: RuntimeContext,
 	file_path: str,
 ) -> str:
-	"""Core archive_memory logic — separated for direct unit testing."""
-	ctx = wrapper.context
+	"""Soft-delete a memory by moving it to archived/ (e.g., decisions/foo.md -> archived/decisions/foo.md).
 
+	Use this for low-value, superseded, or duplicate memories. Do NOT delete files directly.
+
+	Returns JSON: {"archived": true, "source": str, "target": str}.
+
+	Args:
+		file_path: Absolute path to the memory file under decisions/ or learnings/.
+	"""
 	if not ctx.memory_root:
 		return "ERROR: memory_root is not set in runtime context."
 
@@ -471,31 +426,22 @@ def _archive_memory_impl(
 	})
 
 
-@function_tool
-def archive_memory(
-	ctx: RunContextWrapper[OAIRuntimeContext],
-	file_path: str,
-) -> str:
-	"""Soft-delete a memory by moving it to archived/ (e.g., decisions/foo.md -> archived/decisions/foo.md).
-
-	Use this for low-value, superseded, or duplicate memories. Do NOT delete files directly.
-
-	Returns JSON: {"archived": true, "source": str, "target": str}.
-
-	Args:
-		file_path: Absolute path to the memory file under decisions/ or learnings/.
-	"""
-	return _archive_memory_impl(ctx, file_path)
-
-
-def _edit_memory_impl(
-	wrapper,
+def edit_memory(
+	ctx: RuntimeContext,
 	file_path: str,
 	new_content: str,
 ) -> str:
-	"""Core edit_memory logic — separated for direct unit testing."""
-	ctx = wrapper.context
+	"""Replace the full content of an existing memory file (frontmatter + body).
 
+	Use this to merge content from duplicates, update confidence, or add tags.
+	The file MUST already exist under memory_root.
+
+	Returns JSON: {"edited": true, "file_path": str, "bytes": int}.
+
+	Args:
+		file_path: Absolute path to the memory file to overwrite.
+		new_content: Complete replacement content. MUST start with "---" (YAML frontmatter).
+	"""
 	if not ctx.memory_root:
 		return "ERROR: memory_root is not set in runtime context."
 
@@ -524,33 +470,20 @@ def _edit_memory_impl(
 	})
 
 
-@function_tool
-def edit_memory(
-	ctx: RunContextWrapper[OAIRuntimeContext],
-	file_path: str,
-	new_content: str,
-) -> str:
-	"""Replace the full content of an existing memory file (frontmatter + body).
-
-	Use this to merge content from duplicates, update confidence, or add tags.
-	The file MUST already exist under memory_root.
-
-	Returns JSON: {"edited": true, "file_path": str, "bytes": int}.
-
-	Args:
-		file_path: Absolute path to the memory file to overwrite.
-		new_content: Complete replacement content. MUST start with "---" (YAML frontmatter).
-	"""
-	return _edit_memory_impl(ctx, file_path, new_content)
-
-
-def _write_hot_memory_impl(
-	wrapper,
+def write_hot_memory(
+	ctx: RuntimeContext,
 	content: str,
 ) -> str:
-	"""Core write_hot_memory logic — separated for direct unit testing."""
-	ctx = wrapper.context
+	"""Write the hot-memory.md fast-access summary to memory_root's parent directory.
 
+	Use this in the curate_hot_memory step of maintain. Content should be ~2000 tokens
+	with sections: Active Decisions, Key Learnings, Recent Context, Watch Out.
+
+	Returns JSON: {"written": true, "file_path": str, "bytes": int}.
+
+	Args:
+		content: Full markdown content for hot-memory.md. No frontmatter required.
+	"""
 	if not ctx.memory_root:
 		return "ERROR: memory_root is not set in runtime context."
 
@@ -565,72 +498,8 @@ def _write_hot_memory_impl(
 	})
 
 
-@function_tool
-def write_hot_memory(
-	ctx: RunContextWrapper[OAIRuntimeContext],
-	content: str,
-) -> str:
-	"""Write the hot-memory.md fast-access summary to memory_root's parent directory.
-
-	Use this in the curate_hot_memory step of maintain. Content should be ~2000 tokens
-	with sections: Active Decisions, Key Learnings, Recent Context, Watch Out.
-
-	Returns JSON: {"written": true, "file_path": str, "bytes": int}.
-
-	Args:
-		content: Full markdown content for hot-memory.md. No frontmatter required.
-	"""
-	return _write_hot_memory_impl(ctx, content)
-
-
-def _memory_search_impl(
-	wrapper,
-	query: str,
-	mode: str = "similar",
-	title: str = "",
-	body: str = "",
-	limit: int = 5,
-	primitive: str = "",
-	tags: str = "",
-	min_group_size: int = 3,
-) -> str:
-	"""Core memory_search logic -- separated for direct unit testing."""
-	from lerim.memory.memory_index import MemoryIndex
-
-	ctx = wrapper.context
-	memory_root = ctx.memory_root
-	if not memory_root:
-		return "Error: no memory_root configured"
-	db_path = ctx.config.memories_db_path
-	index = MemoryIndex(db_path)
-	index.ensure_schema()
-
-	# Always reindex to catch new/changed files regardless of mode
-	reindex_stats = index.reindex_directory(memory_root)
-
-	if mode == "scan":
-		results = index.scan_all(primitive=primitive or None)
-		return json.dumps({"mode": "scan", "count": len(results), "reindex": reindex_stats, "memories": results}, default=str)
-
-	if mode == "keyword":
-		results = index.search(query, limit=limit, primitive=primitive or None)
-		return json.dumps({"mode": "keyword", "query": query, "count": len(results), "results": results}, default=str)
-
-	if mode == "similar":
-		results = index.find_similar(title or query, body, tags=tags, limit=limit)
-		return json.dumps({"mode": "similar", "count": len(results), "results": results}, default=str)
-
-	if mode == "clusters":
-		clusters = index.find_clusters(min_cluster_size=min_group_size)
-		formatted = [{"size": len(c), "memories": c} for c in clusters]
-		return json.dumps({"mode": "clusters", "cluster_count": len(formatted), "clusters": formatted}, default=str)
-
-	return f"Error: unknown mode '{mode}'. Use: similar, keyword, scan, clusters"
-
-
-@function_tool
 def memory_search(
-	ctx: RunContextWrapper[OAIRuntimeContext],
+	ctx: RuntimeContext,
 	query: str,
 	mode: str = "similar",
 	title: str = "",
@@ -662,17 +531,66 @@ def memory_search(
 		tags: Comma-separated tags for better matching in similar mode.
 		min_group_size: Minimum cluster size for clusters mode. Default 3.
 	"""
-	return _memory_search_impl(ctx, query, mode, title, body, limit, primitive, tags, min_group_size)
-
-
-def _batch_dedup_candidates_impl(
-	wrapper,
-	candidates_json: str,
-) -> str:
-	"""Core batch_dedup_candidates logic -- separated for direct unit testing."""
 	from lerim.memory.memory_index import MemoryIndex
 
-	ctx = wrapper.context
+	memory_root = ctx.memory_root
+	if not memory_root:
+		return "Error: no memory_root configured"
+	db_path = ctx.config.memories_db_path
+	index = MemoryIndex(db_path)
+	index.ensure_schema()
+
+	# Always reindex to catch new/changed files regardless of mode
+	reindex_stats = index.reindex_directory(memory_root)
+
+	if mode == "scan":
+		results = index.scan_all(primitive=primitive or None)
+		return json.dumps({"mode": "scan", "count": len(results), "reindex": reindex_stats, "memories": results}, default=str)
+
+	if mode == "keyword":
+		results = index.search(query, limit=limit, primitive=primitive or None)
+		return json.dumps({"mode": "keyword", "query": query, "count": len(results), "results": results}, default=str)
+
+	if mode == "similar":
+		results = index.find_similar(title or query, body, tags=tags, limit=limit)
+		return json.dumps({"mode": "similar", "count": len(results), "results": results}, default=str)
+
+	if mode == "clusters":
+		clusters = index.find_clusters(min_cluster_size=min_group_size)
+		formatted = [{"size": len(c), "memories": c} for c in clusters]
+		return json.dumps({"mode": "clusters", "cluster_count": len(formatted), "clusters": formatted}, default=str)
+
+	return f"Error: unknown mode '{mode}'. Use: similar, keyword, scan, clusters"
+
+
+def batch_dedup_candidates(
+	ctx: RuntimeContext,
+	candidates_json: str,
+) -> str:
+	"""Find similar existing memories for ALL extract candidates in one call.
+
+	Use this in step 2 (after extract_pipeline). Pass the raw extract.json
+	content. Each candidate is enriched with its top-3 similar existing
+	memories and a top_similarity score for dedup classification.
+
+	Interpreting top_similarity scores:
+	- top_similarity uses normalized 0.0-1.0 similarity (prefer semantic similarity,
+	  fall back to lexical overlap when vector data is unavailable).
+	- 0.65+ : Very likely duplicate. Classify as "no_op" unless candidate has
+	  clearly distinct information not present in the existing memory.
+	- 0.40-0.65 : Related topic. Read both carefully. Classify as "update" if
+	  candidate adds genuinely new facts, "no_op" if it's just rephrasing.
+	- Below 0.40 : Likely a new topic. Classify as "add".
+	- 0.0 : No existing memories at all (empty store). All candidates are "add".
+
+	Returns JSON: {"count": int, "results": [{"candidate": {...},
+	  "similar_existing": [...], "top_similarity": float}]}.
+
+	Args:
+		candidates_json: The full JSON content of the extract artifact file.
+	"""
+	from lerim.memory.memory_index import MemoryIndex
+
 	memory_root = ctx.memory_root
 	if not memory_root:
 		return "Error: no memory_root configured"
@@ -717,91 +635,61 @@ def _batch_dedup_candidates_impl(
 	return json.dumps({"count": len(enriched), "results": enriched}, default=str)
 
 
-@function_tool
-def batch_dedup_candidates(
-	ctx: RunContextWrapper[OAIRuntimeContext],
-	candidates_json: str,
-) -> str:
-	"""Find similar existing memories for ALL extract candidates in one call.
+# ---------------------------------------------------------------------------
+# Tool binding — produce ctx-bound callables with preserved signatures
+# ---------------------------------------------------------------------------
 
-	Use this in step 2 (after extract_pipeline). Pass the raw extract.json
-	content. Each candidate is enriched with its top-3 similar existing
-	memories and a top_similarity score for dedup classification.
+def _bind_tool(fn: Callable, ctx: RuntimeContext) -> Callable:
+	"""Bind ctx to a tool function, preserving __name__, __doc__, and signature.
 
-	Interpreting top_similarity scores:
-	- top_similarity uses normalized 0.0-1.0 similarity (prefer semantic similarity,
-	  fall back to lexical overlap when vector data is unavailable).
-	- 0.65+ : Very likely duplicate. Classify as "no_op" unless candidate has
-	  clearly distinct information not present in the existing memory.
-	- 0.40-0.65 : Related topic. Read both carefully. Classify as "update" if
-	  candidate adds genuinely new facts, "no_op" if it's just rephrasing.
-	- Below 0.40 : Likely a new topic. Classify as "add".
-	- 0.0 : No existing memories at all (empty store). All candidates are "add".
-
-	Returns JSON: {"count": int, "results": [{"candidate": {...},
-	  "similar_existing": [...], "top_similarity": float}]}.
-
-	Args:
-		candidates_json: The full JSON content of the extract artifact file.
+	functools.partial loses the original signature — dspy.Tool sees
+	(*args, **kwargs) and name='partial'. This wrapper creates a proper
+	function with the ctx parameter removed from the signature so
+	dspy.Tool can introspect parameter names, types, and descriptions.
 	"""
-	return _batch_dedup_candidates_impl(ctx, candidates_json)
+	sig = inspect.signature(fn)
+	params = [p for k, p in sig.parameters.items() if k != "ctx"]
+	new_sig = sig.replace(parameters=params)
+
+	@wraps(fn)
+	def wrapper(*args, **kwargs):
+		return fn(ctx, *args, **kwargs)
+
+	wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
+	return wrapper
 
 
-if __name__ == "__main__":
-	"""Self-test: validate write_memory logic and print tool schemas."""
-	import asyncio
-	from tempfile import TemporaryDirectory
+def bind_sync_tools(ctx: RuntimeContext) -> list[Callable]:
+	"""Build the tool list for the sync flow, bound to ctx."""
+	return [
+		_bind_tool(extract_pipeline, ctx),
+		_bind_tool(summarize_pipeline, ctx),
+		_bind_tool(write_memory, ctx),
+		_bind_tool(write_report, ctx),
+		_bind_tool(read_file, ctx),
+		_bind_tool(list_files, ctx),
+		_bind_tool(batch_dedup_candidates, ctx),
+	]
 
-	from lerim.runtime.oai_context import build_oai_context
 
-	from agents import Agent, Runner, set_tracing_disabled
+def bind_maintain_tools(ctx: RuntimeContext) -> list[Callable]:
+	"""Build the tool list for the maintain flow, bound to ctx."""
+	return [
+		_bind_tool(write_memory, ctx),
+		_bind_tool(write_report, ctx),
+		_bind_tool(read_file, ctx),
+		_bind_tool(list_files, ctx),
+		_bind_tool(archive_memory, ctx),
+		_bind_tool(edit_memory, ctx),
+		_bind_tool(write_hot_memory, ctx),
+		_bind_tool(memory_search, ctx),
+	]
 
-	set_tracing_disabled(disabled=True)
 
-	with TemporaryDirectory() as tmp_dir:
-		root = Path(tmp_dir)
-		memory_root = root / "memory"
-		(memory_root / "decisions").mkdir(parents=True)
-		(memory_root / "learnings").mkdir(parents=True)
-
-		ctx = build_oai_context(
-			repo_root=root,
-			memory_root=memory_root,
-			run_folder=root / "workspace",
-			run_id="selftest",
-		)
-
-		from agents.extensions.models.litellm_model import LitellmModel
-		import os
-		from dotenv import load_dotenv
-		load_dotenv(Path(__file__).parent.parent.parent.parent / ".env")
-
-		test_model = LitellmModel(
-			model="minimax/MiniMax-M2.5",
-			api_key=os.environ.get("MINIMAX_API_KEY", ""),
-		)
-
-		agent = Agent(
-			name="WriteMemoryTest",
-			instructions=(
-				"You are a test agent. Use the write_memory tool to save a learning with "
-				"primitive='learning', title='Queue heartbeat', body='Keep heartbeat updates deterministic.', "
-				"confidence=0.8, tags='queue,reliability', kind='insight'. "
-				"Then respond with the JSON result from the tool."
-			),
-			model=test_model,
-			tools=[write_memory],
-		)
-
-		result = asyncio.run(Runner.run(agent, "Save the memory as instructed.", context=ctx))
-		print(f"  Agent response: {result.final_output[:200]}")
-
-		written = list(memory_root.rglob("*.md"))
-		assert len(written) > 0, "No memory file written"
-		print(f"  Written: {written[0].name}")
-
-	# Print tool schemas
-	for tool in [write_memory, extract_pipeline, summarize_pipeline, write_report, read_file, list_files, archive_memory, edit_memory, write_hot_memory, memory_search, batch_dedup_candidates]:
-		print(f"  {tool.name}: params={list(tool.params_json_schema.get('properties', {}).keys())}")
-
-	print("oai_tools: self-test passed")
+def bind_ask_tools(ctx: RuntimeContext) -> list[Callable]:
+	"""Build the tool list for the ask flow, bound to ctx."""
+	return [
+		_bind_tool(memory_search, ctx),
+		_bind_tool(read_file, ctx),
+		_bind_tool(list_files, ctx),
+	]

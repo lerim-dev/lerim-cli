@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from lerim.config.settings import CodexRoleConfig, Config, DSPyRoleConfig, LLMRoleConfig
+from lerim.config.settings import AgentRoleConfig, CodexRoleConfig, Config, DSPyRoleConfig
 from lerim.runtime.ollama_lifecycle import (
     _ollama_models,
     ollama_lifecycle,
@@ -51,7 +51,7 @@ def _make_ollama_config(
         server_port=base.server_port,
         sync_interval_minutes=base.sync_interval_minutes,
         maintain_interval_minutes=base.maintain_interval_minutes,
-        lead_role=LLMRoleConfig(
+        lead_role=AgentRoleConfig(
             provider=lead_provider,
             model=lead_model,
             api_base="",

@@ -20,7 +20,7 @@ from lerim.app.activity_log import log_activity
 from lerim.app.operation_result import OperationResult
 from lerim.config.project_scope import match_session_project
 from lerim.config.settings import get_config, reload_config
-from lerim.runtime.oai_agent import LerimOAIAgent
+from lerim.runtime.runtime import LerimRuntime
 from lerim.sessions.catalog import (
     IndexedSession,
     claim_session_jobs,
@@ -330,7 +330,7 @@ def _process_one_job(job: dict[str, Any]) -> dict[str, Any]:
                 if not session_path:
                     doc = fetch_session_doc(rid) or {}
                     session_path = str(doc.get("session_path") or "").strip()
-                agent = LerimOAIAgent(default_cwd=repo_path)
+                agent = LerimRuntime(default_cwd=repo_path)
                 result = agent.sync(Path(session_path), memory_root=project_memory)
     except Exception as exc:
         fail_session_job(
@@ -722,7 +722,7 @@ def run_maintain_once(
             project_memory = str(project_path / ".lerim" / "memory")
             try:
                 with logfire.span("maintain_project", project=project_name):
-                    agent = LerimOAIAgent(default_cwd=str(project_path))
+                    agent = LerimRuntime(default_cwd=str(project_path))
                     result = agent.maintain(memory_root=project_memory)
                     results[project_name] = result
                     # Include intelligence data from maintain_actions if available

@@ -3,10 +3,9 @@
 Sends spans to Logfire cloud (free tier). Activated by ``tracing.enabled = true``
 in config or ``LERIM_TRACING=1``.
 
-Instruments three layers:
-  1. DSPy extraction/summarisation pipelines (ChainOfThought, Predict)
-  2. OpenAI Agents SDK agent loop (LLM calls, tool decisions, tool executions)
-  3. Manual spans in daemon / oai_agent / extract_pipeline for orchestration context
+Instruments DSPy pipelines (ReAct agents, extraction, summarisation) and
+optional httpx HTTP calls. Manual spans in daemon / runtime / extract_pipeline
+provide orchestration context.
 """
 
 from __future__ import annotations
@@ -49,25 +48,14 @@ def configure_tracing(config: Config) -> None:
 		scrubbing=ScrubbingOptions(callback=_allow_session_fields),
 	)
 
-	# --- DSPy instrumentation (extraction / summarisation) ---------------
+	# --- DSPy instrumentation (ReAct agents + extraction + summarisation) -
 	logfire.instrument_dspy()
-
-	# --- OpenAI Agents SDK instrumentation (agent loop) ------------------
-	# Wraps the OAI SDK's TraceProvider so every agent span (LLM call,
-	# tool decision, tool execution) becomes an OTel span in Logfire.
-	logfire.instrument_openai_agents()
-
-	# Remove the default OAI BatchTraceProcessor → BackendSpanExporter
-	# which would otherwise export spans to OpenAI's servers.
-	# The Logfire wrapper handles all export via OTel.
-	from agents.tracing import set_trace_processors
-	set_trace_processors([])
 
 	# --- Optional HTTP instrumentation -----------------------------------
 	if config.tracing_include_httpx:
 		logfire.instrument_httpx(capture_all=True)
 
-	logger.info("OTel tracing enabled → Logfire (DSPy + OAI Agents)")
+	logger.info("OTel tracing enabled → Logfire (DSPy)")
 
 
 if __name__ == "__main__":

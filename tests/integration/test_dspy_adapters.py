@@ -22,6 +22,7 @@ from lerim.memory.extract_pipeline import MemoryExtractSignature
 from lerim.memory.summarization_pipeline import TraceSummarySignature
 
 from lerim.memory.schemas import MemoryCandidate
+from tests.integration.conftest import retry_on_llm_flake
 
 pytestmark = pytest.mark.integration
 
@@ -120,47 +121,48 @@ FIXTURES = [
 @pytest.mark.parametrize("adapter_name", ADAPTERS)
 @pytest.mark.parametrize("module_name", MODULES)
 @pytest.mark.parametrize("fixture_name,fixture_path", FIXTURES)
+@retry_on_llm_flake()
 def test_extraction_adapter(
-    adapter_name: str, module_name: str, fixture_name: str, fixture_path: Path
+	adapter_name: str, module_name: str, fixture_name: str, fixture_path: Path
 ) -> None:
-    """Extraction with {adapter} + {module} on {fixture} produces valid candidates."""
-    cfg, temp_dir = _setup_eval_config()
-    try:
-        transcript = fixture_path.read_text(encoding="utf-8")
-        lm = _build_test_lm()
-        adapter = _get_adapter(adapter_name)
-        module = _get_module(module_name, MemoryExtractSignature)
+	"""Extraction with {adapter} + {module} on {fixture} produces valid candidates."""
+	cfg, temp_dir = _setup_eval_config()
+	try:
+		transcript = fixture_path.read_text(encoding="utf-8")
+		lm = _build_test_lm()
+		adapter = _get_adapter(adapter_name)
+		module = _get_module(module_name, MemoryExtractSignature)
 
-        with dspy.context(lm=lm, adapter=adapter):
-            result = module(
-                transcript=transcript,
-                guidance="",
-            )
+		with dspy.context(lm=lm, adapter=adapter):
+			result = module(
+				transcript=transcript,
+				guidance="",
+			)
 
-        primitives = getattr(result, "primitives", [])
-        assert isinstance(primitives, list), (
-            f"{adapter_name}+{module_name} on {fixture_name}: "
-            f"primitives is {type(primitives)}, not list"
-        )
-        assert len(primitives) > 0, (
-            f"{adapter_name}+{module_name} on {fixture_name}: "
-            f"0 candidates extracted — pipeline produced nothing"
-        )
+		primitives = getattr(result, "primitives", [])
+		assert isinstance(primitives, list), (
+			f"{adapter_name}+{module_name} on {fixture_name}: "
+			f"primitives is {type(primitives)}, not list"
+		)
+		assert len(primitives) > 0, (
+			f"{adapter_name}+{module_name} on {fixture_name}: "
+			f"0 candidates extracted — pipeline produced nothing"
+		)
 
-        # Validate each candidate against MemoryCandidate schema
-        for i, item in enumerate(primitives):
-            if isinstance(item, MemoryCandidate):
-                d = item.model_dump(mode="json", exclude_none=True)
-            elif isinstance(item, dict):
-                d = item
-            else:
-                pytest.fail(
-                    f"{adapter_name}+{module_name} on {fixture_name}: "
-                    f"candidate[{i}] is {type(item)}, not dict/MemoryCandidate"
-                )
-            MemoryCandidate.model_validate(d)
-    finally:
-        _cleanup_eval_config(temp_dir)
+		# Validate each candidate against MemoryCandidate schema
+		for i, item in enumerate(primitives):
+			if isinstance(item, MemoryCandidate):
+				d = item.model_dump(mode="json", exclude_none=True)
+			elif isinstance(item, dict):
+				d = item
+			else:
+				pytest.fail(
+					f"{adapter_name}+{module_name} on {fixture_name}: "
+					f"candidate[{i}] is {type(item)}, not dict/MemoryCandidate"
+				)
+			MemoryCandidate.model_validate(d)
+	finally:
+		_cleanup_eval_config(temp_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -231,19 +233,20 @@ def test_summarization_adapter(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("fixture_name,fixture_path", FIXTURES)
+@retry_on_llm_flake()
 def test_extract_pipeline_full(fixture_name: str, fixture_path: Path) -> None:
-    """Full extraction pipeline produces candidates on {fixture}."""
-    cfg, temp_dir = _setup_eval_config()
-    try:
-        from lerim.memory.extract_pipeline import extract_memories_from_session_file
+	"""Full extraction pipeline produces candidates on {fixture}."""
+	cfg, temp_dir = _setup_eval_config()
+	try:
+		from lerim.memory.extract_pipeline import extract_memories_from_session_file
 
-        result = extract_memories_from_session_file(fixture_path)
-        assert isinstance(result, list)
-        assert len(result) > 0, f"Full pipeline on {fixture_name}: 0 candidates"
-        for item in result:
-            MemoryCandidate.model_validate(item)
-    finally:
-        _cleanup_eval_config(temp_dir)
+		result = extract_memories_from_session_file(fixture_path)
+		assert isinstance(result, list)
+		assert len(result) > 0, f"Full pipeline on {fixture_name}: 0 candidates"
+		for item in result:
+			MemoryCandidate.model_validate(item)
+	finally:
+		_cleanup_eval_config(temp_dir)
 
 
 @pytest.mark.integration

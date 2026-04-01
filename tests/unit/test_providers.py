@@ -1,9 +1,10 @@
-"""Unit tests for provider builders (PydanticAI orchestration and DSPy pipelines)."""
+"""Unit tests for provider builders (DSPy pipelines and lead agent LM)."""
 
 from __future__ import annotations
 
 import pytest
 
+from lerim.config.settings import AgentRoleConfig
 from lerim.runtime.providers import (
     build_dspy_lm,
     list_provider_models,
@@ -158,6 +159,50 @@ def test_missing_api_key_raises(tmp_path):
     cfg = replace(cfg, extract_role=or_role)
     with pytest.raises(RuntimeError, match="missing_api_key"):
         build_dspy_lm("extract", config=cfg)
+
+
+def test_build_dspy_lm_lead(tmp_path):
+    """build_dspy_lm with 'lead' role should construct a DSPy LM."""
+    import dspy
+    from dataclasses import replace
+    from lerim.runtime.providers import build_dspy_lm
+
+    cfg = make_config(tmp_path)
+    cfg = replace(cfg, openrouter_api_key="test-key")
+    lm = build_dspy_lm("lead", config=cfg)
+    assert isinstance(lm, dspy.LM)
+
+
+def test_build_dspy_fallback_lms_lead_empty(tmp_path):
+    """build_dspy_fallback_lms with 'lead' role and no fallbacks returns empty list."""
+    from lerim.runtime.providers import build_dspy_fallback_lms
+
+    cfg = make_config(tmp_path)
+    lms = build_dspy_fallback_lms("lead", config=cfg)
+    assert isinstance(lms, list)
+    assert lms == []
+
+
+def test_build_dspy_fallback_lms_lead_with_fallbacks(tmp_path):
+    """build_dspy_fallback_lms with 'lead' role and fallbacks returns LM list."""
+    import dspy
+    from dataclasses import replace
+    from lerim.runtime.providers import build_dspy_fallback_lms
+
+    cfg = make_config(tmp_path)
+    role = AgentRoleConfig(
+        provider="openrouter",
+        model="x-ai/grok-4.1-fast",
+        api_base="",
+        fallback_models=("openrouter:qwen/qwen3-coder",),
+        timeout_seconds=120,
+        max_iterations=10,
+        openrouter_provider_order=(),
+    )
+    cfg = replace(cfg, lead_role=role, openrouter_api_key="test-key")
+    lms = build_dspy_fallback_lms("lead", config=cfg)
+    assert len(lms) == 1
+    assert isinstance(lms[0], dspy.LM)
 
 
 def test_list_provider_models():

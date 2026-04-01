@@ -1,9 +1,7 @@
 """Shared utilities for sync and maintain runtime flows.
 
-These helpers handle artifact I/O, path resolution, counter extraction,
-and the stable result contracts consumed by the CLI, daemon, and shipper.
-They are intentionally free of any PydanticAI or provider-specific imports
-so that both the PydanticAI and OpenAI-Agents backends can reuse them.
+Artifact I/O, path resolution, counter extraction, and the stable result
+contracts consumed by the CLI, daemon, and shipper.
 """
 
 from __future__ import annotations
@@ -53,10 +51,38 @@ class MaintainResultContract(BaseModel):
 # Path helpers
 # ---------------------------------------------------------------------------
 
+def is_within(path: Path, root: Path) -> bool:
+	"""Return whether path equals or is inside root."""
+	resolved = path.resolve()
+	root_resolved = root.resolve()
+	return resolved == root_resolved or root_resolved in resolved.parents
+
+
 def _default_run_folder_name(prefix: str = "sync") -> str:
 	"""Build deterministic per-run workspace folder name with given prefix."""
 	stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 	return f"{prefix}-{stamp}-{secrets.token_hex(3)}"
+
+
+def build_maintain_artifact_paths(run_folder: Path) -> dict[str, Path]:
+	"""Return canonical workspace artifact paths for a maintain run folder."""
+	return {
+		"maintain_actions": run_folder / "maintain_actions.json",
+		"agent_log": run_folder / "agent.log",
+		"subagents_log": run_folder / "subagents.log",
+	}
+
+
+def looks_like_auth_error(response: str) -> bool:
+	"""Return whether response text indicates authentication failure."""
+	text = str(response or "").lower()
+	return (
+		"failed to authenticate" in text
+		or "authentication_error" in text
+		or "oauth token has expired" in text
+		or "invalid api key" in text
+		or "unauthorized" in text
+	)
 
 
 def _build_artifact_paths(run_folder: Path) -> dict[str, Path]:

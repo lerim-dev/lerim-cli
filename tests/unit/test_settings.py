@@ -17,8 +17,8 @@ from lerim.config.settings import (
     _parse_string_table,
     _toml_value,
     _toml_write_dict,
+    _build_agent_role,
     _build_dspy_role,
-    _build_llm_role,
     load_toml_file,
     save_config_patch,
     reload_config,
@@ -303,9 +303,9 @@ def test_port_over_65535_resets(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_llm_role_explicit_overrides():
-    """_build_llm_role uses explicit values over defaults."""
-    role = _build_llm_role(
+def test_agent_role_explicit_overrides():
+    """_build_agent_role uses explicit values over defaults."""
+    role = _build_agent_role(
         {
             "provider": "anthropic",
             "model": "claude-3",
@@ -320,9 +320,9 @@ def test_llm_role_explicit_overrides():
     assert role.timeout_seconds == 600
 
 
-def test_llm_role_timeout_minimum():
-    """_build_llm_role enforces minimum timeout of 10s."""
-    role = _build_llm_role(
+def test_agent_role_timeout_minimum():
+    """_build_agent_role enforces minimum timeout of 10s."""
+    role = _build_agent_role(
         {"timeout_seconds": 5, "max_iterations": 10},
         default_provider="openrouter",
         default_model="m",

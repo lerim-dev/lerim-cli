@@ -9,7 +9,7 @@ The package is organized by feature boundary:
 - `config/`: config loading, scope resolution, logging, OpenTelemetry tracing
 - `sessions/`: platform indexing, session catalog, queue
 - `memory/`: memory taxonomy/record schema (`memory_record.py`), repository paths (`memory_repo.py`), extraction pipeline, trace summarization pipeline
-- `runtime/`: lead runtime (`oai_agent.py`), OpenAI Agents SDK tools (`oai_tools.py`), provider/model builders (`oai_providers.py`), agent context (`oai_context.py`), shared helpers (`helpers.py`), typed contracts (`contracts.py`), prompt builders (`prompts/`)
+- `runtime/`: lead runtime (`runtime.py`), DSPy ReAct agents (`sync_agent.py`, `maintain_agent.py`, `ask_agent.py`), tool functions (`tools.py`), runtime context (`context.py`), provider/model builders (`providers.py`), shared helpers (`helpers.py`), typed contracts (`contracts.py`), prompt builders (`prompts/`)
 - `adapters/`: platform-specific session readers
 
 ## How to use

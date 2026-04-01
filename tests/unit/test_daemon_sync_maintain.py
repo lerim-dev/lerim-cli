@@ -32,7 +32,7 @@ def test_sync_does_not_run_vector_rebuild(monkeypatch, tmp_path) -> None:
     )
 
     monkeypatch.setattr(
-        "lerim.runtime.oai_agent.LerimOAIAgent.sync",
+        "lerim.runtime.runtime.LerimRuntime.sync",
         lambda *_args, **_kwargs: {
             "counts": {"add": 1, "update": 0, "no_op": 0},
         },
@@ -97,7 +97,7 @@ def test_sync_force_enqueues_changed_sessions(monkeypatch, tmp_path) -> None:
         ],
     )
     monkeypatch.setattr(
-        "lerim.runtime.oai_agent.LerimOAIAgent.sync",
+        "lerim.runtime.runtime.LerimRuntime.sync",
         lambda *_a, **_kw: {"counts": {"add": 0, "update": 1, "no_op": 0}},
     )
 
@@ -123,7 +123,7 @@ def test_maintain_calls_agent(monkeypatch, tmp_path) -> None:
     _setup(tmp_path, monkeypatch)
     called: list[str] = []
     monkeypatch.setattr(
-        "lerim.runtime.oai_agent.LerimOAIAgent.maintain",
+        "lerim.runtime.runtime.LerimRuntime.maintain",
         lambda self, **kw: (
             called.append(kw.get("memory_root", "")),
             {

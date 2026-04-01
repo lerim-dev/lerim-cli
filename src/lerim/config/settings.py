@@ -30,7 +30,7 @@ _LAST_CONFIG_SOURCES: list[dict[str, str]] = []
 
 
 @dataclass(frozen=True)
-class LLMRoleConfig:
+class AgentRoleConfig:
     """Role config for lead orchestration agent."""
 
     provider: str
@@ -43,9 +43,9 @@ class LLMRoleConfig:
     thinking: bool = True
     max_tokens: int = 32000
     max_explorers: int = 4
-    max_turns_sync: int = 50
-    max_turns_maintain: int = 100
-    max_turns_ask: int = 30
+    max_iters_sync: int = 50
+    max_iters_maintain: int = 100
+    max_iters_ask: int = 30
 
 
 @dataclass(frozen=True)
@@ -277,7 +277,7 @@ class Config:
     sync_max_sessions: int
     parallel_pipelines: bool
 
-    lead_role: LLMRoleConfig
+    lead_role: AgentRoleConfig
     codex_role: CodexRoleConfig
     extract_role: DSPyRoleConfig
     summarize_role: DSPyRoleConfig
@@ -415,16 +415,16 @@ def _to_string_tuple(value: Any) -> tuple[str, ...]:
     return ()
 
 
-def _build_llm_role(
+def _build_agent_role(
     raw: dict[str, Any], *, default_provider: str, default_model: str
-) -> LLMRoleConfig:
+) -> AgentRoleConfig:
     """Build one orchestration role config from TOML payload."""
     from lerim.runtime.provider_caps import normalize_model_name
 
     provider = _to_non_empty_string(raw.get("provider")) or default_provider
     model = _to_non_empty_string(raw.get("model")) or default_model
     model = normalize_model_name(provider, model)
-    return LLMRoleConfig(
+    return AgentRoleConfig(
         provider=provider,
         model=model,
         api_base=_to_non_empty_string(raw.get("api_base")),
@@ -437,9 +437,9 @@ def _build_llm_role(
         thinking=bool(raw.get("thinking", True)),
         max_tokens=int(raw.get("max_tokens", 32000)),
         max_explorers=int(raw.get("max_explorers", 4)),
-        max_turns_sync=int(raw.get("max_turns_sync", 50)),
-        max_turns_maintain=int(raw.get("max_turns_maintain", 100)),
-        max_turns_ask=int(raw.get("max_turns_ask", 30)),
+        max_iters_sync=int(raw.get("max_iters_sync", 50)),
+        max_iters_maintain=int(raw.get("max_iters_maintain", 100)),
+        max_iters_ask=int(raw.get("max_iters_ask", 30)),
     )
 
 
@@ -573,7 +573,7 @@ def load_config() -> Config:
         ensure_memory_paths(build_memory_paths(data_root))
         _ensure_project_config_exists(data_root)
 
-    lead_role = _build_llm_role(
+    lead_role = _build_agent_role(
         roles.get("lead", {}) if isinstance(roles.get("lead", {}), dict) else {},
         default_provider="openrouter",
         default_model="qwen/qwen3-coder-30b-a3b-instruct",
@@ -812,7 +812,7 @@ def build_isolated_config(
         )
         roles[role_name] = _deep_merge(existing, overrides)
 
-    lead_role = _build_llm_role(
+    lead_role = _build_agent_role(
         roles.get("lead", {}) if isinstance(roles.get("lead", {}), dict) else {},
         default_provider="openrouter",
         default_model="qwen/qwen3-coder-30b-a3b-instruct",

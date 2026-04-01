@@ -11,7 +11,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 # Learning subtypes; models sometimes emit these as `primitive`. Keep in sync with
-# VALID_KINDS in lerim.runtime.oai_tools.
+# VALID_KINDS in lerim.runtime.tools.
 _LEARNING_KINDS_MISUSED_AS_PRIMITIVE = frozenset(
     {"insight", "procedure", "friction", "pitfall", "preference"}
 )

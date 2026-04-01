@@ -853,7 +853,7 @@ def _serialize_full_config(config: Config) -> dict[str, Any]:
     """Serialize full Config dataclass to a dashboard-friendly JSON dict."""
 
     def _role_dict(role: Any) -> dict[str, Any]:
-        """Convert LLMRoleConfig or DSPyRoleConfig to a dict."""
+        """Convert AgentRoleConfig or DSPyRoleConfig to a dict."""
         base: dict[str, Any] = {
             "provider": role.provider,
             "model": role.model,

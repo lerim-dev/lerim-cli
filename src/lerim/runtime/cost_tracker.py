@@ -1,9 +1,9 @@
 """Track LLM cost per run via OpenRouter's usage.cost response field.
 
-Uses a ContextVar with a mutable accumulator so cost captured inside
-asyncio.run() and run_in_executor (tool calls) propagates back to the
-caller.  Capture path:
- - DSPy: explicit capture_dspy_cost() reads LM history after pipeline calls.
+Uses a ContextVar with a mutable accumulator shared by reference so
+cost captured in tool calls propagates back to the caller.  Capture path:
+ - DSPy: explicit capture_dspy_cost() reads LM history after synchronous
+   pipeline calls and adds any reported cost to the accumulator.
 """
 
 from __future__ import annotations
