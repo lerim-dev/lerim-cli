@@ -62,3 +62,4 @@ CLAUDE.md
 evals/dataset/catalog.json
 evals/dataset/manifest.json
 evals/dataset/traces/
+.coverage

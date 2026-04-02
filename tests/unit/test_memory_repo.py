@@ -9,9 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from lerim.memory.repo import (
-    build_memory_paths,
-    ensure_memory_paths,
-    reset_memory_root,
+	build_memory_paths,
+	ensure_memory_paths,
+	reset_memory_root,
 )
 
 
@@ -21,29 +21,29 @@ from lerim.memory.repo import (
 
 
 def test_build_memory_paths_structure(tmp_path):
-    """build_memory_paths returns correct canonical path set."""
-    paths = build_memory_paths(tmp_path)
-    assert paths.data_dir == tmp_path
-    assert paths.memory_dir == tmp_path / "memory"
-    assert paths.workspace_dir == tmp_path / "workspace"
-    assert paths.index_dir == tmp_path / "index"
+	"""build_memory_paths returns correct canonical path set."""
+	paths = build_memory_paths(tmp_path)
+	assert paths.data_dir == tmp_path
+	assert paths.memory_dir == tmp_path / "memory"
+	assert paths.workspace_dir == tmp_path / "workspace"
+	assert paths.index_dir == tmp_path / "index"
 
 
 def test_build_memory_paths_expands_user():
-    """build_memory_paths expands ~ in the data_dir path."""
-    paths = build_memory_paths(Path("~/test-lerim"))
-    assert "~" not in str(paths.data_dir)
-    assert paths.data_dir == Path.home() / "test-lerim"
+	"""build_memory_paths expands ~ in the data_dir path."""
+	paths = build_memory_paths(Path("~/test-lerim"))
+	assert "~" not in str(paths.data_dir)
+	assert paths.data_dir == Path.home() / "test-lerim"
 
 
 def test_memory_paths_is_frozen(tmp_path):
-    """MemoryPaths dataclass is immutable."""
-    paths = build_memory_paths(tmp_path)
-    try:
-        paths.data_dir = tmp_path / "other"
-        assert False, "Should have raised FrozenInstanceError"
-    except AttributeError:
-        pass
+	"""MemoryPaths dataclass is immutable."""
+	paths = build_memory_paths(tmp_path)
+	try:
+		paths.data_dir = tmp_path / "other"
+		assert False, "Should have raised FrozenInstanceError"
+	except AttributeError:
+		pass
 
 
 # ---------------------------------------------------------------------------
@@ -52,35 +52,35 @@ def test_memory_paths_is_frozen(tmp_path):
 
 
 def test_ensure_memory_paths_creates_dirs(tmp_path):
-    """ensure_memory_paths creates all canonical subdirectories."""
-    paths = build_memory_paths(tmp_path)
-    ensure_memory_paths(paths)
+	"""ensure_memory_paths creates all canonical subdirectories."""
+	paths = build_memory_paths(tmp_path)
+	ensure_memory_paths(paths)
 
-    assert paths.memory_dir.is_dir()
-    assert (paths.memory_dir / "summaries").is_dir()
-    assert (paths.memory_dir / "archived").is_dir()
-    assert paths.workspace_dir.is_dir()
-    assert paths.index_dir.is_dir()
+	assert paths.memory_dir.is_dir()
+	assert (paths.memory_dir / "summaries").is_dir()
+	assert (paths.memory_dir / "archived").is_dir()
+	assert paths.workspace_dir.is_dir()
+	assert paths.index_dir.is_dir()
 
 
 def test_ensure_memory_paths_idempotent(tmp_path):
-    """Calling ensure_memory_paths twice does not raise."""
-    paths = build_memory_paths(tmp_path)
-    ensure_memory_paths(paths)
-    ensure_memory_paths(paths)
-    assert paths.memory_dir.is_dir()
+	"""Calling ensure_memory_paths twice does not raise."""
+	paths = build_memory_paths(tmp_path)
+	ensure_memory_paths(paths)
+	ensure_memory_paths(paths)
+	assert paths.memory_dir.is_dir()
 
 
 def test_ensure_memory_paths_preserves_existing_files(tmp_path):
-    """ensure_memory_paths does not delete existing files."""
-    paths = build_memory_paths(tmp_path)
-    ensure_memory_paths(paths)
+	"""ensure_memory_paths does not delete existing files."""
+	paths = build_memory_paths(tmp_path)
+	ensure_memory_paths(paths)
 
-    test_file = paths.memory_dir / "test.md"
-    test_file.write_text("keep me", encoding="utf-8")
+	test_file = paths.memory_dir / "test.md"
+	test_file.write_text("keep me", encoding="utf-8")
 
-    ensure_memory_paths(paths)
-    assert test_file.read_text(encoding="utf-8") == "keep me"
+	ensure_memory_paths(paths)
+	assert test_file.read_text(encoding="utf-8") == "keep me"
 
 
 # ---------------------------------------------------------------------------
@@ -89,57 +89,106 @@ def test_ensure_memory_paths_preserves_existing_files(tmp_path):
 
 
 def test_reset_removes_and_recreates(tmp_path):
-    """reset_memory_root clears memory/workspace/index and recreates structure."""
-    paths = build_memory_paths(tmp_path)
-    ensure_memory_paths(paths)
+	"""reset_memory_root clears memory/workspace/index and recreates structure."""
+	paths = build_memory_paths(tmp_path)
+	ensure_memory_paths(paths)
 
-    # Create a file that should be removed
-    sentinel = paths.memory_dir / "20260228-test.md"
-    sentinel.write_text("test content", encoding="utf-8")
-    assert sentinel.exists()
+	# Create a file that should be removed
+	sentinel = paths.memory_dir / "20260228-test.md"
+	sentinel.write_text("test content", encoding="utf-8")
+	assert sentinel.exists()
 
-    result = reset_memory_root(paths)
+	result = reset_memory_root(paths)
 
-    # File gone, but directory recreated
-    assert not sentinel.exists()
-    assert paths.memory_dir.is_dir()
-    assert str(paths.memory_dir) in result["removed"]
+	# File gone, but directory recreated
+	assert not sentinel.exists()
+	assert paths.memory_dir.is_dir()
+	assert str(paths.memory_dir) in result["removed"]
 
 
 def test_reset_reports_removed_dirs(tmp_path):
-    """reset_memory_root reports which directories were removed."""
-    paths = build_memory_paths(tmp_path)
-    ensure_memory_paths(paths)
+	"""reset_memory_root reports which directories were removed."""
+	paths = build_memory_paths(tmp_path)
+	ensure_memory_paths(paths)
 
-    result = reset_memory_root(paths)
-    removed = result["removed"]
+	result = reset_memory_root(paths)
+	removed = result["removed"]
 
-    assert str(paths.memory_dir) in removed
-    assert str(paths.workspace_dir) in removed
-    assert str(paths.index_dir) in removed
+	assert str(paths.memory_dir) in removed
+	assert str(paths.workspace_dir) in removed
+	assert str(paths.index_dir) in removed
 
 
 def test_reset_on_empty_root(tmp_path):
-    """reset_memory_root works even when no directories exist yet."""
-    paths = build_memory_paths(tmp_path)
-    # Don't call ensure_memory_paths — dirs don't exist
-    result = reset_memory_root(paths)
+	"""reset_memory_root works even when no directories exist yet."""
+	paths = build_memory_paths(tmp_path)
+	# Don't call ensure_memory_paths -- dirs don't exist
+	result = reset_memory_root(paths)
 
-    # Should still create the structure
-    assert paths.memory_dir.is_dir()
-    assert result["removed"] == []
+	# Should still create the structure
+	assert paths.memory_dir.is_dir()
+	assert result["removed"] == []
 
 
 def test_reset_then_ensure_consistent(tmp_path):
-    """After reset, ensure_memory_paths produces same layout."""
-    paths = build_memory_paths(tmp_path)
-    ensure_memory_paths(paths)
+	"""After reset, ensure_memory_paths produces same layout."""
+	paths = build_memory_paths(tmp_path)
+	ensure_memory_paths(paths)
 
-    reset_memory_root(paths)
+	reset_memory_root(paths)
 
-    # Verify same dirs exist as after a fresh ensure
-    assert paths.memory_dir.is_dir()
-    assert (paths.memory_dir / "summaries").is_dir()
-    assert (paths.memory_dir / "archived").is_dir()
-    assert paths.workspace_dir.is_dir()
-    assert paths.index_dir.is_dir()
+	# Verify same dirs exist as after a fresh ensure
+	assert paths.memory_dir.is_dir()
+	assert (paths.memory_dir / "summaries").is_dir()
+	assert (paths.memory_dir / "archived").is_dir()
+	assert paths.workspace_dir.is_dir()
+	assert paths.index_dir.is_dir()
+
+
+def test_reset_removes_cache_dir(tmp_path):
+	"""reset_memory_root also removes the cache directory."""
+	paths = build_memory_paths(tmp_path)
+	ensure_memory_paths(paths)
+
+	cache_dir = paths.data_dir / "cache"
+	cache_dir.mkdir(parents=True)
+	cache_file = cache_dir / "session.jsonl"
+	cache_file.write_text('{"x":1}\n', encoding="utf-8")
+	assert cache_file.exists()
+
+	result = reset_memory_root(paths)
+
+	assert not cache_file.exists()
+	assert str(cache_dir) in result["removed"]
+
+
+def test_reset_handles_file_instead_of_dir(tmp_path):
+	"""reset_memory_root removes a plain file if it exists where a dir is expected."""
+	paths = build_memory_paths(tmp_path)
+
+	# Place a file where memory_dir would be (not a directory)
+	paths.memory_dir.parent.mkdir(parents=True, exist_ok=True)
+	paths.memory_dir.write_text("I am a file, not a dir", encoding="utf-8")
+	assert paths.memory_dir.is_file()
+
+	result = reset_memory_root(paths)
+
+	# File should have been unlinked, and the dir recreated
+	assert paths.memory_dir.is_dir()
+	assert str(paths.memory_dir) in result["removed"]
+
+
+def test_reset_creates_summaries_and_archived(tmp_path):
+	"""reset_memory_root recreates summaries and archived subdirs after clearing."""
+	paths = build_memory_paths(tmp_path)
+	ensure_memory_paths(paths)
+
+	# Put content in summaries
+	summary_file = paths.memory_dir / "summaries" / "test.md"
+	summary_file.write_text("summary", encoding="utf-8")
+
+	reset_memory_root(paths)
+
+	assert (paths.memory_dir / "summaries").is_dir()
+	assert (paths.memory_dir / "archived").is_dir()
+	assert not summary_file.exists()

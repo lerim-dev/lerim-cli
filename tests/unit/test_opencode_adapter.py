@@ -1,4 +1,4 @@
-"""Unit tests for the OpenCode session adapter using in-memory SQLite databases."""
+"""Unit tests for the OpenCode session adapter using temporary SQLite databases."""
 
 from __future__ import annotations
 
@@ -6,219 +6,1098 @@ import json
 import sqlite3
 from pathlib import Path
 
+from lerim.adapters.base import ViewerMessage, ViewerSession
 from lerim.adapters.opencode import (
-    compact_trace,
-    count_sessions,
-    read_session,
-    validate_connection,
+	_export_session_jsonl,
+	_json_col,
+	_read_session_db,
+	_read_session_jsonl,
+	_resolve_db_path,
+	compact_trace,
+	count_sessions,
+	default_path,
+	find_session_path,
+	iter_sessions,
+	read_session,
+	validate_connection,
 )
-from lerim.adapters.base import ViewerSession
 
 
 def _make_opencode_db(db_path: Path) -> None:
-    """Create a minimal OpenCode SQLite DB with test data."""
-    conn = sqlite3.connect(db_path)
-    conn.execute("""CREATE TABLE session (
-        id TEXT PRIMARY KEY,
-        directory TEXT,
-        version TEXT,
-        title TEXT,
-        time_created INTEGER
-    )""")
-    conn.execute("""CREATE TABLE message (
-        id TEXT PRIMARY KEY,
-        session_id TEXT,
-        data TEXT,
-        time_created INTEGER
-    )""")
-    conn.execute("""CREATE TABLE part (
-        id TEXT PRIMARY KEY,
-        message_id TEXT,
-        data TEXT,
-        time_created INTEGER
-    )""")
-    # Insert a session
-    conn.execute(
-        "INSERT INTO session VALUES (?, ?, ?, ?, ?)",
-        ("sess-1", "/tmp/project", "1.0", "Test Session", 1708000000000),
-    )
-    # Insert messages
-    conn.execute(
-        "INSERT INTO message VALUES (?, ?, ?, ?)",
-        (
-            "msg-1",
-            "sess-1",
-            json.dumps({"role": "user", "tokens": {"input": 10, "output": 0}}),
-            1708000001000,
-        ),
-    )
-    conn.execute(
-        "INSERT INTO message VALUES (?, ?, ?, ?)",
-        (
-            "msg-2",
-            "sess-1",
-            json.dumps(
-                {
-                    "role": "assistant",
-                    "tokens": {"input": 0, "output": 50},
-                    "modelID": "gpt-4",
-                }
-            ),
-            1708000002000,
-        ),
-    )
-    # Insert parts
-    conn.execute(
-        "INSERT INTO part VALUES (?, ?, ?, ?)",
-        (
-            "part-1",
-            "msg-1",
-            json.dumps({"type": "text", "text": "User question here"}),
-            1708000001000,
-        ),
-    )
-    conn.execute(
-        "INSERT INTO part VALUES (?, ?, ?, ?)",
-        (
-            "part-2",
-            "msg-2",
-            json.dumps({"type": "text", "text": "Assistant answer here"}),
-            1708000002000,
-        ),
-    )
-    conn.commit()
-    conn.close()
+	"""Create a minimal OpenCode SQLite DB with one session, two messages, and parts."""
+	conn = sqlite3.connect(db_path)
+	conn.execute("""CREATE TABLE session (
+		id TEXT PRIMARY KEY,
+		directory TEXT,
+		version TEXT,
+		title TEXT,
+		time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE message (
+		id TEXT PRIMARY KEY,
+		session_id TEXT,
+		data TEXT,
+		time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE part (
+		id TEXT PRIMARY KEY,
+		message_id TEXT,
+		data TEXT,
+		time_created INTEGER
+	)""")
+	# Insert a session
+	conn.execute(
+		"INSERT INTO session VALUES (?, ?, ?, ?, ?)",
+		("sess-1", "/tmp/project", "1.0", "Test Session", 1708000000000),
+	)
+	# Insert messages
+	conn.execute(
+		"INSERT INTO message VALUES (?, ?, ?, ?)",
+		(
+			"msg-1",
+			"sess-1",
+			json.dumps({
+				"role": "user",
+				"tokens": {"input": 10, "output": 0},
+				"time": {"created": 1708000001000},
+			}),
+			1708000001000,
+		),
+	)
+	conn.execute(
+		"INSERT INTO message VALUES (?, ?, ?, ?)",
+		(
+			"msg-2",
+			"sess-1",
+			json.dumps({
+				"role": "assistant",
+				"tokens": {"input": 0, "output": 50, "reasoning": 20},
+				"modelID": "gpt-4",
+				"time": {"created": 1708000002000},
+			}),
+			1708000002000,
+		),
+	)
+	# Insert parts
+	conn.execute(
+		"INSERT INTO part VALUES (?, ?, ?, ?)",
+		(
+			"part-1",
+			"msg-1",
+			json.dumps({"type": "text", "text": "User question here"}),
+			1708000001000,
+		),
+	)
+	conn.execute(
+		"INSERT INTO part VALUES (?, ?, ?, ?)",
+		(
+			"part-2",
+			"msg-2",
+			json.dumps({"type": "text", "text": "Assistant answer here"}),
+			1708000002000,
+		),
+	)
+	conn.commit()
+	conn.close()
 
 
-def test_read_session_from_sqlite(tmp_path):
-    """Read session from an in-memory SQLite DB mimicking OpenCode schema."""
-    db_path = tmp_path / "opencode.db"
-    _make_opencode_db(db_path)
-    session = read_session(tmp_path, session_id="sess-1")
-    assert session is not None
-    assert isinstance(session, ViewerSession)
-    assert session.session_id == "sess-1"
-    user_msgs = [m for m in session.messages if m.role == "user"]
-    asst_msgs = [m for m in session.messages if m.role == "assistant"]
-    assert len(user_msgs) >= 1
-    assert len(asst_msgs) >= 1
-    assert "User question" in user_msgs[0].content
-    assert "Assistant answer" in asst_msgs[0].content
+def _make_opencode_db_with_tools(db_path: Path) -> None:
+	"""Create an OpenCode DB with a tool part to test tool message extraction."""
+	_make_opencode_db(db_path)
+	conn = sqlite3.connect(db_path)
+	# Add a message with a tool part
+	conn.execute(
+		"INSERT INTO message VALUES (?, ?, ?, ?)",
+		(
+			"msg-3",
+			"sess-1",
+			json.dumps({
+				"role": "assistant",
+				"tokens": {"input": 5, "output": 10},
+				"time": {"created": 1708000003000},
+			}),
+			1708000003000,
+		),
+	)
+	conn.execute(
+		"INSERT INTO part VALUES (?, ?, ?, ?)",
+		(
+			"part-3",
+			"msg-3",
+			json.dumps({
+				"type": "tool",
+				"tool": "bash",
+				"state": {
+					"input": "ls -la",
+					"output": "file1\nfile2",
+					"time": {"start": 1708000003500},
+				},
+			}),
+			1708000003000,
+		),
+	)
+	conn.commit()
+	conn.close()
 
 
-def test_jsonl_export_roundtrip(tmp_path):
-    """Export ViewerSession to JSONL, re-read, verify identical content."""
-    from lerim.adapters.opencode import _export_session_jsonl, _read_session_jsonl
+def _make_multi_session_db(db_path: Path) -> None:
+	"""Create an OpenCode DB with multiple sessions for iteration tests."""
+	conn = sqlite3.connect(db_path)
+	conn.execute("""CREATE TABLE session (
+		id TEXT PRIMARY KEY,
+		directory TEXT,
+		version TEXT,
+		title TEXT,
+		time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE message (
+		id TEXT PRIMARY KEY,
+		session_id TEXT,
+		data TEXT,
+		time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE part (
+		id TEXT PRIMARY KEY,
+		message_id TEXT,
+		data TEXT,
+		time_created INTEGER
+	)""")
+	# Session 1 (earlier)
+	conn.execute(
+		"INSERT INTO session VALUES (?, ?, ?, ?, ?)",
+		("s1", "/project-a", "1.0", "First Session", 1708000000000),
+	)
+	conn.execute(
+		"INSERT INTO message VALUES (?, ?, ?, ?)",
+		("m1", "s1", json.dumps({"role": "user", "tokens": {}, "time": {}}), 1708000001000),
+	)
+	conn.execute(
+		"INSERT INTO part VALUES (?, ?, ?, ?)",
+		("p1", "m1", json.dumps({"type": "text", "text": "Question A"}), 1708000001000),
+	)
+	conn.execute(
+		"INSERT INTO message VALUES (?, ?, ?, ?)",
+		("m2", "s1", json.dumps({"role": "assistant", "tokens": {}, "time": {}}), 1708000002000),
+	)
+	conn.execute(
+		"INSERT INTO part VALUES (?, ?, ?, ?)",
+		("p2", "m2", json.dumps({"type": "text", "text": "Answer A"}), 1708000002000),
+	)
+	# Session 2 (later)
+	conn.execute(
+		"INSERT INTO session VALUES (?, ?, ?, ?, ?)",
+		("s2", "/project-b", "1.0", "Second Session", 1708001000000),
+	)
+	conn.execute(
+		"INSERT INTO message VALUES (?, ?, ?, ?)",
+		("m3", "s2", json.dumps({"role": "user", "tokens": {}, "time": {}}), 1708001001000),
+	)
+	conn.execute(
+		"INSERT INTO part VALUES (?, ?, ?, ?)",
+		("p3", "m3", json.dumps({"type": "text", "text": "Question B"}), 1708001001000),
+	)
+	conn.commit()
+	conn.close()
 
-    session = ViewerSession(
-        session_id="roundtrip-test",
-        cwd="/tmp",
-        messages=[
-            __import__("lerim.adapters.base", fromlist=["ViewerMessage"]).ViewerMessage(
-                role="user", content="Hello"
-            ),
-            __import__("lerim.adapters.base", fromlist=["ViewerMessage"]).ViewerMessage(
-                role="assistant", content="World"
-            ),
-        ],
-        total_input_tokens=100,
-        total_output_tokens=200,
-    )
-    jsonl_path = _export_session_jsonl(session, tmp_path)
-    assert jsonl_path.is_file()
-    reloaded = _read_session_jsonl(jsonl_path, "roundtrip-test")
-    assert reloaded is not None
-    assert len(reloaded.messages) == 2
-    assert reloaded.total_input_tokens == 100
-    assert reloaded.total_output_tokens == 200
+
+# ---------------------------------------------------------------------------
+# _json_col tests
+# ---------------------------------------------------------------------------
 
 
-def test_count_sessions(tmp_path):
-    """count_sessions on mock DB."""
-    db_path = tmp_path / "opencode.db"
-    _make_opencode_db(db_path)
-    assert count_sessions(tmp_path) == 1
+def test_json_col_valid_dict():
+	"""Valid JSON dict is parsed correctly."""
+	assert _json_col('{"key": "value"}') == {"key": "value"}
+
+
+def test_json_col_returns_empty_on_none():
+	"""None input returns empty dict."""
+	assert _json_col(None) == {}
+
+
+def test_json_col_returns_empty_on_empty_string():
+	"""Empty string returns empty dict."""
+	assert _json_col("") == {}
+
+
+def test_json_col_returns_empty_on_invalid_json():
+	"""Invalid JSON returns empty dict."""
+	assert _json_col("not json {{{") == {}
+
+
+def test_json_col_returns_empty_on_non_dict():
+	"""JSON that parses to non-dict returns empty dict."""
+	assert _json_col("[1, 2, 3]") == {}
+	assert _json_col('"just a string"') == {}
+	assert _json_col("42") == {}
+
+
+# ---------------------------------------------------------------------------
+# _resolve_db_path tests
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_db_path_direct_file(tmp_path):
+	"""Direct opencode.db file path is returned."""
+	db = tmp_path / "opencode.db"
+	db.touch()
+	assert _resolve_db_path(db) == db
+
+
+def test_resolve_db_path_in_directory(tmp_path):
+	"""opencode.db is found inside a directory."""
+	db = tmp_path / "opencode.db"
+	db.touch()
+	assert _resolve_db_path(tmp_path) == db
+
+
+def test_resolve_db_path_not_found(tmp_path):
+	"""Returns None when no opencode.db exists."""
+	assert _resolve_db_path(tmp_path) is None
+
+
+def test_resolve_db_path_wrong_filename(tmp_path):
+	"""Returns None when a direct file has wrong name."""
+	other = tmp_path / "other.db"
+	other.touch()
+	assert _resolve_db_path(other) is None
+
+
+# ---------------------------------------------------------------------------
+# default_path test
+# ---------------------------------------------------------------------------
+
+
+def test_default_path_returns_path():
+	"""default_path returns a Path object."""
+	result = default_path()
+	assert result is not None
+	assert isinstance(result, Path)
+
+
+# ---------------------------------------------------------------------------
+# validate_connection tests
+# ---------------------------------------------------------------------------
 
 
 def test_validate_connection_valid(tmp_path):
-    """validate_connection passes on well-formed DB."""
-    db_path = tmp_path / "opencode.db"
-    _make_opencode_db(db_path)
-    result = validate_connection(tmp_path)
-    assert result["ok"] is True
-    assert result["sessions"] == 1
-    assert result["messages"] == 2
+	"""validate_connection passes on well-formed DB."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	result = validate_connection(tmp_path)
+	assert result["ok"] is True
+	assert result["sessions"] == 1
+	assert result["messages"] == 2
 
 
-def test_validate_connection_missing(tmp_path):
-    """validate_connection fails on missing DB."""
-    result = validate_connection(tmp_path)
-    assert result["ok"] is False
-    assert "error" in result
+def test_validate_connection_missing_db(tmp_path):
+	"""validate_connection fails on missing DB."""
+	result = validate_connection(tmp_path)
+	assert result["ok"] is False
+	assert "error" in result
+
+
+def test_validate_connection_missing_table(tmp_path):
+	"""validate_connection fails when a required table is absent."""
+	db_path = tmp_path / "opencode.db"
+	conn = sqlite3.connect(db_path)
+	conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY)")
+	conn.execute("CREATE TABLE message (id TEXT PRIMARY KEY)")
+	# No 'part' table
+	conn.commit()
+	conn.close()
+	result = validate_connection(tmp_path)
+	assert result["ok"] is False
+	assert "part" in result["error"]
+
+
+def test_validate_connection_corrupt_db(tmp_path):
+	"""validate_connection handles corrupt DB file."""
+	db_path = tmp_path / "opencode.db"
+	db_path.write_bytes(b"this is not a sqlite database at all")
+	result = validate_connection(tmp_path)
+	assert result["ok"] is False
+	assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# count_sessions tests
+# ---------------------------------------------------------------------------
+
+
+def test_count_sessions_basic(tmp_path):
+	"""count_sessions on mock DB returns correct count."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	assert count_sessions(tmp_path) == 1
+
+
+def test_count_sessions_nonexistent_path(tmp_path):
+	"""Nonexistent path returns 0."""
+	assert count_sessions(tmp_path / "nope") == 0
+
+
+def test_count_sessions_no_db(tmp_path):
+	"""Directory without opencode.db returns 0."""
+	assert count_sessions(tmp_path) == 0
+
+
+def test_count_sessions_multiple(tmp_path):
+	"""count_sessions reports correct count for multiple sessions."""
+	db_path = tmp_path / "opencode.db"
+	_make_multi_session_db(db_path)
+	assert count_sessions(tmp_path) == 2
+
+
+# ---------------------------------------------------------------------------
+# _read_session_db tests
+# ---------------------------------------------------------------------------
+
+
+def test_read_session_db_basic(tmp_path):
+	"""_read_session_db returns a ViewerSession with correct structure."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	session = _read_session_db(db_path, "sess-1")
+	assert session is not None
+	assert session.session_id == "sess-1"
+	assert session.cwd == "/tmp/project"
+	assert session.meta["version"] == "1.0"
+	assert session.meta["title"] == "Test Session"
+	user_msgs = [m for m in session.messages if m.role == "user"]
+	asst_msgs = [m for m in session.messages if m.role == "assistant"]
+	assert len(user_msgs) >= 1
+	assert len(asst_msgs) >= 1
+	assert "User question" in user_msgs[0].content
+
+
+def test_read_session_db_with_tools(tmp_path):
+	"""_read_session_db extracts tool parts as tool messages."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db_with_tools(db_path)
+	session = _read_session_db(db_path, "sess-1")
+	assert session is not None
+	tool_msgs = [m for m in session.messages if m.role == "tool"]
+	assert len(tool_msgs) == 1
+	assert tool_msgs[0].tool_name == "bash"
+	assert tool_msgs[0].tool_input == "ls -la"
+	assert tool_msgs[0].tool_output == "file1\nfile2"
+
+
+def test_read_session_db_token_counting(tmp_path):
+	"""_read_session_db accumulates token counts including reasoning tokens."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	session = _read_session_db(db_path, "sess-1")
+	assert session is not None
+	assert session.total_input_tokens == 10
+	# output (50) + reasoning (20) = 70
+	assert session.total_output_tokens == 70
+
+
+def test_read_session_db_model_id(tmp_path):
+	"""_read_session_db attaches model to assistant messages."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	session = _read_session_db(db_path, "sess-1")
+	assert session is not None
+	asst_msgs = [m for m in session.messages if m.role == "assistant"]
+	assert asst_msgs[0].model == "gpt-4"
+
+
+def test_read_session_db_nonexistent_session(tmp_path):
+	"""_read_session_db returns None for a session ID not in the DB."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	assert _read_session_db(db_path, "nonexistent") is None
+
+
+def test_read_session_db_timestamps(tmp_path):
+	"""_read_session_db attaches ISO timestamps to messages."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	session = _read_session_db(db_path, "sess-1")
+	assert session is not None
+	for msg in session.messages:
+		if msg.role in {"user", "assistant"}:
+			assert msg.timestamp is not None
+			assert "2024" in msg.timestamp  # epoch 1708000001000 -> Feb 2024
+
+
+def test_read_session_db_empty_text_parts_skipped(tmp_path):
+	"""_read_session_db skips text parts with empty or whitespace content."""
+	db_path = tmp_path / "opencode.db"
+	conn = sqlite3.connect(db_path)
+	conn.execute("""CREATE TABLE session (
+		id TEXT PRIMARY KEY, directory TEXT, version TEXT, title TEXT, time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE message (
+		id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE part (
+		id TEXT PRIMARY KEY, message_id TEXT, data TEXT, time_created INTEGER
+	)""")
+	conn.execute(
+		"INSERT INTO session VALUES (?, ?, ?, ?, ?)",
+		("s", "/d", "1.0", "T", 1708000000000),
+	)
+	conn.execute(
+		"INSERT INTO message VALUES (?, ?, ?, ?)",
+		("m", "s", json.dumps({"role": "user", "tokens": {}, "time": {}}), 1708000001000),
+	)
+	conn.execute(
+		"INSERT INTO part VALUES (?, ?, ?, ?)",
+		("p1", "m", json.dumps({"type": "text", "text": ""}), 1708000001000),
+	)
+	conn.execute(
+		"INSERT INTO part VALUES (?, ?, ?, ?)",
+		("p2", "m", json.dumps({"type": "text", "text": "   "}), 1708000001000),
+	)
+	conn.execute(
+		"INSERT INTO part VALUES (?, ?, ?, ?)",
+		("p3", "m", json.dumps({"type": "text", "text": "real content"}), 1708000001000),
+	)
+	conn.commit()
+	conn.close()
+	session = _read_session_db(db_path, "s")
+	assert session is not None
+	assert len(session.messages) == 1
+	assert session.messages[0].content == "real content"
+
+
+def test_read_session_db_message_with_no_text_parts(tmp_path):
+	"""_read_session_db skips messages where all parts are non-text or empty."""
+	db_path = tmp_path / "opencode.db"
+	conn = sqlite3.connect(db_path)
+	conn.execute("""CREATE TABLE session (
+		id TEXT PRIMARY KEY, directory TEXT, version TEXT, title TEXT, time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE message (
+		id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE part (
+		id TEXT PRIMARY KEY, message_id TEXT, data TEXT, time_created INTEGER
+	)""")
+	conn.execute(
+		"INSERT INTO session VALUES (?, ?, ?, ?, ?)",
+		("s", "/d", "1.0", "T", 1708000000000),
+	)
+	conn.execute(
+		"INSERT INTO message VALUES (?, ?, ?, ?)",
+		("m1", "s", json.dumps({"role": "assistant", "tokens": {}, "time": {}}), 1708000001000),
+	)
+	# Only a tool part, no text part -- so no text-role message for this msg
+	conn.execute(
+		"INSERT INTO part VALUES (?, ?, ?, ?)",
+		(
+			"p1", "m1",
+			json.dumps({"type": "tool", "tool": "grep", "state": {"input": "q", "output": "r"}}),
+			1708000001000,
+		),
+	)
+	conn.commit()
+	conn.close()
+	session = _read_session_db(db_path, "s")
+	assert session is not None
+	# Should have the tool message but no text message
+	assert len(session.messages) == 1
+	assert session.messages[0].role == "tool"
+
+
+def test_read_session_db_default_role(tmp_path):
+	"""_read_session_db defaults to 'assistant' when role is missing from message data."""
+	db_path = tmp_path / "opencode.db"
+	conn = sqlite3.connect(db_path)
+	conn.execute("""CREATE TABLE session (
+		id TEXT PRIMARY KEY, directory TEXT, version TEXT, title TEXT, time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE message (
+		id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE part (
+		id TEXT PRIMARY KEY, message_id TEXT, data TEXT, time_created INTEGER
+	)""")
+	conn.execute(
+		"INSERT INTO session VALUES (?, ?, ?, ?, ?)",
+		("s", "/d", "1.0", "T", 1708000000000),
+	)
+	conn.execute(
+		"INSERT INTO message VALUES (?, ?, ?, ?)",
+		("m", "s", json.dumps({"tokens": {}, "time": {}}), 1708000001000),
+	)
+	conn.execute(
+		"INSERT INTO part VALUES (?, ?, ?, ?)",
+		("p", "m", json.dumps({"type": "text", "text": "no role set"}), 1708000001000),
+	)
+	conn.commit()
+	conn.close()
+	session = _read_session_db(db_path, "s")
+	assert session is not None
+	assert session.messages[0].role == "assistant"
+
+
+# ---------------------------------------------------------------------------
+# read_session dispatch tests
+# ---------------------------------------------------------------------------
+
+
+def test_read_session_from_sqlite(tmp_path):
+	"""Read session from an in-memory SQLite DB mimicking OpenCode schema."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	session = read_session(tmp_path, session_id="sess-1")
+	assert session is not None
+	assert isinstance(session, ViewerSession)
+	assert session.session_id == "sess-1"
+	user_msgs = [m for m in session.messages if m.role == "user"]
+	asst_msgs = [m for m in session.messages if m.role == "assistant"]
+	assert len(user_msgs) >= 1
+	assert len(asst_msgs) >= 1
+	assert "User question" in user_msgs[0].content
+	assert "Assistant answer" in asst_msgs[0].content
+
+
+def test_read_session_from_jsonl(tmp_path):
+	"""Read session from a JSONL cache file."""
+	jsonl_path = tmp_path / "test.jsonl"
+	lines = [
+		json.dumps({"session_id": "j1", "cwd": "/tmp", "total_input_tokens": 5, "total_output_tokens": 10, "meta": {}}),
+		json.dumps({"role": "user", "content": "hello"}),
+		json.dumps({"role": "assistant", "content": "world", "model": "gpt-4"}),
+	]
+	jsonl_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+	session = read_session(jsonl_path, session_id="j1")
+	assert session is not None
+	assert session.session_id == "j1"
+	assert len(session.messages) == 2
+	assert session.total_input_tokens == 5
+	assert session.total_output_tokens == 10
+
+
+def test_read_session_from_direct_db_path(tmp_path):
+	"""read_session works when given the .db file path directly."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	session = read_session(db_path, session_id="sess-1")
+	assert session is not None
+	assert session.session_id == "sess-1"
+
+
+def test_read_session_returns_none_no_session_id(tmp_path):
+	"""read_session returns None for a DB file path without session_id."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	assert read_session(db_path) is None
+
+
+def test_read_session_nonexistent_jsonl(tmp_path):
+	"""read_session returns None for nonexistent JSONL."""
+	assert read_session(tmp_path / "nope.jsonl") is None
+
+
+# ---------------------------------------------------------------------------
+# _read_session_jsonl tests
+# ---------------------------------------------------------------------------
+
+
+def test_read_session_jsonl_with_tool_messages(tmp_path):
+	"""_read_session_jsonl handles tool messages in JSONL."""
+	jsonl_path = tmp_path / "tools.jsonl"
+	lines = [
+		json.dumps({"session_id": "t1", "cwd": "/tmp", "total_input_tokens": 0, "total_output_tokens": 0, "meta": {}}),
+		json.dumps({"role": "user", "content": "run ls"}),
+		json.dumps({"role": "tool", "tool_name": "bash", "tool_input": "ls", "tool_output": "files", "timestamp": "2024-01-01T00:00:00"}),
+		json.dumps({"role": "assistant", "content": "Here are the files"}),
+	]
+	jsonl_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+	session = _read_session_jsonl(jsonl_path, "t1")
+	assert session is not None
+	assert len(session.messages) == 3
+	tool_msg = [m for m in session.messages if m.role == "tool"][0]
+	assert tool_msg.tool_name == "bash"
+	assert tool_msg.tool_input == "ls"
+	assert tool_msg.tool_output == "files"
+
+
+def test_read_session_jsonl_empty_file(tmp_path):
+	"""_read_session_jsonl returns None for an empty file."""
+	jsonl_path = tmp_path / "empty.jsonl"
+	jsonl_path.write_text("", encoding="utf-8")
+	assert _read_session_jsonl(jsonl_path, "x") is None
+
+
+def test_read_session_jsonl_id_fallback(tmp_path):
+	"""_read_session_jsonl falls back to path stem when no session_id given or in data."""
+	jsonl_path = tmp_path / "fallback_id.jsonl"
+	lines = [
+		json.dumps({"cwd": "/tmp", "total_input_tokens": 0, "total_output_tokens": 0, "meta": {}}),
+		json.dumps({"role": "user", "content": "hi"}),
+	]
+	jsonl_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+	session = _read_session_jsonl(jsonl_path, None)
+	assert session is not None
+	assert session.session_id == "fallback_id"
+
+
+def test_read_session_jsonl_skips_empty_content(tmp_path):
+	"""_read_session_jsonl skips messages with empty content."""
+	jsonl_path = tmp_path / "sparse.jsonl"
+	lines = [
+		json.dumps({"session_id": "sp", "cwd": "/", "total_input_tokens": 0, "total_output_tokens": 0, "meta": {}}),
+		json.dumps({"role": "user", "content": ""}),
+		json.dumps({"role": "user", "content": "   "}),
+		json.dumps({"role": "assistant", "content": "real"}),
+	]
+	jsonl_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+	session = _read_session_jsonl(jsonl_path, "sp")
+	assert session is not None
+	assert len(session.messages) == 1
+	assert session.messages[0].content == "real"
+
+
+# ---------------------------------------------------------------------------
+# _export_session_jsonl + roundtrip tests
+# ---------------------------------------------------------------------------
+
+
+def test_jsonl_export_roundtrip(tmp_path):
+	"""Export ViewerSession to JSONL, re-read, verify identical content."""
+	session = ViewerSession(
+		session_id="roundtrip-test",
+		cwd="/tmp",
+		messages=[
+			ViewerMessage(role="user", content="Hello"),
+			ViewerMessage(role="assistant", content="World", model="gpt-4"),
+			ViewerMessage(role="tool", tool_name="bash", tool_input="ls", tool_output="files", timestamp="2024-01-01T00:00:00"),
+		],
+		total_input_tokens=100,
+		total_output_tokens=200,
+		meta={"version": "2.0"},
+	)
+	jsonl_path = _export_session_jsonl(session, tmp_path)
+	assert jsonl_path.is_file()
+	reloaded = _read_session_jsonl(jsonl_path, "roundtrip-test")
+	assert reloaded is not None
+	assert len(reloaded.messages) == 3
+	assert reloaded.total_input_tokens == 100
+	assert reloaded.total_output_tokens == 200
+	assert reloaded.meta["version"] == "2.0"
+
+	# Check tool message preserved
+	tool = [m for m in reloaded.messages if m.role == "tool"][0]
+	assert tool.tool_name == "bash"
+
+
+def test_export_session_jsonl_empty_messages(tmp_path):
+	"""Exporting a session with no messages produces only the metadata line."""
+	session = ViewerSession(session_id="empty", cwd="/")
+	jsonl_path = _export_session_jsonl(session, tmp_path)
+	lines = jsonl_path.read_text(encoding="utf-8").strip().splitlines()
+	assert len(lines) == 1
+	meta = json.loads(lines[0])
+	assert meta["session_id"] == "empty"
+
+
+# ---------------------------------------------------------------------------
+# find_session_path tests
+# ---------------------------------------------------------------------------
+
+
+def test_find_session_path_from_cache(tmp_path, monkeypatch):
+	"""find_session_path returns cached JSONL when it exists."""
+	cache_dir = tmp_path / "cache"
+	cache_dir.mkdir()
+	cached = cache_dir / "sid1.jsonl"
+	cached.write_text("{}\n", encoding="utf-8")
+	monkeypatch.setattr(
+		"lerim.adapters.opencode._default_cache_dir", lambda: cache_dir
+	)
+	result = find_session_path("sid1")
+	assert result == cached
+
+
+def test_find_session_path_from_db(tmp_path, monkeypatch):
+	"""find_session_path falls back to DB when cache miss."""
+	cache_dir = tmp_path / "empty_cache"
+	cache_dir.mkdir()
+	monkeypatch.setattr(
+		"lerim.adapters.opencode._default_cache_dir", lambda: cache_dir
+	)
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	result = find_session_path("sess-1", traces_dir=tmp_path)
+	assert result == db_path
+
+
+def test_find_session_path_empty_id():
+	"""find_session_path returns None for empty session_id."""
+	assert find_session_path("") is None
+	assert find_session_path("   ") is None
+
+
+def test_find_session_path_not_found(tmp_path, monkeypatch):
+	"""find_session_path returns None when session does not exist."""
+	cache_dir = tmp_path / "cache"
+	cache_dir.mkdir()
+	monkeypatch.setattr(
+		"lerim.adapters.opencode._default_cache_dir", lambda: cache_dir
+	)
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	result = find_session_path("unknown", traces_dir=tmp_path)
+	assert result is None
+
+
+def test_find_session_path_no_db(tmp_path, monkeypatch):
+	"""find_session_path returns None when no DB exists."""
+	cache_dir = tmp_path / "cache"
+	cache_dir.mkdir()
+	monkeypatch.setattr(
+		"lerim.adapters.opencode._default_cache_dir", lambda: cache_dir
+	)
+	result = find_session_path("abc", traces_dir=tmp_path)
+	assert result is None
+
+
+def test_find_session_path_nonexistent_root(tmp_path, monkeypatch):
+	"""find_session_path returns None when traces_dir does not exist."""
+	cache_dir = tmp_path / "cache"
+	cache_dir.mkdir()
+	monkeypatch.setattr(
+		"lerim.adapters.opencode._default_cache_dir", lambda: cache_dir
+	)
+	result = find_session_path("abc", traces_dir=tmp_path / "nope")
+	assert result is None
+
+
+# ---------------------------------------------------------------------------
+# iter_sessions tests
+# ---------------------------------------------------------------------------
+
+
+def test_iter_sessions_basic(tmp_path):
+	"""iter_sessions exports sessions and returns SessionRecords."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	cache_dir = tmp_path / "cache"
+	records = iter_sessions(traces_dir=tmp_path, cache_dir=cache_dir)
+	assert len(records) == 1
+	rec = records[0]
+	assert rec.run_id == "sess-1"
+	assert rec.agent_type == "opencode"
+	assert rec.repo_path == "/tmp/project"
+	assert rec.message_count >= 2
+	assert Path(rec.session_path).is_file()
 
 
 def test_iter_sessions_skips_known_ids(tmp_path):
-    """iter_sessions skips sessions whose run_id is already known."""
-    from lerim.adapters.opencode import iter_sessions
+	"""iter_sessions skips sessions whose run_id is already known."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	cache_dir = tmp_path / "cache"
+	records = iter_sessions(
+		traces_dir=tmp_path,
+		cache_dir=cache_dir,
+		known_run_ids={"sess-1"},
+	)
+	assert len(records) == 0
 
-    db_path = tmp_path / "opencode.db"
-    _make_opencode_db(db_path)
-    cache_dir = tmp_path / "cache"
 
-    # Skip "sess-1" by providing its ID
-    records = iter_sessions(
-        traces_dir=tmp_path,
-        cache_dir=cache_dir,
-        known_run_ids={"sess-1"},
-    )
-    assert len(records) == 0
+def test_iter_sessions_nonexistent_dir(tmp_path):
+	"""Nonexistent traces_dir returns empty list."""
+	records = iter_sessions(traces_dir=tmp_path / "nope")
+	assert records == []
+
+
+def test_iter_sessions_no_db(tmp_path):
+	"""Directory without opencode.db returns empty list."""
+	records = iter_sessions(traces_dir=tmp_path)
+	assert records == []
+
+
+def test_iter_sessions_multiple_sessions(tmp_path):
+	"""iter_sessions handles multiple sessions correctly."""
+	db_path = tmp_path / "opencode.db"
+	_make_multi_session_db(db_path)
+	cache_dir = tmp_path / "cache"
+	records = iter_sessions(traces_dir=tmp_path, cache_dir=cache_dir)
+	assert len(records) == 2
+	ids = {r.run_id for r in records}
+	assert ids == {"s1", "s2"}
+
+
+def test_iter_sessions_summaries(tmp_path):
+	"""iter_sessions collects message summaries (up to 5, truncated to 140 chars)."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	cache_dir = tmp_path / "cache"
+	records = iter_sessions(traces_dir=tmp_path, cache_dir=cache_dir)
+	assert len(records) == 1
+	# Should have summaries from user and assistant messages
+	assert len(records[0].summaries) >= 1
+	assert any("User question" in s for s in records[0].summaries)
+
+
+def test_iter_sessions_tool_call_count(tmp_path):
+	"""iter_sessions counts tool messages separately."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db_with_tools(db_path)
+	cache_dir = tmp_path / "cache"
+	records = iter_sessions(traces_dir=tmp_path, cache_dir=cache_dir)
+	assert len(records) == 1
+	assert records[0].tool_call_count >= 1
+
+
+def test_iter_sessions_total_tokens(tmp_path):
+	"""iter_sessions calculates total_tokens from input + output tokens."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	cache_dir = tmp_path / "cache"
+	records = iter_sessions(traces_dir=tmp_path, cache_dir=cache_dir)
+	assert len(records) == 1
+	# 10 input + 50 output + 20 reasoning = 80
+	assert records[0].total_tokens == 80
+
+
+def test_iter_sessions_jsonl_cache_created(tmp_path):
+	"""iter_sessions creates JSONL cache files."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	cache_dir = tmp_path / "cache"
+	records = iter_sessions(traces_dir=tmp_path, cache_dir=cache_dir)
+	for rec in records:
+		p = Path(rec.session_path)
+		assert p.is_file()
+		assert p.suffix == ".jsonl"
+		assert p.parent == cache_dir
+
+
+def test_iter_sessions_partial_skip(tmp_path):
+	"""iter_sessions skips only known IDs, keeping the rest."""
+	db_path = tmp_path / "opencode.db"
+	_make_multi_session_db(db_path)
+	cache_dir = tmp_path / "cache"
+	records = iter_sessions(
+		traces_dir=tmp_path,
+		cache_dir=cache_dir,
+		known_run_ids={"s1"},
+	)
+	assert len(records) == 1
+	assert records[0].run_id == "s2"
 
 
 # --- compact_trace tests ---
 
 
 def test_compact_trace_clears_tool_output():
-    """compact_trace replaces tool_output with size descriptor."""
-    lines = [
-        json.dumps({"session_id": "s1", "cwd": "/tmp"}),
-        json.dumps(
-            {
-                "role": "tool",
-                "tool_name": "bash",
-                "tool_input": "ls -la",
-                "tool_output": "x" * 8000,
-            }
-        ),
-    ]
-    result = compact_trace("\n".join(lines) + "\n")
-    parsed = [json.loads(line) for line in result.strip().split("\n")]
-    assert parsed[0]["session_id"] == "s1"
-    assert parsed[1]["tool_name"] == "bash"
-    assert parsed[1]["tool_input"] == "ls -la"
-    assert parsed[1]["tool_output"] == "[cleared: 8000 chars]"
+	"""compact_trace replaces tool_output with size descriptor."""
+	lines = [
+		json.dumps({"session_id": "s1", "cwd": "/tmp"}),
+		json.dumps({
+			"role": "tool",
+			"tool_name": "bash",
+			"tool_input": "ls -la",
+			"tool_output": "x" * 8000,
+		}),
+	]
+	result = compact_trace("\n".join(lines) + "\n")
+	parsed = [json.loads(line) for line in result.strip().split("\n")]
+	assert parsed[0]["session_id"] == "s1"
+	assert parsed[1]["tool_name"] == "bash"
+	assert parsed[1]["tool_input"] == "ls -la"
+	assert parsed[1]["tool_output"] == "[cleared: 8000 chars]"
 
 
 def test_compact_trace_preserves_user_assistant_messages():
-    """compact_trace preserves user and assistant message content."""
-    lines = [
-        json.dumps({"session_id": "s1", "cwd": "/tmp"}),
-        json.dumps({"role": "user", "content": "hello"}),
-        json.dumps({"role": "assistant", "content": "world"}),
-    ]
-    result = compact_trace("\n".join(lines) + "\n")
-    parsed = [json.loads(line) for line in result.strip().split("\n")]
-    assert parsed[1]["content"] == "hello"
-    assert parsed[2]["content"] == "world"
+	"""compact_trace preserves user and assistant message content."""
+	lines = [
+		json.dumps({"session_id": "s1", "cwd": "/tmp"}),
+		json.dumps({"role": "user", "content": "hello"}),
+		json.dumps({"role": "assistant", "content": "world"}),
+	]
+	result = compact_trace("\n".join(lines) + "\n")
+	parsed = [json.loads(line) for line in result.strip().split("\n")]
+	assert parsed[1]["content"] == "hello"
+	assert parsed[2]["content"] == "world"
 
 
 def test_compact_trace_preserves_session_metadata():
-    """compact_trace passes session metadata through unchanged."""
-    meta = {
-        "session_id": "s1",
-        "cwd": "/tmp",
-        "total_input_tokens": 100,
-        "meta": {"version": "1.0"},
-    }
-    result = compact_trace(json.dumps(meta) + "\n")
-    parsed = json.loads(result.strip())
-    assert parsed == meta
+	"""compact_trace passes session metadata through unchanged."""
+	meta = {
+		"session_id": "s1",
+		"cwd": "/tmp",
+		"total_input_tokens": 100,
+		"meta": {"version": "1.0"},
+	}
+	result = compact_trace(json.dumps(meta) + "\n")
+	parsed = json.loads(result.strip())
+	assert parsed == meta
+
+
+def test_compact_trace_non_tool_role_not_cleared():
+	"""compact_trace does not clear tool_output on non-tool roles."""
+	line = json.dumps({
+		"role": "assistant",
+		"tool_output": "should stay",
+	})
+	result = compact_trace(line + "\n")
+	parsed = json.loads(result.strip())
+	assert parsed["tool_output"] == "should stay"
+
+
+# ---------------------------------------------------------------------------
+# Time window filtering tests
+# ---------------------------------------------------------------------------
+
+
+def test_iter_sessions_time_window_filter(tmp_path):
+	"""iter_sessions filters sessions outside the start/end time window."""
+	from datetime import datetime, timezone
+
+	db_path = tmp_path / "opencode.db"
+	conn = sqlite3.connect(db_path)
+	conn.execute("""CREATE TABLE session (
+		id TEXT PRIMARY KEY, directory TEXT, version TEXT, title TEXT, time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE message (
+		id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE part (
+		id TEXT PRIMARY KEY, message_id TEXT, data TEXT, time_created INTEGER
+	)""")
+	# Old session
+	conn.execute(
+		"INSERT INTO session VALUES (?, ?, ?, ?, ?)",
+		("old", "/d", "1.0", "Old", 1600000000000),
+	)
+	conn.execute(
+		"INSERT INTO message VALUES (?, ?, ?, ?)",
+		("m-old", "old", json.dumps({"role": "user", "tokens": {}, "time": {}}), 1600000001000),
+	)
+	conn.execute(
+		"INSERT INTO part VALUES (?, ?, ?, ?)",
+		("p-old", "m-old", json.dumps({"type": "text", "text": "old msg"}), 1600000001000),
+	)
+	# New session
+	conn.execute(
+		"INSERT INTO session VALUES (?, ?, ?, ?, ?)",
+		("new", "/d", "1.0", "New", 1800000000000),
+	)
+	conn.execute(
+		"INSERT INTO message VALUES (?, ?, ?, ?)",
+		("m-new", "new", json.dumps({"role": "user", "tokens": {}, "time": {}}), 1800000001000),
+	)
+	conn.execute(
+		"INSERT INTO part VALUES (?, ?, ?, ?)",
+		("p-new", "m-new", json.dumps({"type": "text", "text": "new msg"}), 1800000001000),
+	)
+	conn.commit()
+	conn.close()
+
+	cache_dir = tmp_path / "cache"
+	start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+	records = iter_sessions(traces_dir=tmp_path, cache_dir=cache_dir, start=start)
+	assert len(records) == 1
+	assert records[0].run_id == "new"
+
+
+def test_iter_sessions_skips_session_when_read_returns_none(tmp_path, monkeypatch):
+	"""iter_sessions skips sessions where _read_session_db returns None."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	cache_dir = tmp_path / "cache"
+
+	# Monkeypatch _read_session_db to return None for the session
+	monkeypatch.setattr(
+		"lerim.adapters.opencode._read_session_db", lambda *a, **kw: None
+	)
+	records = iter_sessions(traces_dir=tmp_path, cache_dir=cache_dir)
+	assert records == []
+
+
+def test_iter_sessions_directory_as_repo_name(tmp_path):
+	"""iter_sessions uses session directory for both repo_path and repo_name."""
+	db_path = tmp_path / "opencode.db"
+	_make_opencode_db(db_path)
+	cache_dir = tmp_path / "cache"
+	records = iter_sessions(traces_dir=tmp_path, cache_dir=cache_dir)
+	assert records[0].repo_path == "/tmp/project"
+	assert records[0].repo_name == "/tmp/project"
+
+
+def test_iter_sessions_summaries_capped_at_five(tmp_path):
+	"""iter_sessions caps summaries at 5 entries."""
+	db_path = tmp_path / "opencode.db"
+	conn = sqlite3.connect(db_path)
+	conn.execute("""CREATE TABLE session (
+		id TEXT PRIMARY KEY, directory TEXT, version TEXT, title TEXT, time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE message (
+		id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER
+	)""")
+	conn.execute("""CREATE TABLE part (
+		id TEXT PRIMARY KEY, message_id TEXT, data TEXT, time_created INTEGER
+	)""")
+	conn.execute(
+		"INSERT INTO session VALUES (?, ?, ?, ?, ?)",
+		("s", "/d", "1.0", "T", 1708000000000),
+	)
+	# Create 8 user+assistant message pairs (16 messages, each with a text part)
+	for i in range(8):
+		mid = f"m{i}"
+		role = "user" if i % 2 == 0 else "assistant"
+		conn.execute(
+			"INSERT INTO message VALUES (?, ?, ?, ?)",
+			(mid, "s", json.dumps({"role": role, "tokens": {}, "time": {}}), 1708000001000 + i * 1000),
+		)
+		conn.execute(
+			"INSERT INTO part VALUES (?, ?, ?, ?)",
+			(f"p{i}", mid, json.dumps({"type": "text", "text": f"msg {i}"}), 1708000001000 + i * 1000),
+		)
+	conn.commit()
+	conn.close()
+
+	cache_dir = tmp_path / "cache"
+	records = iter_sessions(traces_dir=tmp_path, cache_dir=cache_dir)
+	assert len(records) == 1
+	assert len(records[0].summaries) == 5
+
+
+# ---------------------------------------------------------------------------
+# SQLite error handling tests
+# ---------------------------------------------------------------------------
+
+
+def test_count_sessions_sqlite_error(tmp_path):
+	"""count_sessions returns 0 on corrupt DB."""
+	db_path = tmp_path / "opencode.db"
+	db_path.write_bytes(b"corrupt data not a database")
+	assert count_sessions(tmp_path) == 0
+
+
+def test_find_session_path_sqlite_error(tmp_path, monkeypatch):
+	"""find_session_path returns None on SQLite error."""
+	cache_dir = tmp_path / "cache"
+	cache_dir.mkdir()
+	monkeypatch.setattr(
+		"lerim.adapters.opencode._default_cache_dir", lambda: cache_dir
+	)
+	db_path = tmp_path / "opencode.db"
+	db_path.write_bytes(b"corrupt data")
+	result = find_session_path("sid", traces_dir=tmp_path)
+	assert result is None
+
+
+def test_read_session_db_sqlite_error(tmp_path):
+	"""_read_session_db returns None on SQLite error."""
+	db_path = tmp_path / "opencode.db"
+	db_path.write_bytes(b"corrupt data")
+	assert _read_session_db(db_path, "sid") is None
+
+
+def test_iter_sessions_sqlite_error(tmp_path):
+	"""iter_sessions returns empty list on DB query error."""
+	db_path = tmp_path / "opencode.db"
+	db_path.write_bytes(b"corrupt sqlite data")
+	records = iter_sessions(traces_dir=tmp_path, cache_dir=tmp_path / "cache")
+	assert records == []
