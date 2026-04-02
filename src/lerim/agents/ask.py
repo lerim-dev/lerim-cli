@@ -10,7 +10,7 @@ from typing import Any
 import dspy
 
 from lerim.agents.context import RuntimeContext
-from lerim.agents.tools import bind_ask_tools
+from lerim.agents.tools import make_ask_tools
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +97,7 @@ class AskAgent(dspy.Module):
         super().__init__()
         self.react = dspy.ReAct(
             AskSignature,
-            tools=bind_ask_tools(ctx),
+            tools=make_ask_tools(ctx),
             max_iters=ctx.config.lead_role.max_iters_ask,
         )
 

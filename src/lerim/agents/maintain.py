@@ -10,7 +10,7 @@ from __future__ import annotations
 import dspy
 
 from lerim.agents.context import RuntimeContext
-from lerim.agents.tools import bind_maintain_tools
+from lerim.agents.tools import make_maintain_tools
 
 
 class MaintainSignature(dspy.Signature):
@@ -89,7 +89,7 @@ class MaintainAgent(dspy.Module):
         super().__init__()
         self.react = dspy.ReAct(
             MaintainSignature,
-            tools=bind_maintain_tools(ctx),
+            tools=make_maintain_tools(ctx),
             max_iters=ctx.config.lead_role.max_iters_maintain,
         )
 

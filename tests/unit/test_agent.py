@@ -151,8 +151,8 @@ def test_extract_agent_construction(tmp_path):
 	assert hasattr(agent, "react")
 	# DSPy ReAct collapses functools.partial tools by type name;
 	# verify the bind function returns the expected count instead.
-	from lerim.agents.tools import bind_extract_tools
-	assert len(bind_extract_tools(ctx)) == 8
+	from lerim.agents.tools import make_extract_tools
+	assert len(make_extract_tools(ctx)) == 11
 
 
 def test_maintain_agent_construction(tmp_path):
@@ -160,8 +160,8 @@ def test_maintain_agent_construction(tmp_path):
 	ctx = _make_ctx(tmp_path)
 	agent = MaintainAgent(ctx)
 	assert hasattr(agent, "react")
-	from lerim.agents.tools import bind_maintain_tools
-	assert len(bind_maintain_tools(ctx)) == 8
+	from lerim.agents.tools import make_maintain_tools
+	assert len(make_maintain_tools(ctx)) == 8
 
 
 def test_ask_agent_construction(tmp_path):
@@ -169,8 +169,8 @@ def test_ask_agent_construction(tmp_path):
 	ctx = _make_ctx(tmp_path)
 	agent = AskAgent(ctx)
 	assert hasattr(agent, "react")
-	from lerim.agents.tools import bind_ask_tools
-	assert len(bind_ask_tools(ctx)) == 3
+	from lerim.agents.tools import make_ask_tools
+	assert len(make_ask_tools(ctx)) == 3
 
 
 def test_extract_agent_is_dspy_module(tmp_path):

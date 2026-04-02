@@ -10,7 +10,7 @@ from __future__ import annotations
 import dspy
 
 from lerim.agents.context import RuntimeContext
-from lerim.agents.tools import bind_extract_tools
+from lerim.agents.tools import make_extract_tools
 
 
 class ExtractSignature(dspy.Signature):
@@ -112,7 +112,7 @@ class ExtractAgent(dspy.Module):
 		super().__init__()
 		self.react = dspy.ReAct(
 			ExtractSignature,
-			tools=bind_extract_tools(ctx),
+			tools=make_extract_tools(ctx),
 			max_iters=ctx.config.lead_role.max_iters_sync,
 		)
 

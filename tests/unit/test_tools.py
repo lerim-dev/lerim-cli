@@ -1,6 +1,6 @@
 """Unit tests for DSPy ReAct tools (write_memory, write_report, read_file, list_files,
 archive_memory, edit_memory, scan_memory_manifest, update_memory_index,
-bind_extract_tools, bind_maintain_tools, bind_ask_tools)."""
+make_extract_tools, make_maintain_tools, make_ask_tools)."""
 
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ import pytest
 from lerim.agents.context import RuntimeContext, build_context
 from lerim.agents.tools import (
 	archive_memory,
-	bind_ask_tools,
-	bind_maintain_tools,
-	bind_extract_tools,
+	make_ask_tools,
+	make_maintain_tools,
+	make_extract_tools,
 	edit_memory,
 	list_files,
 	read_file,
@@ -548,7 +548,7 @@ def test_update_memory_index_writes_file(tmp_path):
 	"""update_memory_index should write MEMORY.md."""
 	ctx = _make_ctx(tmp_path)
 	content = "- [Use PostgreSQL](use-postgres.md) -- Primary database choice"
-	result = update_memory_index(content, ctx)
+	result = update_memory_index(ctx, content)
 	parsed = json.loads(result)
 	assert parsed["lines"] >= 1
 	assert parsed["bytes"] > 0
@@ -563,7 +563,7 @@ def test_update_memory_index_truncates_long(tmp_path):
 	ctx = _make_ctx(tmp_path)
 	lines = [f"- [Memory {i}](mem-{i}.md) -- description {i}" for i in range(250)]
 	content = "\n".join(lines)
-	result = update_memory_index(content, ctx)
+	result = update_memory_index(ctx, content)
 	parsed = json.loads(result)
 	# 200 original + 1 warning line + trailing newline
 	assert parsed["lines"] <= 203
@@ -572,7 +572,7 @@ def test_update_memory_index_truncates_long(tmp_path):
 def test_update_memory_index_no_memory_root(tmp_path):
 	"""update_memory_index without memory_root returns error."""
 	ctx = build_context(repo_root=tmp_path, config=make_config(tmp_path))
-	result = update_memory_index("# Index", ctx)
+	result = update_memory_index(ctx, "# Index")
 	parsed = json.loads(result)
 	assert "error" in parsed
 
@@ -582,17 +582,19 @@ def test_update_memory_index_no_memory_root(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_partial_preserves_function_name(tmp_path):
-	"""Partial-bound tools should preserve the original function name."""
+def test_closure_tools_have_function_names(tmp_path):
+	"""Closure-bound tools should have proper function names, not 'partial'."""
 	ctx = _make_ctx(tmp_path)
-	bound = partial(write_memory, ctx)
-	assert bound.func.__name__ == "write_memory"
+	tools = make_extract_tools(ctx)
+	for tool in tools:
+		assert tool.__name__ != "partial"
+		assert tool.__name__ != "<lambda>"
 
 
 @pytest.mark.parametrize("bind_fn,expected_count", [
-	(bind_extract_tools, 8),
-	(bind_maintain_tools, 8),
-	(bind_ask_tools, 3),
+	(make_extract_tools, 11),
+	(make_maintain_tools, 8),
+	(make_ask_tools, 3),
 ])
 def test_bind_tools_callable(tmp_path, bind_fn, expected_count):
 	"""Bound tools should be callable with preserved names."""
@@ -609,10 +611,12 @@ def test_bind_tools_dspy_introspection(tmp_path):
 	"""dspy.Tool should see correct names and args from bound tools."""
 	import dspy
 	ctx = _make_ctx(tmp_path)
-	tools = bind_extract_tools(ctx)
+	tools = make_extract_tools(ctx)
 	expected_names = {
-		"read_file", "scan_memory_manifest", "write_memory", "write_summary",
-		"edit_memory", "update_memory_index", "list_files", "write_report",
+		"read_file", "read_trace", "grep_trace",
+		"scan_memory_manifest", "write_memory", "write_summary",
+		"edit_memory", "archive_memory", "update_memory_index",
+		"list_files", "write_report",
 	}
 	seen_names = set()
 	for tool in tools:
