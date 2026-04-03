@@ -23,7 +23,6 @@ class MaintainSignature(dspy.Signature):
     - edit_memory(file_path, new_content) -- replace file content (must start with ---)
     - write_memory(type, name, description, body) -- create new memories
     - update_memory_index(content) -- write MEMORY.md index
-    - write_report(file_path, content) -- write final JSON report
 
     ## Phase 1 -- Orient
     - Call scan_memory_manifest() to see all existing memories
@@ -49,13 +48,6 @@ class MaintainSignature(dspy.Signature):
     - Remove pointers to archived/deleted memories
     - Add pointers to new/updated memories
 
-    Write report to maintain_actions_path:
-    {
-      "run_id": "<name of run_folder>",
-      "actions": [{"action": str, "source_path": str, "target_path": str, "reason": str}],
-      "counts": {"merged": N, "archived": N, "consolidated": N, "unchanged": N}
-    }
-
     Constraints:
     - ONLY read/write under memory_root and run_folder.
     - Summaries (memory_root/summaries/) are read-only.
@@ -72,7 +64,7 @@ class MaintainSignature(dspy.Signature):
         desc="Absolute path to the run workspace folder"
     )
     maintain_actions_path: str = dspy.InputField(
-        desc="Path where write_report writes the actions JSON"
+        desc="Path for maintain_actions.json (optional; runtime fills defaults if missing)"
     )
     memory_index_path: str = dspy.InputField(
         desc="Path to MEMORY.md index file"

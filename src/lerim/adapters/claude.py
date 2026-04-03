@@ -12,6 +12,7 @@ from lerim.adapters.common import (
     count_non_empty_files,
     in_window,
     load_jsonl_dict_lines,
+    normalize_timestamp_iso,
     parse_timestamp,
     write_session_cache,
 )
@@ -19,6 +20,7 @@ from lerim.adapters.common import (
 
 _DROP_TYPES = {"progress", "file-history-snapshot", "queue-operation", "pr-link"}
 _KEEP_FIELDS = {"type", "message", "timestamp"}
+_CANONICAL_TYPES = {"user", "assistant"}
 
 
 def _clean_entry(obj: dict[str, Any]) -> dict[str, Any] | None:
@@ -31,8 +33,13 @@ def _clean_entry(obj: dict[str, Any]) -> dict[str, Any] | None:
     """
     if obj.get("type") in _DROP_TYPES:
         return None
+    # Drop non-conversation types (system entries contain prompts, not conversation)
+    if obj.get("type") not in _CANONICAL_TYPES:
+        return None
     # Strip to only conversation-relevant fields
     obj = {k: v for k, v in obj.items() if k in _KEEP_FIELDS}
+    # Normalize timestamp to ISO 8601 UTC
+    obj["timestamp"] = normalize_timestamp_iso(obj.get("timestamp"))
     # Strip metadata from inner message -- keep only role and content
     msg = obj.get("message")
     if isinstance(msg, dict):
@@ -47,7 +54,7 @@ def _clean_entry(obj: dict[str, Any]) -> dict[str, Any] | None:
                     continue
                 if block.get("type") == "tool_result":
                     inner = block.get("content", "")
-                    if isinstance(inner, str):
+                    if isinstance(inner, str) and not inner.startswith("[cleared:"):
                         block["content"] = f"[cleared: {len(inner)} chars]"
                     elif isinstance(inner, list):
                         total = sum(
@@ -58,7 +65,8 @@ def _clean_entry(obj: dict[str, Any]) -> dict[str, Any] | None:
                         block["content"] = f"[cleared: {total} chars]"
                 elif block.get("type") == "thinking":
                     text = block.get("thinking", "")
-                    block["thinking"] = f"[thinking cleared: {len(text)} chars]"
+                    if not text.startswith("[thinking cleared:"):
+                        block["thinking"] = f"[thinking cleared: {len(text)} chars]"
                     block.pop("signature", None)
     return obj
 

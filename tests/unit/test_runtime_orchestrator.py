@@ -538,7 +538,7 @@ class TestSyncFlow:
 			"lerim.server.runtime.ExtractAgent", lambda ctx: MagicMock(return_value=pred)
 		)
 		monkeypatch.setattr(
-			"lerim.server.runtime.build_context",
+			"lerim.server.runtime.RuntimeContext",
 			lambda **kw: MagicMock(),
 		)
 
@@ -580,7 +580,7 @@ class TestSyncFlow:
 			"lerim.server.runtime.ExtractAgent", lambda ctx: MagicMock(return_value=pred)
 		)
 		monkeypatch.setattr(
-			"lerim.server.runtime.build_context", lambda **kw: MagicMock()
+			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
 		)
 		mock_span = MagicMock()
 		mock_span.__enter__ = MagicMock(return_value=mock_span)
@@ -605,7 +605,7 @@ class TestSyncFlow:
 		assert trace_data[0]["content"] == "Read file"
 
 	def test_sync_handles_missing_report(self, tmp_path, monkeypatch):
-		"""sync() creates default memory_actions when write_report is skipped."""
+		"""sync() creates default memory_actions when the artifact file is absent."""
 		rt, _ = _build_runtime(tmp_path, monkeypatch)
 
 		trace_file = tmp_path / "trace.jsonl"
@@ -616,7 +616,7 @@ class TestSyncFlow:
 			"lerim.server.runtime.ExtractAgent", lambda ctx: MagicMock(return_value=pred)
 		)
 		monkeypatch.setattr(
-			"lerim.server.runtime.build_context", lambda **kw: MagicMock()
+			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
 		)
 		mock_span = MagicMock()
 		mock_span.__enter__ = MagicMock(return_value=mock_span)
@@ -654,7 +654,7 @@ class TestMaintainFlow:
 			"lerim.server.runtime.MaintainAgent", lambda ctx: MagicMock(return_value=pred)
 		)
 		monkeypatch.setattr(
-			"lerim.server.runtime.build_context", lambda **kw: MagicMock()
+			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
 		)
 		mock_span = MagicMock()
 		mock_span.__enter__ = MagicMock(return_value=mock_span)
@@ -688,7 +688,7 @@ class TestMaintainFlow:
 			"lerim.server.runtime.MaintainAgent", lambda ctx: MagicMock(return_value=pred)
 		)
 		monkeypatch.setattr(
-			"lerim.server.runtime.build_context", lambda **kw: MagicMock()
+			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
 		)
 		mock_span = MagicMock()
 		mock_span.__enter__ = MagicMock(return_value=mock_span)
@@ -714,7 +714,7 @@ class TestMaintainFlow:
 			lambda ctx: MagicMock(side_effect=RuntimeError("LLM failed")),
 		)
 		monkeypatch.setattr(
-			"lerim.server.runtime.build_context", lambda **kw: MagicMock()
+			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
 		)
 		mock_span = MagicMock()
 		mock_span.__enter__ = MagicMock(return_value=mock_span)
@@ -745,7 +745,7 @@ class TestAskFlow:
 			"lerim.server.runtime.AskAgent", lambda ctx: MagicMock(return_value=pred)
 		)
 		monkeypatch.setattr(
-			"lerim.server.runtime.build_context", lambda **kw: MagicMock()
+			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
 		)
 		monkeypatch.setattr(
 			"lerim.server.runtime.format_ask_hints", lambda **kw: ""
@@ -765,7 +765,7 @@ class TestAskFlow:
 			"lerim.server.runtime.AskAgent", lambda ctx: MagicMock(return_value=pred)
 		)
 		monkeypatch.setattr(
-			"lerim.server.runtime.build_context", lambda **kw: MagicMock()
+			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
 		)
 		monkeypatch.setattr(
 			"lerim.server.runtime.format_ask_hints", lambda **kw: ""
@@ -783,7 +783,7 @@ class TestAskFlow:
 			"lerim.server.runtime.AskAgent", lambda ctx: MagicMock(return_value=pred)
 		)
 		monkeypatch.setattr(
-			"lerim.server.runtime.build_context", lambda **kw: MagicMock()
+			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
 		)
 		monkeypatch.setattr(
 			"lerim.server.runtime.format_ask_hints", lambda **kw: ""
@@ -802,7 +802,7 @@ class TestAskFlow:
 			lambda ctx: MagicMock(side_effect=RuntimeError("model down")),
 		)
 		monkeypatch.setattr(
-			"lerim.server.runtime.build_context", lambda **kw: MagicMock()
+			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
 		)
 		monkeypatch.setattr(
 			"lerim.server.runtime.format_ask_hints", lambda **kw: ""

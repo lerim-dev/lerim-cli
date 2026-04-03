@@ -558,7 +558,7 @@ def test_read_session_from_sqlite(tmp_path):
 
 
 def test_read_session_from_jsonl(tmp_path):
-	"""Read session from a JSONL cache file."""
+	"""Read session from a JSONL cache file (legacy format)."""
 	jsonl_path = tmp_path / "test.jsonl"
 	lines = [
 		json.dumps({"session_id": "j1", "cwd": "/tmp", "total_input_tokens": 5, "total_output_tokens": 10, "meta": {}}),
@@ -570,8 +570,24 @@ def test_read_session_from_jsonl(tmp_path):
 	assert session is not None
 	assert session.session_id == "j1"
 	assert len(session.messages) == 2
-	assert session.total_input_tokens == 5
-	assert session.total_output_tokens == 10
+
+
+def test_read_session_from_canonical_jsonl(tmp_path):
+	"""Read session from a canonical-format JSONL cache file."""
+	jsonl_path = tmp_path / "test.jsonl"
+	lines = [
+		json.dumps({"type": "user", "message": {"role": "user", "content": "hello"}, "timestamp": "2024-02-15T12:00:00Z"}),
+		json.dumps({"type": "assistant", "message": {"role": "assistant", "content": "world"}, "timestamp": "2024-02-15T12:00:01Z"}),
+	]
+	jsonl_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+	session = read_session(jsonl_path, session_id="c1")
+	assert session is not None
+	assert session.session_id == "c1"
+	assert len(session.messages) == 2
+	assert session.messages[0].role == "user"
+	assert session.messages[0].content == "hello"
+	assert session.messages[1].role == "assistant"
+	assert session.messages[1].content == "world"
 
 
 def test_read_session_from_direct_db_path(tmp_path):
@@ -676,26 +692,32 @@ def test_jsonl_export_roundtrip(tmp_path):
 	)
 	jsonl_path = _export_session_jsonl(session, tmp_path)
 	assert jsonl_path.is_file()
+
+	# Verify JSONL lines are canonical format (no metadata line)
+	raw_lines = jsonl_path.read_text(encoding="utf-8").strip().splitlines()
+	for line in raw_lines:
+		obj = json.loads(line)
+		assert "type" in obj
+		assert "message" in obj
+		assert "timestamp" in obj
+
 	reloaded = _read_session_jsonl(jsonl_path, "roundtrip-test")
 	assert reloaded is not None
 	assert len(reloaded.messages) == 3
-	assert reloaded.total_input_tokens == 100
-	assert reloaded.total_output_tokens == 200
-	assert reloaded.meta["version"] == "2.0"
 
-	# Check tool message preserved
+	# Check tool message preserved with cleared output
 	tool = [m for m in reloaded.messages if m.role == "tool"][0]
 	assert tool.tool_name == "bash"
+	assert tool.tool_input == "ls"
+	assert tool.tool_output.startswith("[cleared:")
 
 
 def test_export_session_jsonl_empty_messages(tmp_path):
-	"""Exporting a session with no messages produces only the metadata line."""
+	"""Exporting a session with no messages produces an empty JSONL file."""
 	session = ViewerSession(session_id="empty", cwd="/")
 	jsonl_path = _export_session_jsonl(session, tmp_path)
-	lines = jsonl_path.read_text(encoding="utf-8").strip().splitlines()
-	assert len(lines) == 1
-	meta = json.loads(lines[0])
-	assert meta["session_id"] == "empty"
+	content = jsonl_path.read_text(encoding="utf-8").strip()
+	assert content == ""
 
 
 # ---------------------------------------------------------------------------
@@ -889,60 +911,68 @@ def test_iter_sessions_partial_skip(tmp_path):
 # --- compact_trace tests ---
 
 
-def test_compact_trace_clears_tool_output():
-	"""compact_trace replaces tool_output with size descriptor."""
+def test_compact_trace_passes_canonical_entries():
+	"""compact_trace passes through canonical user/assistant entries unchanged."""
 	lines = [
-		json.dumps({"session_id": "s1", "cwd": "/tmp"}),
-		json.dumps({
-			"role": "tool",
-			"tool_name": "bash",
-			"tool_input": "ls -la",
-			"tool_output": "x" * 8000,
-		}),
+		json.dumps({"type": "user", "message": {"role": "user", "content": "hello"}, "timestamp": "2024-02-15T12:00:00Z"}),
+		json.dumps({"type": "assistant", "message": {"role": "assistant", "content": "world"}, "timestamp": "2024-02-15T12:00:01Z"}),
 	]
 	result = compact_trace("\n".join(lines) + "\n")
 	parsed = [json.loads(line) for line in result.strip().split("\n")]
-	assert parsed[0]["session_id"] == "s1"
-	assert parsed[1]["tool_name"] == "bash"
-	assert parsed[1]["tool_input"] == "ls -la"
-	assert parsed[1]["tool_output"] == "[cleared: 8000 chars]"
+	assert len(parsed) == 2
+	assert parsed[0]["message"]["content"] == "hello"
+	assert parsed[1]["message"]["content"] == "world"
 
 
-def test_compact_trace_preserves_user_assistant_messages():
-	"""compact_trace preserves user and assistant message content."""
-	lines = [
-		json.dumps({"session_id": "s1", "cwd": "/tmp"}),
-		json.dumps({"role": "user", "content": "hello"}),
-		json.dumps({"role": "assistant", "content": "world"}),
-	]
-	result = compact_trace("\n".join(lines) + "\n")
-	parsed = [json.loads(line) for line in result.strip().split("\n")]
-	assert parsed[1]["content"] == "hello"
-	assert parsed[2]["content"] == "world"
-
-
-def test_compact_trace_preserves_session_metadata():
-	"""compact_trace passes session metadata through unchanged."""
-	meta = {
-		"session_id": "s1",
-		"cwd": "/tmp",
-		"total_input_tokens": 100,
-		"meta": {"version": "1.0"},
+def test_compact_trace_clears_tool_result_in_canonical():
+	"""compact_trace clears uncleaned tool_result content in canonical entries."""
+	entry = {
+		"type": "assistant",
+		"message": {
+			"role": "assistant",
+			"content": [
+				{"type": "tool_use", "name": "bash", "input": "ls -la"},
+				{"type": "tool_result", "content": "x" * 8000},
+			],
+		},
+		"timestamp": "2024-02-15T12:00:00Z",
 	}
-	result = compact_trace(json.dumps(meta) + "\n")
+	result = compact_trace(json.dumps(entry) + "\n")
 	parsed = json.loads(result.strip())
-	assert parsed == meta
+	assert parsed["message"]["content"][0]["name"] == "bash"
+	assert parsed["message"]["content"][1]["content"] == "[cleared: 8000 chars]"
 
 
-def test_compact_trace_non_tool_role_not_cleared():
-	"""compact_trace does not clear tool_output on non-tool roles."""
-	line = json.dumps({
-		"role": "assistant",
-		"tool_output": "should stay",
-	})
-	result = compact_trace(line + "\n")
+def test_compact_trace_preserves_already_cleared():
+	"""compact_trace preserves already-cleared tool_result descriptors."""
+	entry = {
+		"type": "assistant",
+		"message": {
+			"role": "assistant",
+			"content": [
+				{"type": "tool_use", "name": "bash", "input": "ls"},
+				{"type": "tool_result", "content": "[cleared: 500 chars]"},
+			],
+		},
+		"timestamp": "2024-02-15T12:00:00Z",
+	}
+	result = compact_trace(json.dumps(entry) + "\n")
 	parsed = json.loads(result.strip())
-	assert parsed["tool_output"] == "should stay"
+	assert parsed["message"]["content"][1]["content"] == "[cleared: 500 chars]"
+
+
+def test_compact_trace_drops_non_canonical_entries():
+	"""compact_trace drops entries that don't match canonical schema."""
+	lines = [
+		json.dumps({"session_id": "s1", "cwd": "/tmp"}),
+		json.dumps({"role": "user", "content": "old format"}),
+		json.dumps({"type": "user", "message": {"role": "user", "content": "canonical"}, "timestamp": "2024-02-15T12:00:00Z"}),
+	]
+	result = compact_trace("\n".join(lines) + "\n")
+	parsed = [json.loads(line) for line in result.strip().split("\n")]
+	# Only the canonical entry survives
+	assert len(parsed) == 1
+	assert parsed[0]["message"]["content"] == "canonical"
 
 
 # ---------------------------------------------------------------------------

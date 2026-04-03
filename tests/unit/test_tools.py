@@ -1,4 +1,4 @@
-"""Unit tests for DSPy ReAct tools (write_memory, write_report, read_file, list_files,
+"""Unit tests for DSPy ReAct tools (write_memory, read_file, list_files,
 archive_memory, edit_memory, scan_memory_manifest, update_memory_index,
 make_extract_tools, make_maintain_tools, make_ask_tools)."""
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from lerim.agents.context import RuntimeContext, build_context
+from lerim.agents.context import RuntimeContext
 from lerim.agents.tools import (
 	archive_memory,
 	make_ask_tools,
@@ -22,7 +22,6 @@ from lerim.agents.tools import (
 	scan_memory_manifest,
 	update_memory_index,
 	write_memory,
-	write_report,
 )
 from tests.helpers import make_config
 
@@ -42,9 +41,29 @@ def _make_ctx(tmp_path: Path, **overrides) -> RuntimeContext:
 		extra_read_roots=(),
 		run_id="test-run-001",
 		config=make_config(tmp_path),
+		trace_path=None,
+		artifact_paths=None,
 	)
-	defaults.update(overrides)
-	return build_context(**defaults)
+	m = {**defaults, **overrides}
+
+	def _p(x: str | Path | None) -> Path | None:
+		if x is None:
+			return None
+		return Path(x).expanduser().resolve()
+
+	return RuntimeContext(
+		config=m["config"],
+		repo_root=Path(m["repo_root"]).expanduser().resolve(),
+		memory_root=_p(m.get("memory_root")),
+		workspace_root=_p(m.get("workspace_root")),
+		run_folder=_p(m.get("run_folder")),
+		extra_read_roots=tuple(
+			Path(p).expanduser().resolve() for p in (m.get("extra_read_roots") or ())
+		),
+		run_id=str(m.get("run_id") or ""),
+		trace_path=_p(m.get("trace_path")),
+		artifact_paths=m.get("artifact_paths"),
+	)
 
 
 # ---------------------------------------------------------------------------
@@ -222,9 +241,14 @@ def test_write_memory_empty_body(tmp_path):
 
 def test_write_memory_no_memory_root(tmp_path):
 	"""Missing memory_root in context should return an ERROR string."""
-	ctx = build_context(
-		repo_root=tmp_path,
+	ctx = RuntimeContext(
 		config=make_config(tmp_path),
+		repo_root=tmp_path.resolve(),
+		memory_root=None,
+		workspace_root=None,
+		run_folder=None,
+		extra_read_roots=(),
+		run_id="",
 	)
 	result = write_memory(
 		ctx,
@@ -235,43 +259,6 @@ def test_write_memory_no_memory_root(tmp_path):
 	)
 	assert result.startswith("ERROR:")
 	assert "memory_root" in result
-
-
-# ---------------------------------------------------------------------------
-# write_report tests
-# ---------------------------------------------------------------------------
-
-
-def test_write_report_valid(tmp_path):
-	"""write_report should write valid JSON to workspace."""
-	ctx = _make_ctx(tmp_path)
-	report_path = str(ctx.run_folder / "memory_actions.json")
-	content = json.dumps({"counts": {"add": 1, "update": 0, "no_op": 0}})
-	result = write_report(ctx, file_path=report_path, content=content)
-	assert "Report written" in result
-	written = json.loads(Path(report_path).read_text())
-	assert written["counts"]["add"] == 1
-
-
-def test_write_report_outside_workspace(tmp_path):
-	"""write_report should reject paths outside run_folder."""
-	ctx = _make_ctx(tmp_path)
-	result = write_report(
-		ctx,
-		file_path="/tmp/evil.json",
-		content="{}",
-	)
-	assert "Error" in result
-	assert "outside" in result
-
-
-def test_write_report_invalid_json(tmp_path):
-	"""write_report should reject invalid JSON content."""
-	ctx = _make_ctx(tmp_path)
-	report_path = str(ctx.run_folder / "bad.json")
-	result = write_report(ctx, file_path=report_path, content="not json")
-	assert "Error" in result
-	assert "not valid JSON" in result
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +393,15 @@ def test_archive_memory_not_found(tmp_path):
 
 def test_archive_memory_no_memory_root(tmp_path):
 	"""archive_memory should error when memory_root is not set."""
-	ctx = build_context(repo_root=tmp_path, config=make_config(tmp_path))
+	ctx = RuntimeContext(
+		config=make_config(tmp_path),
+		repo_root=tmp_path.resolve(),
+		memory_root=None,
+		workspace_root=None,
+		run_folder=None,
+		extra_read_roots=(),
+		run_id="",
+	)
 	result = archive_memory(ctx, file_path="/some/path.md")
 	assert result.startswith("ERROR:")
 	assert "memory_root" in result
@@ -469,7 +464,15 @@ def test_edit_memory_not_found(tmp_path):
 
 def test_edit_memory_no_memory_root(tmp_path):
 	"""edit_memory should error when memory_root is not set."""
-	ctx = build_context(repo_root=tmp_path, config=make_config(tmp_path))
+	ctx = RuntimeContext(
+		config=make_config(tmp_path),
+		repo_root=tmp_path.resolve(),
+		memory_root=None,
+		workspace_root=None,
+		run_folder=None,
+		extra_read_roots=(),
+		run_id="",
+	)
 	result = edit_memory(
 		ctx,
 		file_path="/some/path.md",
@@ -533,7 +536,15 @@ def test_scan_memory_manifest_empty(tmp_path):
 
 def test_scan_memory_manifest_no_memory_root(tmp_path):
 	"""scan_memory_manifest without memory_root returns error."""
-	ctx = build_context(repo_root=tmp_path, config=make_config(tmp_path))
+	ctx = RuntimeContext(
+		config=make_config(tmp_path),
+		repo_root=tmp_path.resolve(),
+		memory_root=None,
+		workspace_root=None,
+		run_folder=None,
+		extra_read_roots=(),
+		run_id="",
+	)
 	result = scan_memory_manifest(ctx)
 	parsed = json.loads(result)
 	assert "error" in parsed
@@ -571,7 +582,15 @@ def test_update_memory_index_truncates_long(tmp_path):
 
 def test_update_memory_index_no_memory_root(tmp_path):
 	"""update_memory_index without memory_root returns error."""
-	ctx = build_context(repo_root=tmp_path, config=make_config(tmp_path))
+	ctx = RuntimeContext(
+		config=make_config(tmp_path),
+		repo_root=tmp_path.resolve(),
+		memory_root=None,
+		workspace_root=None,
+		run_folder=None,
+		extra_read_roots=(),
+		run_id="",
+	)
 	result = update_memory_index(ctx, "# Index")
 	parsed = json.loads(result)
 	assert "error" in parsed
@@ -592,8 +611,8 @@ def test_closure_tools_have_function_names(tmp_path):
 
 
 @pytest.mark.parametrize("bind_fn,expected_count", [
-	(make_extract_tools, 11),
-	(make_maintain_tools, 8),
+	(make_extract_tools, 9),
+	(make_maintain_tools, 7),
 	(make_ask_tools, 3),
 ])
 def test_bind_tools_callable(tmp_path, bind_fn, expected_count):
@@ -614,9 +633,8 @@ def test_bind_tools_dspy_introspection(tmp_path):
 	tools = make_extract_tools(ctx)
 	expected_names = {
 		"read_file", "read_trace", "grep_trace",
-		"scan_memory_manifest", "write_memory", "write_summary",
-		"edit_memory", "archive_memory", "update_memory_index",
-		"list_files", "write_report",
+		"scan_memory_manifest", "write_memory", "edit_memory",
+		"update_memory_index", "write_summary", "list_files",
 	}
 	seen_names = set()
 	for tool in tools:

@@ -37,11 +37,10 @@ This is **agent context amnesia**, and it's the biggest productivity drain in AI
 Lerim solves this by:
 
 - :material-sync: **Watching** your agent sessions across all supported coding agents
-- :material-brain: **Extracting** decisions and learnings automatically using LLM pipelines (DSPy ReAct)
+- :material-brain: **Extracting** decisions and learnings automatically using a DSPy ReAct lead agent
 - :material-file-document: **Storing** everything as plain markdown files in your repo (`.lerim/`)
-- :material-refresh: **Refining** knowledge continuously — merges duplicates, archives stale entries, applies time-based decay
-- :material-graph: **Connecting** learnings into a context graph — related decisions and patterns are linked
-- :material-share-variant: **Unifying** knowledge across all your agents — what one agent learns, every other can recall
+- :material-refresh: **Refining** knowledge over time — merges duplicates, archives stale entries, refreshes the memory index
+- :material-share-variant: **Unifying** knowledge across all your agents — shared files under `.lerim/memory/`
 - :material-chat-question: **Answering** questions about past context: `lerim ask "why did we choose Postgres?"`
 
 No proprietary format. No database lock-in. Just markdown files that both humans and agents can read.
@@ -120,7 +119,7 @@ LLM pipelines extract decisions and learnings from sessions
 
 #### :material-refresh: Continuous refinement
 
-Merges duplicates, archives stale entries, applies time decay
+Merges duplicates, archives stale entries, maintains `MEMORY.md`
 
 </div>
 
@@ -179,33 +178,29 @@ lerim connect auto
 
 ### Sync sessions
 
-Lerim reads session transcripts, extracts decisions and learnings via DSPy pipelines, and writes them as markdown files. **Lead agent** + **tools** (DSPy runs inside the extract/summarize pipeline tools):
+Lerim reads session transcripts and runs **ExtractAgent** (DSPy ReAct) with the **`[roles.lead]`** model. The agent calls tools to read the trace, scan existing memories, write or edit markdown, update `MEMORY.md`, and save a session summary:
 
 ```mermaid
 flowchart TB
     subgraph lead["Lead"]
-        RT[LerimRuntime · DSPy ReAct]
+        RT[LerimRuntime · ExtractAgent]
+    end
+    subgraph lm["LM"]
+        L[roles.lead]
     end
     subgraph syncTools["Sync tools"]
-        ep[extract_pipeline]
-        sp[summarize_pipeline]
-        bd[batch_dedup_candidates]
-        wm[write_memory]
-        wr[write_report]
-        rf["read_file · list_files"]
+        t1["read_file · read_trace · grep_trace"]
+        sm[scan_memory_manifest]
+        wm["write_memory · edit_memory"]
+        ui["update_memory_index · write_summary"]
+        lf[list_files]
     end
-    subgraph dspy["DSPy LMs"]
-        ex[roles.extract]
-        su[roles.summarize]
-    end
-    RT --> ep
-    RT --> sp
-    RT --> bd
+    RT --> L
+    RT --> t1
+    RT --> sm
     RT --> wm
-    RT --> wr
-    RT --> rf
-    ep -.-> ex
-    sp -.-> su
+    RT --> ui
+    RT --> lf
 ```
 
 </div>
@@ -214,29 +209,25 @@ flowchart TB
 
 ### Maintain knowledge
 
-Offline refinement merges duplicates, archives low-value entries, consolidates related learnings, and applies time-based decay. **Lead agent** + **maintain tools** only:
+Offline refinement merges duplicates, archives low-value entries, and consolidates related learnings. **MaintainAgent** uses the same **`[roles.lead]`** model with maintain-only tools:
 
 ```mermaid
 flowchart TB
     subgraph lead_m["Lead"]
-        RT_m[LerimRuntime · DSPy ReAct]
+        RT_m[LerimRuntime · MaintainAgent]
     end
     subgraph maintainTools["Maintain tools"]
-        ms[memory_search]
+        t2["read_file · list_files"]
+        sm2[scan_memory_manifest]
+        wm2["write_memory · edit_memory"]
         ar[archive_memory]
-        em[edit_memory]
-        wh[write_hot_memory]
-        wm2[write_memory]
-        wr2[write_report]
-        rf2["read_file · list_files"]
+        ui2[update_memory_index]
     end
-    RT_m --> ms
-    RT_m --> ar
-    RT_m --> em
-    RT_m --> wh
+    RT_m --> t2
+    RT_m --> sm2
     RT_m --> wm2
-    RT_m --> wr2
-    RT_m --> rf2
+    RT_m --> ar
+    RT_m --> ui2
 ```
 
 </div>

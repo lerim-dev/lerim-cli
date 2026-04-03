@@ -165,7 +165,7 @@ flowchart TD
 
     ---
 
-    Primitives, frontmatter, lifecycle, and decay.
+    Types, layout, and lifecycle.
 
     [:octicons-arrow-right-24: Memory model](memory-model.md)
 

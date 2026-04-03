@@ -94,6 +94,54 @@ def compute_file_hash(path: Path) -> str:
     return h.hexdigest()
 
 
+# ---------------------------------------------------------------------------
+# Canonical compacted schema
+# ---------------------------------------------------------------------------
+# Every adapter must produce JSONL entries matching this shape:
+#   {"type": "user|assistant", "message": {"role": "user|assistant", "content": ...}, "timestamp": "..."}
+# Content can be a string or a list of block dicts (e.g. tool_use, tool_result).
+
+_CANONICAL_TYPES = frozenset({"user", "assistant"})
+
+
+def make_canonical_entry(
+    entry_type: str,
+    role: str,
+    content: str | list,
+    timestamp: str | None,
+) -> dict[str, Any]:
+    """Build a canonical compacted JSONL entry."""
+    return {
+        "type": entry_type,
+        "message": {"role": role, "content": content},
+        "timestamp": timestamp,
+    }
+
+
+def validate_canonical_entry(obj: dict[str, Any]) -> bool:
+    """Return True if entry conforms to the canonical compacted schema."""
+    if set(obj.keys()) != {"type", "message", "timestamp"}:
+        return False
+    if obj["type"] not in _CANONICAL_TYPES:
+        return False
+    msg = obj.get("message")
+    if not isinstance(msg, dict) or set(msg.keys()) != {"role", "content"}:
+        return False
+    if msg["role"] not in _CANONICAL_TYPES:
+        return False
+    if not isinstance(msg["content"], (str, list)):
+        return False
+    return True
+
+
+def normalize_timestamp_iso(value: Any) -> str | None:
+    """Parse any timestamp shape and return ISO 8601 UTC string, or None."""
+    dt = parse_timestamp(value)
+    if dt is None:
+        return None
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def compact_jsonl(
     raw_text: str, cleaner: Callable[[dict[str, Any]], dict[str, Any] | None]
 ) -> str:

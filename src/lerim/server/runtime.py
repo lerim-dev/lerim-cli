@@ -21,7 +21,7 @@ import logfire
 
 from lerim.config.settings import Config, get_config
 from lerim.agents.ask import AskAgent
-from lerim.agents.context import build_context
+from lerim.agents.context import RuntimeContext
 from lerim.agents.contracts import (
 	MaintainResultContract,
 	SyncResultContract,
@@ -317,7 +317,7 @@ class LerimRuntime:
 						f"[{flow}] ReAct attempt {attempt}/{max_attempts} "
 						f"(model={model_label})"
 					)
-					with dspy.context(lm=lm):
+					with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
 						return module(**input_args)
 				except Exception as exc:
 					last_error = exc
@@ -433,15 +433,15 @@ class LerimRuntime:
 
 		memory_index_path = resolved_memory_root / "MEMORY.md"
 
-		# Build RuntimeContext for tool functions.
-		ctx = build_context(
+		# RuntimeContext for tool functions.
+		ctx = RuntimeContext(
+			config=self.config,
 			repo_root=repo_root,
 			memory_root=resolved_memory_root,
 			workspace_root=resolved_workspace_root,
 			run_folder=run_folder,
-			extra_read_roots=(trace_file.parent,),
+			extra_read_roots=(trace_file.parent.resolve(),),
 			run_id=run_folder.name,
-			config=self.config,
 			trace_path=trace_file,
 			artifact_paths=artifact_paths,
 		)
@@ -496,11 +496,11 @@ class LerimRuntime:
 
 		# Validate required artifacts exist.
 		# summary is written in pre-processing (always present, may be empty).
-		# memory_actions is written by write_report tool -- soft failure.
+		# memory_actions.json is optional (no dedicated report tool) -- soft failure.
 		if not artifact_paths["memory_actions"].exists():
 			logger.warning(
-				"[sync] memory_actions.json missing -- write_report may "
-				"have been skipped, but write_memory tool may have written memories."
+				"[sync] memory_actions.json missing -- using defaults "
+				"(write_memory may still have created memories)."
 			)
 			artifact_paths["memory_actions"].write_text(
 				json.dumps({
@@ -647,14 +647,15 @@ class LerimRuntime:
 
 		memory_index_path = resolved_memory_root / "MEMORY.md"
 
-		# Build RuntimeContext for tool functions.
-		ctx = build_context(
+		# RuntimeContext for tool functions.
+		ctx = RuntimeContext(
+			config=self.config,
 			repo_root=repo_root,
 			memory_root=resolved_memory_root,
 			workspace_root=resolved_workspace_root,
 			run_folder=run_folder,
+			extra_read_roots=(),
 			run_id=run_folder.name,
-			config=self.config,
 			artifact_paths=artifact_paths,
 		)
 
@@ -704,8 +705,8 @@ class LerimRuntime:
 			)
 			agent_trace_path.write_text("[]", encoding="utf-8")
 
-		# Validate maintain_actions artifact exists.
-		# If write_report was skipped, write_memory may still have done work.
+		# Validate maintain_actions artifact exists (optional JSON; runtime defaults if absent).
+		# The agent may still have used write_memory / edit_memory without a report file.
 		actions_path = artifact_paths["maintain_actions"]
 		if not actions_path.exists():
 			logger.warning(
@@ -839,13 +840,15 @@ class LerimRuntime:
 		)
 		resolved_session_id = session_id or self.generate_session_id()
 
-		# Build RuntimeContext for tool functions (minimal -- no run_folder or
-		# artifact_paths for ask flow).
-		ctx = build_context(
+		# RuntimeContext for ask flow (minimal: no run_folder or artifact_paths).
+		ctx = RuntimeContext(
+			config=self.config,
 			repo_root=runtime_cwd,
 			memory_root=resolved_memory_root,
+			workspace_root=None,
+			run_folder=None,
+			extra_read_roots=(),
 			run_id=resolved_session_id,
-			config=self.config,
 		)
 
 		# Format hints from pre-fetched search results.

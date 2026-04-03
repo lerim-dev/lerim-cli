@@ -9,7 +9,7 @@ import dspy
 import pytest
 
 from lerim.config.settings import RoleConfig
-from lerim.agents.context import RuntimeContext, build_context
+from lerim.agents.context import RuntimeContext
 from lerim.server.runtime import LerimRuntime, _trajectory_to_trace_list
 from lerim.agents.extract import ExtractAgent, ExtractSignature
 from lerim.agents.maintain import MaintainAgent, MaintainSignature
@@ -37,9 +37,29 @@ def _make_ctx(tmp_path: Path, **overrides) -> RuntimeContext:
 		extra_read_roots=(),
 		run_id="test-run-001",
 		config=make_config(tmp_path),
+		trace_path=None,
+		artifact_paths=None,
 	)
-	defaults.update(overrides)
-	return build_context(**defaults)
+	m = {**defaults, **overrides}
+
+	def _p(x: str | Path | None) -> Path | None:
+		if x is None:
+			return None
+		return Path(x).expanduser().resolve()
+
+	return RuntimeContext(
+		config=m["config"],
+		repo_root=Path(m["repo_root"]).expanduser().resolve(),
+		memory_root=_p(m.get("memory_root")),
+		workspace_root=_p(m.get("workspace_root")),
+		run_folder=_p(m.get("run_folder")),
+		extra_read_roots=tuple(
+			Path(p).expanduser().resolve() for p in (m.get("extra_read_roots") or ())
+		),
+		run_id=str(m.get("run_id") or ""),
+		trace_path=_p(m.get("trace_path")),
+		artifact_paths=m.get("artifact_paths"),
+	)
 
 
 # ---------------------------------------------------------------------------
@@ -48,13 +68,13 @@ def _make_ctx(tmp_path: Path, **overrides) -> RuntimeContext:
 
 
 def test_extract_signature_contains_steps():
-	"""ExtractSignature docstring should contain all 6 steps."""
+	"""ExtractSignature docstring should contain major phases."""
 	assert "ORIENT" in ExtractSignature.__doc__
 	assert "ANALYZE" in ExtractSignature.__doc__
 	assert "DEDUP" in ExtractSignature.__doc__
 	assert "WRITE" in ExtractSignature.__doc__
 	assert "INDEX" in ExtractSignature.__doc__
-	assert "REPORT" in ExtractSignature.__doc__
+	assert "SUMMARIZE" in ExtractSignature.__doc__
 
 
 def test_sync_signature_contains_dedup_rules():
@@ -152,7 +172,7 @@ def test_extract_agent_construction(tmp_path):
 	# DSPy ReAct collapses functools.partial tools by type name;
 	# verify the bind function returns the expected count instead.
 	from lerim.agents.tools import make_extract_tools
-	assert len(make_extract_tools(ctx)) == 11
+	assert len(make_extract_tools(ctx)) == 9
 
 
 def test_maintain_agent_construction(tmp_path):
@@ -161,7 +181,7 @@ def test_maintain_agent_construction(tmp_path):
 	agent = MaintainAgent(ctx)
 	assert hasattr(agent, "react")
 	from lerim.agents.tools import make_maintain_tools
-	assert len(make_maintain_tools(ctx)) == 8
+	assert len(make_maintain_tools(ctx)) == 7
 
 
 def test_ask_agent_construction(tmp_path):
@@ -399,9 +419,14 @@ def test_trajectory_to_trace_list_single_step():
 	"""Single-step trajectory should produce 3 entries."""
 	trajectory = {
 		"thought_0": "Done",
-		"tool_name_0": "write_report",
-		"tool_args_0": {"file_path": "/tmp/r.json", "content": "{}"},
-		"observation_0": "Report written",
+		"tool_name_0": "write_memory",
+		"tool_args_0": {
+			"type": "project",
+			"name": "Test",
+			"description": "Desc",
+			"body": "Body **Why:** x **How to apply:** y",
+		},
+		"observation_0": '{"file_path": "/tmp/m.md"}',
 	}
 	trace = _trajectory_to_trace_list(trajectory)
 	assert len(trace) == 3

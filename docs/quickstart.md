@@ -283,7 +283,7 @@ lerim sync --agent claude
 2. **Extraction** — When new sessions are detected, Lerim extracts decision and learning candidates using DSPy pipelines
 3. **Deduplication** — Candidates are compared against existing knowledge to avoid duplicates
 4. **Storage** — New entries are written as markdown files to `.lerim/memory/` (project scope)
-5. **Refinement** — The maintain loop periodically merges duplicates, archives low-value entries, and applies time decay to keep the context graph clean
+5. **Refinement** — The maintain loop periodically merges duplicates, archives low-value entries, and refreshes the memory index
 
 ## Next steps
 

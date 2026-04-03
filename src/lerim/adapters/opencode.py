@@ -25,21 +25,42 @@ from lerim.adapters.common import (
     compact_jsonl,
     in_window,
     load_jsonl_dict_lines,
+    make_canonical_entry,
+    normalize_timestamp_iso,
     parse_timestamp,
     readonly_connect,
+    validate_canonical_entry,
     write_session_cache,
 )
 
 
-def _clean_entry(obj: dict[str, Any]) -> dict[str, Any]:
-    """Apply OpenCode-specific cleaning to a single JSONL entry.
+def _clean_entry(obj: dict[str, Any]) -> dict[str, Any] | None:
+    """Validate and pass through a canonical OpenCode JSONL entry.
 
-    Clears: tool_output field on tool messages (replaced with size descriptor).
-    Preserves: tool_name and tool_input for context.
+    Entries produced by ``_export_session_jsonl`` are already in canonical
+    compacted schema.  This function acts as an idempotency guard:
+
+    1. If the entry is already canonical, ensure any tool_result content
+       blocks have their output cleared, then return as-is.
+    2. If the entry is not canonical (e.g., old-format cache), return None
+       to drop it -- it will be re-exported from the DB on next sync.
     """
-    if obj.get("role") == "tool" and "tool_output" in obj:
-        output = obj["tool_output"]
-        obj["tool_output"] = f"[cleared: {len(str(output))} chars]"
+    if not validate_canonical_entry(obj):
+        return None
+
+    # Idempotency guard: ensure tool_result blocks are cleared
+    content = obj["message"]["content"]
+    if isinstance(content, list):
+        for block in content:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool_result"
+                and "content" in block
+            ):
+                raw = str(block["content"])
+                if not raw.startswith("[cleared:"):
+                    block["content"] = f"[cleared: {len(raw)} chars]"
+
     return obj
 
 
@@ -242,16 +263,62 @@ def _read_session_db(db_path: Path, session_id: str) -> ViewerSession | None:
 
 
 def _read_session_jsonl(path: Path, session_id: str | None) -> ViewerSession | None:
-    """Parse an exported OpenCode JSONL cache file into a ViewerSession."""
+    """Parse an exported OpenCode JSONL cache file into a ViewerSession.
+
+    Handles both canonical schema (no metadata line, entries have
+    ``type/message/timestamp``) and legacy schema (metadata line 0,
+    entries have ``role/content``).
+    """
     lines = load_jsonl_dict_lines(path)
     if not lines:
         return None
-    metadata = lines[0]
-    resolved_id = session_id or metadata.get("session_id") or path.stem
+
+    resolved_id = session_id or path.stem
     messages: list[ViewerMessage] = []
-    total_input = 0
-    total_output = 0
-    for row in lines[1:]:
+
+    for row in lines:
+        # --- Canonical format ---
+        if validate_canonical_entry(row):
+            msg = row["message"]
+            role = msg["role"]
+            content = msg["content"]
+            ts = row.get("timestamp")
+
+            if isinstance(content, list):
+                # Structured content blocks (tool_use + tool_result)
+                tool_name: str | None = None
+                tool_input: Any = None
+                tool_output: str | None = None
+                for block in content:
+                    if isinstance(block, dict):
+                        if block.get("type") == "tool_use":
+                            tool_name = block.get("name")
+                            tool_input = block.get("input")
+                        elif block.get("type") == "tool_result":
+                            tool_output = block.get("content")
+                messages.append(
+                    ViewerMessage(
+                        role="tool",
+                        tool_name=tool_name,
+                        tool_input=tool_input,
+                        tool_output=tool_output,
+                        timestamp=ts,
+                    )
+                )
+            else:
+                # Plain text content
+                if isinstance(content, str) and content.strip():
+                    messages.append(
+                        ViewerMessage(role=role, content=content, timestamp=ts)
+                    )
+            continue
+
+        # --- Legacy format: skip metadata line (has session_id key) ---
+        if "session_id" in row:
+            resolved_id = session_id or row.get("session_id") or path.stem
+            continue
+
+        # --- Legacy format: role-based entries ---
         role = row.get("role") or "assistant"
         if role == "tool":
             messages.append(
@@ -265,7 +332,7 @@ def _read_session_jsonl(path: Path, session_id: str | None) -> ViewerSession | N
             )
         else:
             content = row.get("content") or ""
-            if content.strip():
+            if isinstance(content, str) and content.strip():
                 messages.append(
                     ViewerMessage(
                         role=role,
@@ -274,50 +341,60 @@ def _read_session_jsonl(path: Path, session_id: str | None) -> ViewerSession | N
                         model=row.get("model"),
                     )
                 )
-    total_input = int(metadata.get("total_input_tokens") or 0)
-    total_output = int(metadata.get("total_output_tokens") or 0)
+
     return ViewerSession(
         session_id=resolved_id,
-        cwd=metadata.get("cwd"),
         messages=messages,
-        total_input_tokens=total_input,
-        total_output_tokens=total_output,
-        meta=metadata.get("meta") or {},
     )
 
 
 def _export_session_jsonl(session: ViewerSession, out_dir: Path) -> Path:
-    """Export a ViewerSession to a compacted JSONL cache file, return the file path."""
+    """Export a ViewerSession to a compacted JSONL cache file in canonical schema.
+
+    No metadata line is emitted. Every line conforms to the canonical shape:
+    ``{"type": "user|assistant", "message": {"role": ..., "content": ...}, "timestamp": "..."}``
+
+    Tool messages are folded into assistant-type entries with structured content
+    blocks (tool_use + tool_result with cleared output).
+    """
     lines: list[str] = []
-    # First line: session metadata
-    lines.append(
-        json.dumps(
-            {
-                "session_id": session.session_id,
-                "cwd": session.cwd,
-                "total_input_tokens": session.total_input_tokens,
-                "total_output_tokens": session.total_output_tokens,
-                "meta": session.meta,
-            },
-            ensure_ascii=False,
-        )
-    )
-    # Remaining lines: one per message
     for msg in session.messages:
-        row: dict[str, Any] = {"role": msg.role}
-        if msg.content is not None:
-            row["content"] = msg.content
-        if msg.timestamp:
-            row["timestamp"] = msg.timestamp
-        if msg.model:
-            row["model"] = msg.model
-        if msg.tool_name:
-            row["tool_name"] = msg.tool_name
-        if msg.tool_input is not None:
-            row["tool_input"] = msg.tool_input
-        if msg.tool_output is not None:
-            row["tool_output"] = msg.tool_output
-        lines.append(json.dumps(row, ensure_ascii=False))
+        ts = normalize_timestamp_iso(msg.timestamp)
+
+        if msg.role == "user":
+            if not (msg.content or "").strip():
+                continue
+            entry = make_canonical_entry("user", "user", msg.content or "", ts)
+
+        elif msg.role == "assistant":
+            if not (msg.content or "").strip():
+                continue
+            entry = make_canonical_entry(
+                "assistant", "assistant", msg.content or "", ts
+            )
+
+        elif msg.role == "tool":
+            tool_name = msg.tool_name or "tool"
+            tool_input = msg.tool_input
+            tool_output = msg.tool_output
+            # Clear tool output, preserving already-cleared descriptors
+            output_str = str(tool_output) if tool_output is not None else ""
+            if output_str.startswith("[cleared:"):
+                descriptor = output_str
+            else:
+                descriptor = f"[cleared: {len(output_str)} chars]"
+            content_blocks: list[dict[str, Any]] = [
+                {"type": "tool_use", "name": tool_name, "input": tool_input},
+                {"type": "tool_result", "content": descriptor},
+            ]
+            entry = make_canonical_entry("assistant", "assistant", content_blocks, ts)
+
+        else:
+            # Unknown role -- skip
+            continue
+
+        lines.append(json.dumps(entry, ensure_ascii=False))
+
     return write_session_cache(out_dir, session.session_id, lines, compact_trace)
 
 
@@ -458,7 +535,7 @@ if __name__ == "__main__":
         jsonl_path = Path(first.session_path)
         assert jsonl_path.is_file(), f"JSONL not found: {jsonl_path}"
         lines = jsonl_path.read_text(encoding="utf-8").strip().splitlines()
-        assert len(lines) > 1, f"Expected multiple lines, got {len(lines)}"
+        assert len(lines) >= 1, f"Expected at least one line, got {len(lines)}"
         print(f"  first JSONL ({jsonl_path.name}): {len(lines)} lines")
 
         # Verify JSONL round-trip via read_session

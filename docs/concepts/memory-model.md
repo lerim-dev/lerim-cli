@@ -4,46 +4,31 @@ Lerim stores memories as plain markdown files with YAML frontmatter. No database
 
 ---
 
-## Primitives
+## Types
 
-Lerim uses two core memory types plus episodic summaries:
+Each memory file uses a `type` field in frontmatter:
 
-| Primitive | Purpose | Example |
-|-----------|---------|---------|
-| **Decision** | An architectural or design choice made during development | "Use JWT bearer tokens for API auth" |
-| **Learning** | A reusable insight, procedure, friction point, or preference | "pytest fixtures must be in conftest.py for discovery" |
-| **Summary** | An episodic record of what happened in a coding session | "Refactored auth module, added rate limiting" |
+| Type | Purpose |
+|------|---------|
+| `user` | Preferences, role, and working style (about the person) |
+| `feedback` | Corrections and confirmations from the user |
+| `project` | Decisions and context not obvious from code alone |
+| `reference` | Pointers to external systems (dashboards, tickets, docs) |
 
-Decisions and learnings are the durable primitives -- they persist and are refined over time. Summaries are episodic records written once per session and not modified by the maintain path.
-
----
-
-## Learning kinds
-
-Learnings are categorized by kind:
-
-| Kind | Description | Example |
-|------|-------------|---------|
-| `insight` | A general observation or understanding | "FastAPI dependency injection resolves at request time" |
-| `procedure` | A step-by-step process or workflow | "To add a new adapter: create module, implement protocol, register" |
-| `friction` | Something that caused difficulty or slowdown | "Edit tool fails when target string appears in multiple files" |
-| `pitfall` | A mistake or trap to avoid | "Never run migrations on production without a backup" |
-| `preference` | A stylistic or tooling preference | "Always use pathlib over os.path" |
+Episodic **session summaries** live under `memory/summaries/` (written by the `write_summary` tool during sync). They complement durable memories but are not the same format.
 
 ---
 
 ## Directory layout
 
-Each project stores memories in its `.lerim/` directory:
+Each project stores memories under `.lerim/memory/`:
 
 ```text
 <repo>/.lerim/memory/
-├── decisions/*.md               # decision memory files
-├── learnings/*.md               # learning memory files
-├── summaries/YYYYMMDD/HHMMSS/   # session summaries
-└── archived/                    # soft-deleted memories
-    ├── decisions/*.md
-    └── learnings/*.md
+├── *.md                         # flat memory files (one file per memory)
+├── MEMORY.md                    # optional index (updated by the agent)
+├── summaries/YYYYMMDD/HHMMSS/   # episodic session summaries
+└── archived/                    # soft-deleted memories (from archive_memory)
 ```
 
 ---
@@ -52,50 +37,25 @@ Each project stores memories in its `.lerim/` directory:
 
 ```mermaid
 flowchart LR
-    A["Agent Session"] --> B["Extract"]
-    B --> C["Dedupe Check"]
-    C -->|New| D["Create Memory"]
-    C -->|Similar exists| E["Update / Merge"]
-    D --> F["Active Memory"]
+    A["Agent session"] --> B["ExtractAgent sync"]
+    B --> C["Dedupe via manifest + edits"]
+    C -->|New| D["write_memory"]
+    C -->|Update| E["edit_memory"]
+    D --> F["Active .md files"]
     E --> F
-    F --> G["Maintain"]
-    G -->|Low value| H["Archive"]
-    G -->|Duplicate| I["Merge"]
-    G -->|Decayed| H
-    G -->|Related| J["Consolidate"]
-    I --> F
-    J --> F
+    F --> G["MaintainAgent"]
+    G -->|Duplicate / stale| H["archive_memory"]
+    G -->|Consolidate| F
 ```
 
-1. **Extract** -- DSPy finds decision and learning candidates from session transcripts
-2. **Dedupe** -- the lead agent compares candidates against existing memories
-3. **Create / Update** -- new memories are written as markdown; updates modify existing files
-4. **Maintain** -- periodic refinement merges duplicates, consolidates related memories, archives low-value entries, and applies time-based decay
+1. **Sync** -- the lead agent reads the trace and writes or edits markdown memories.
+2. **Maintain** -- a separate pass merges duplicates, archives noise, and refreshes `MEMORY.md`.
 
 ---
 
-## Confidence and decay
+## Roadmap (not implemented yet)
 
-Each memory has a `confidence` score (0.0 to 1.0) assigned during extraction. Over time, memories that are not accessed lose effective confidence through decay.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `decay_days` | `180` | Days of no access before full decay |
-| `min_confidence_floor` | `0.1` | Decay never drops below this value |
-| `archive_threshold` | `0.2` | Effective confidence below this triggers archiving |
-| `recent_access_grace_days` | `30` | Recently accessed memories skip archiving |
-
-- Querying memories (`lerim ask`, `lerim memory search`) resets the access timestamp
-- Frequently useful memories naturally stay alive; unused ones fade and are eventually archived
-
-```toml
-[memory.decay]
-enabled = true
-decay_days = 180
-min_confidence_floor = 0.1
-archive_threshold = 0.2
-recent_access_grace_days = 30
-```
+Time-based **confidence decay**, automatic **graph linking** between memories, and vector search are **not** in the current open-source runtime. Configuration keys for those may appear commented in `default.toml` as placeholders.
 
 ---
 
@@ -118,27 +78,19 @@ lerim memory reset --scope global --yes   # global data only
 
 <div class="grid cards" markdown>
 
--   :material-cog:{ .lg .middle } **How It Works**
-
-    ---
-
-    Architecture overview, data flow, and deployment model.
-
-    [:octicons-arrow-right-24: How it works](how-it-works.md)
-
 -   :material-sync:{ .lg .middle } **Sync & Maintain**
 
     ---
 
-    How sessions become memories and how memories stay clean.
+    How the two pipelines run.
 
     [:octicons-arrow-right-24: Sync & maintain](sync-maintain.md)
 
--   :material-tune:{ .lg .middle } **Configuration**
+-   :material-cog:{ .lg .middle } **Configuration**
 
     ---
 
-    Decay settings, model roles, and scope options.
+    TOML config and model roles.
 
     [:octicons-arrow-right-24: Configuration](../configuration/overview.md)
 

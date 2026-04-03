@@ -1,22 +1,30 @@
-"""Unit tests for DSPy ReAct runtime context."""
+"""Unit tests for RuntimeContext."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from lerim.agents.context import build_context
+from lerim.agents.context import RuntimeContext
 from tests.helpers import make_config
 
 
-def test_build_context_resolves_paths(tmp_path):
-	"""All path fields should be resolved to absolute paths."""
-	ctx = build_context(
-		repo_root=tmp_path,
-		memory_root=tmp_path / "memory",
-		workspace_root=tmp_path / "workspace",
-		run_folder=tmp_path / "workspace" / "run-001",
+def test_runtime_context_paths_absolute(tmp_path):
+	"""Path fields can be stored as resolved absolute paths."""
+	cfg = make_config(tmp_path)
+	repo = Path(tmp_path).resolve()
+	mem = (tmp_path / "memory").resolve()
+	ws = (tmp_path / "workspace").resolve()
+	run = (tmp_path / "workspace" / "run-001").resolve()
+	ctx = RuntimeContext(
+		config=cfg,
+		repo_root=repo,
+		memory_root=mem,
+		workspace_root=ws,
+		run_folder=run,
+		extra_read_roots=(),
 		run_id="test-run",
-		config=make_config(tmp_path),
 	)
 	assert ctx.repo_root.is_absolute()
 	assert ctx.memory_root.is_absolute()
@@ -25,51 +33,74 @@ def test_build_context_resolves_paths(tmp_path):
 	assert ctx.run_id == "test-run"
 
 
-def test_build_context_none_optionals(tmp_path):
-	"""Optional fields default to None when not provided."""
-	ctx = build_context(
-		repo_root=tmp_path,
-		config=make_config(tmp_path),
+def test_runtime_context_none_optionals(tmp_path):
+	"""Optional fields may be None."""
+	cfg = make_config(tmp_path)
+	repo = Path(tmp_path).resolve()
+	ctx = RuntimeContext(
+		config=cfg,
+		repo_root=repo,
+		memory_root=None,
+		workspace_root=None,
+		run_folder=None,
+		extra_read_roots=(),
+		run_id="",
 	)
-	assert ctx.memory_root is None
-	assert ctx.workspace_root is None
-	assert ctx.run_folder is None
 	assert ctx.trace_path is None
 	assert ctx.artifact_paths is None
-	assert ctx.extra_read_roots == ()
 
 
 def test_context_is_frozen(tmp_path):
 	"""Context should be immutable (frozen dataclass)."""
-	ctx = build_context(
-		repo_root=tmp_path,
-		config=make_config(tmp_path),
+	cfg = make_config(tmp_path)
+	repo = Path(tmp_path).resolve()
+	ctx = RuntimeContext(
+		config=cfg,
+		repo_root=repo,
+		memory_root=None,
+		workspace_root=None,
+		run_folder=None,
+		extra_read_roots=(),
+		run_id="",
 	)
 	with pytest.raises(AttributeError):
 		ctx.run_id = "changed"
 
 
-def test_build_context_with_trace_and_artifacts(tmp_path):
-	"""trace_path and artifact_paths should be set when provided."""
-	trace = tmp_path / "trace.jsonl"
+def test_runtime_context_trace_and_artifacts(tmp_path):
+	"""trace_path and artifact_paths are stored when provided."""
+	cfg = make_config(tmp_path)
+	repo = Path(tmp_path).resolve()
+	trace = (tmp_path / "trace.jsonl").resolve()
 	artifacts = {"summary": tmp_path / "summary.json"}
-	ctx = build_context(
-		repo_root=tmp_path,
+	ctx = RuntimeContext(
+		config=cfg,
+		repo_root=repo,
+		memory_root=None,
+		workspace_root=None,
+		run_folder=None,
+		extra_read_roots=(),
+		run_id="",
 		trace_path=trace,
 		artifact_paths=artifacts,
-		config=make_config(tmp_path),
 	)
-	assert ctx.trace_path == trace.resolve()
+	assert ctx.trace_path == trace
 	assert ctx.artifact_paths == artifacts
 
 
-def test_build_context_extra_read_roots(tmp_path):
-	"""extra_read_roots should be resolved and stored as tuple."""
-	extra = tmp_path / "extra"
-	ctx = build_context(
-		repo_root=tmp_path,
+def test_runtime_context_extra_read_roots(tmp_path):
+	"""extra_read_roots is a tuple of paths."""
+	cfg = make_config(tmp_path)
+	repo = Path(tmp_path).resolve()
+	extra = (tmp_path / "extra").resolve()
+	ctx = RuntimeContext(
+		config=cfg,
+		repo_root=repo,
+		memory_root=None,
+		workspace_root=None,
+		run_folder=None,
 		extra_read_roots=(extra,),
-		config=make_config(tmp_path),
+		run_id="",
 	)
 	assert len(ctx.extra_read_roots) == 1
 	assert ctx.extra_read_roots[0].is_absolute()

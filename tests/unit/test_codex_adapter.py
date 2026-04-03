@@ -148,48 +148,79 @@ def test_iter_sessions_skips_known_ids(tmp_path):
     assert records[0].run_id == "new"
 
 
-# --- compact_trace tests ---
+# --- compact_trace tests (canonical schema) ---
 
 
 def test_compact_trace_drops_turn_context():
-    """compact_trace drops turn_context lines."""
+    """compact_trace drops turn_context lines entirely."""
     lines = [
         json.dumps({"type": "turn_context", "payload": {"files": ["a.py"]}}),
         json.dumps(
-            {"type": "event_msg", "payload": {"type": "user_message", "message": "hi"}}
+            {
+                "type": "response_item",
+                "timestamp": "2026-03-20T10:00:00Z",
+                "payload": {"type": "message", "role": "user", "content": "hi"},
+            }
         ),
     ]
     result = compact_trace("\n".join(lines) + "\n")
     parsed = [json.loads(line) for line in result.strip().split("\n")]
     assert len(parsed) == 1
-    assert parsed[0]["type"] == "event_msg"
+    assert parsed[0]["type"] == "user"
 
 
-def test_compact_trace_strips_base_instructions():
-    """compact_trace removes base_instructions from session_meta."""
+def test_compact_trace_drops_session_meta():
+    """compact_trace drops session_meta lines entirely."""
     entry = {
         "type": "session_meta",
         "payload": {"id": "s1", "cwd": "/tmp", "base_instructions": "x" * 10_000},
     }
     result = compact_trace(json.dumps(entry) + "\n")
-    parsed = json.loads(result.strip())
-    assert "base_instructions" not in parsed["payload"]
-    assert parsed["payload"]["id"] == "s1"
+    assert result.strip() == ""
+
+
+def test_compact_trace_drops_event_msg():
+    """compact_trace drops event_msg lines entirely."""
+    entry = {
+        "type": "event_msg",
+        "payload": {"type": "user_message", "message": "hi"},
+    }
+    result = compact_trace(json.dumps(entry) + "\n")
+    assert result.strip() == ""
 
 
 def test_compact_trace_clears_function_call_output():
-    """compact_trace replaces function_call_output content with size descriptor."""
+    """compact_trace produces canonical entry with cleared tool_result content."""
     entry = {
         "type": "response_item",
+        "timestamp": "2026-03-20T10:00:00Z",
         "payload": {"type": "function_call_output", "output": "x" * 50_000},
     }
     result = compact_trace(json.dumps(entry) + "\n")
     parsed = json.loads(result.strip())
-    assert parsed["payload"]["output"] == "[cleared: 50000 chars]"
+    assert parsed["type"] == "assistant"
+    assert parsed["message"]["role"] == "assistant"
+    content = parsed["message"]["content"]
+    assert isinstance(content, list)
+    assert content[0]["type"] == "tool_result"
+    assert content[0]["content"] == "[cleared: 50000 chars]"
 
 
-def test_compact_trace_clears_reasoning():
-    """compact_trace replaces reasoning content with size descriptor."""
+def test_compact_trace_function_call_output_idempotent():
+    """Already-cleared function_call_output is not re-measured."""
+    entry = {
+        "type": "response_item",
+        "timestamp": "2026-03-20T10:00:00Z",
+        "payload": {"type": "function_call_output", "output": "[cleared: 999 chars]"},
+    }
+    result = compact_trace(json.dumps(entry) + "\n")
+    parsed = json.loads(result.strip())
+    content = parsed["message"]["content"]
+    assert content[0]["content"] == "[cleared: 999 chars]"
+
+
+def test_compact_trace_drops_reasoning():
+    """compact_trace drops reasoning entries entirely."""
     entry = {
         "type": "response_item",
         "payload": {
@@ -198,25 +229,24 @@ def test_compact_trace_clears_reasoning():
         },
     }
     result = compact_trace(json.dumps(entry) + "\n")
-    parsed = json.loads(result.strip())
-    assert parsed["payload"]["content"] == "[reasoning cleared: 8000 chars]"
+    assert result.strip() == ""
 
 
-def test_compact_trace_clears_agent_reasoning():
-    """compact_trace replaces agent_reasoning event message with size descriptor."""
+def test_compact_trace_drops_agent_reasoning():
+    """compact_trace drops agent_reasoning event_msg entirely."""
     entry = {
         "type": "event_msg",
         "payload": {"type": "agent_reasoning", "message": "z" * 3000},
     }
     result = compact_trace(json.dumps(entry) + "\n")
-    parsed = json.loads(result.strip())
-    assert parsed["payload"]["message"] == "[reasoning cleared: 3000 chars]"
+    assert result.strip() == ""
 
 
-def test_compact_trace_preserves_function_call():
-    """compact_trace keeps function_call name and arguments intact."""
+def test_compact_trace_transforms_function_call():
+    """compact_trace transforms function_call into canonical tool_use entry."""
     entry = {
         "type": "response_item",
+        "timestamp": "2026-03-20T10:00:00Z",
         "payload": {
             "type": "function_call",
             "name": "read_file",
@@ -225,8 +255,70 @@ def test_compact_trace_preserves_function_call():
     }
     result = compact_trace(json.dumps(entry) + "\n")
     parsed = json.loads(result.strip())
-    assert parsed["payload"]["name"] == "read_file"
-    assert parsed["payload"]["arguments"] == '{"path": "/tmp/x.py"}'
+    assert parsed["type"] == "assistant"
+    assert parsed["message"]["role"] == "assistant"
+    content = parsed["message"]["content"]
+    assert isinstance(content, list)
+    assert content[0]["type"] == "tool_use"
+    assert content[0]["name"] == "read_file"
+    assert content[0]["input"] == '{"path": "/tmp/x.py"}'
+
+
+def test_compact_trace_transforms_user_message():
+    """compact_trace transforms user message into canonical user entry."""
+    entry = {
+        "type": "response_item",
+        "timestamp": "2026-03-20T10:00:00Z",
+        "payload": {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "Hello world"}],
+        },
+    }
+    result = compact_trace(json.dumps(entry) + "\n")
+    parsed = json.loads(result.strip())
+    assert parsed["type"] == "user"
+    assert parsed["message"]["role"] == "user"
+    assert parsed["message"]["content"] == "Hello world"
+    assert parsed["timestamp"] == "2026-03-20T10:00:00Z"
+
+
+def test_compact_trace_transforms_assistant_message():
+    """compact_trace transforms assistant message and strips think blocks."""
+    entry = {
+        "type": "response_item",
+        "timestamp": "2026-03-20T10:00:00Z",
+        "payload": {
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {"type": "output_text", "text": "before <think>secret</think> after"}
+            ],
+        },
+    }
+    result = compact_trace(json.dumps(entry) + "\n")
+    parsed = json.loads(result.strip())
+    assert parsed["type"] == "assistant"
+    assert parsed["message"]["role"] == "assistant"
+    assert "<think>" not in parsed["message"]["content"]
+    assert "[thinking cleared]" in parsed["message"]["content"]
+    assert "before" in parsed["message"]["content"]
+    assert "after" in parsed["message"]["content"]
+
+
+def test_compact_trace_drops_developer_message():
+    """compact_trace drops developer (system prompt) messages."""
+    entry = {
+        "type": "response_item",
+        "timestamp": "2026-03-20T10:00:00Z",
+        "payload": {
+            "type": "message",
+            "role": "developer",
+            "content": "System prompt text",
+        },
+    }
+    result = compact_trace(json.dumps(entry) + "\n")
+    assert result.strip() == ""
 
 
 # --- _extract_message_text edge cases ---
@@ -511,15 +603,21 @@ def test_read_session_uses_stem_as_default_id(tmp_path):
 
 
 def test_compact_trace_no_payload():
-    """Entry without payload key is kept as-is."""
+    """response_item without valid payload dict is dropped."""
+    entry = {"type": "response_item", "payload": "not-a-dict"}
+    result = compact_trace(json.dumps(entry) + "\n")
+    assert result.strip() == ""
+
+
+def test_compact_trace_unknown_type_dropped():
+    """Entry with unknown type is dropped entirely."""
     entry = {"type": "unknown_type", "data": "something"}
     result = compact_trace(json.dumps(entry) + "\n")
-    parsed = json.loads(result.strip())
-    assert parsed == entry
+    assert result.strip() == ""
 
 
-def test_compact_trace_reasoning_non_list_content():
-    """Reasoning with non-list content uses str length."""
+def test_compact_trace_reasoning_dropped():
+    """Reasoning with non-list content is dropped entirely."""
     entry = {
         "type": "response_item",
         "payload": {
@@ -528,24 +626,27 @@ def test_compact_trace_reasoning_non_list_content():
         },
     }
     result = compact_trace(json.dumps(entry) + "\n")
-    parsed = json.loads(result.strip())
-    assert "reasoning cleared:" in parsed["payload"]["content"]
-    assert "30 chars" in parsed["payload"]["content"]
+    assert result.strip() == ""
 
 
 def test_compact_trace_multiple_lines():
-    """compact_trace processes multiple JSONL lines correctly."""
+    """compact_trace processes multiple JSONL lines: drops non-conversation, keeps canonical."""
     lines = [
         json.dumps({"type": "turn_context", "payload": {}}),
         json.dumps({"type": "session_meta", "payload": {"id": "s1", "base_instructions": "long"}}),
         json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": "hi"}}),
+        json.dumps({
+            "type": "response_item",
+            "timestamp": "2026-03-20T10:00:00Z",
+            "payload": {"type": "message", "role": "user", "content": "hello"},
+        }),
     ]
     result = compact_trace("\n".join(lines) + "\n")
     parsed = [json.loads(line) for line in result.strip().split("\n")]
-    # turn_context is dropped -> 2 lines remain
-    assert len(parsed) == 2
-    # base_instructions is stripped from session_meta
-    assert "base_instructions" not in parsed[0]["payload"]
+    # turn_context, session_meta, event_msg all dropped -> only the response_item user message
+    assert len(parsed) == 1
+    assert parsed[0]["type"] == "user"
+    assert parsed[0]["message"]["content"] == "hello"
 
 
 # --- find_session_path edge cases ---

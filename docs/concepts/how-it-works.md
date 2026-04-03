@@ -57,33 +57,29 @@ flowchart TD
 
 The sync path processes new agent sessions and turns them into memories.
 
-**Agent / tools view** -- the lead runtime is a DSPy ReAct agent whose tools call DSPy (extract/summarize roles) and write to disk:
+**Agent / tools view** -- `LerimRuntime` runs **ExtractAgent** (DSPy ReAct) with the **`[roles.lead]`** language model. The agent calls tools in `make_extract_tools` (see `lerim.agents.tools`) to read the trace, inspect existing memories, write or edit files, refresh `MEMORY.md`, and call `write_summary`:
 
 ```mermaid
 flowchart TB
     subgraph lead["Lead"]
-        RT[LerimRuntime · DSPy ReAct]
+        RT[LerimRuntime · ExtractAgent]
+    end
+    subgraph lm["LM"]
+        L[roles.lead]
     end
     subgraph syncTools["Sync tools"]
-        ep[extract_pipeline]
-        sp[summarize_pipeline]
-        bd[batch_dedup_candidates]
-        wm[write_memory]
-        wr[write_report]
-        rf["read_file · list_files"]
+        t1["read_file · read_trace · grep_trace"]
+        sm[scan_memory_manifest]
+        wm["write_memory · edit_memory"]
+        ui["update_memory_index · write_summary"]
+        lf[list_files]
     end
-    subgraph dspy["DSPy LMs"]
-        ex[roles.extract]
-        su[roles.summarize]
-    end
-    RT --> ep
-    RT --> sp
-    RT --> bd
+    RT --> L
+    RT --> t1
+    RT --> sm
     RT --> wm
-    RT --> wr
-    RT --> rf
-    ep -.-> ex
-    sp -.-> su
+    RT --> ui
+    RT --> lf
 ```
 
 **Pipeline steps** (ingest + agent run):
@@ -91,10 +87,9 @@ flowchart TB
 1. **Discover** -- adapters scan session directories for new sessions within the time window (default: last 7 days)
 2. **Index** -- new sessions are cataloged with metadata (agent type, repo path, timestamps)
 3. **Compact** -- traces are compacted by stripping tool outputs and reasoning blocks (typically 40-90% size reduction), cached in `~/.lerim/cache/`
-4. **Extract** -- DSPy pipelines extract decision and learning candidates from the compacted transcript
-5. **Deduplicate** -- the lead agent compares candidates against existing memories and decides: add, update, or skip
-6. **Write** -- new memories are written as markdown files to `.lerim/memory/`
-7. **Summarize** -- an episodic summary of the session is generated and saved
+4. **Extract (ReAct)** -- the lead agent reads the transcript and existing memories, then writes high-value items as typed markdown (`user`, `feedback`, `project`, `reference`)
+5. **Dedupe** -- happens inside the agent loop via `scan_memory_manifest`, `read_file`, `write_memory`, and `edit_memory`
+6. **Summarize** -- `write_summary` stores an episodic summary under `memory/summaries/`
 
 ---
 
@@ -102,38 +97,34 @@ flowchart TB
 
 The maintain path refines existing memories offline.
 
-**Agent / tools view** — same lead agent pattern; maintain registers a different tool set (search, archive, edit, hot-memory, reports):
+**Agent / tools view** — same **`[roles.lead]`** model; **MaintainAgent** uses `make_maintain_tools` (no trace ingestion):
 
 ```mermaid
 flowchart TB
     subgraph lead_m["Lead"]
-        RT_m[LerimRuntime · DSPy ReAct]
+        RT_m[LerimRuntime · MaintainAgent]
     end
     subgraph maintainTools["Maintain tools"]
-        ms[memory_search]
+        t2["read_file · list_files"]
+        sm2[scan_memory_manifest]
+        wm2["write_memory · edit_memory"]
         ar[archive_memory]
-        em[edit_memory]
-        wh[write_hot_memory]
-        wm2[write_memory]
-        wr2[write_report]
-        rf2["read_file · list_files"]
+        ui2[update_memory_index]
     end
-    RT_m --> ms
-    RT_m --> ar
-    RT_m --> em
-    RT_m --> wh
+    RT_m --> t2
+    RT_m --> sm2
     RT_m --> wm2
-    RT_m --> wr2
-    RT_m --> rf2
+    RT_m --> ar
+    RT_m --> ui2
 ```
 
-**Pipeline steps** (what the maintainer is instructed to do):
+**Pipeline steps** (what the maintainer prompt instructs):
 
-1. **Scan** -- reads all active memories in the project
-2. **Merge duplicates** -- combines memories covering the same concept
-3. **Archive low-value** -- soft-deletes memories with low effective confidence
-4. **Consolidate** -- combines related memories into richer entries
-5. **Apply decay** -- reduces confidence of memories not accessed recently
+1. **Scan** -- `scan_memory_manifest()` plus optional reads of `MEMORY.md` and `summaries/`
+2. **Merge duplicates** -- archive or edit redundant files
+3. **Archive low-value** -- `archive_memory()` moves files to `memory/archived/`
+4. **Consolidate** -- combine topics via `edit_memory()` / `write_memory()`
+5. **Re-index** -- `update_memory_index()` refreshes `MEMORY.md`
 
 ---
 
@@ -184,11 +175,11 @@ lerim up/down     (host only, manages Docker)
 ```text
 <repo>/.lerim/
 ├── memory/
-│   ├── decisions/*.md           # decision memory files
-│   ├── learnings/*.md           # learning memory files
-│   ├── summaries/YYYYMMDD/      # session summaries
+│   ├── *.md                     # flat memory files (YAML frontmatter)
+│   ├── MEMORY.md                # optional index (maintained by the agent)
+│   ├── summaries/YYYYMMDD/HHMMSS/  # episodic session summaries
 │   └── archived/                # soft-deleted memories
-└── workspace/                   # run artifacts (logs, extraction results)
+└── workspace/                   # run artifacts (logs, per-run JSON)
 ```
 
 ### Global: `~/.lerim/`
@@ -212,7 +203,7 @@ lerim up/down     (host only, manages Docker)
 
     ---
 
-    Learn about memory primitives, lifecycle, and decay.
+    Learn about memory types and layout.
 
     [:octicons-arrow-right-24: Memory model](memory-model.md)
 

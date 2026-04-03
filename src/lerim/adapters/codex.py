@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,45 +13,91 @@ from lerim.adapters.common import (
     count_non_empty_files,
     in_window,
     load_jsonl_dict_lines,
+    make_canonical_entry,
+    normalize_timestamp_iso,
     parse_timestamp,
     write_session_cache,
 )
 
 
 def _clean_entry(obj: dict[str, Any]) -> dict[str, Any] | None:
-    """Apply Codex-specific cleaning to a single JSONL entry.
+    """Transform a Codex JSONL entry into the canonical compacted schema.
 
-    Drops: turn_context lines (full codebase snapshots).
-    Strips: base_instructions from session_meta.
-    Clears: function_call_output content (replaced with size descriptor).
-    Clears: reasoning / agent_reasoning content (replaced with size descriptor).
+    Drops: session_meta (metadata), event_msg (duplicates of response_items),
+           developer messages (system prompts), reasoning blocks.
+    Transforms response_item entries into canonical
+    ``{"type", "message": {"role", "content"}, "timestamp"}`` records.
     """
-    if obj.get("type") == "turn_context":
+    line_type = obj.get("type")
+
+    # 1. Drop session metadata entirely
+    if line_type == "session_meta":
         return None
+
+    # 2. Drop event_msg entirely (duplicates of response_items)
+    if line_type == "event_msg":
+        return None
+
+    # 3. Only response_item entries carry conversation data
+    if line_type != "response_item":
+        return None
+
     payload = obj.get("payload")
     if not isinstance(payload, dict):
-        return obj
-    line_type = obj.get("type")
-    if line_type == "session_meta":
-        payload.pop("base_instructions", None)
-    elif line_type == "response_item":
-        ptype = payload.get("type")
-        if ptype == "function_call_output":
-            output = payload.get("output", "")
-            payload["output"] = f"[cleared: {len(output)} chars]"
-        elif ptype == "reasoning":
-            content = payload.get("content", [])
-            total = (
-                sum(len(c.get("text", "")) for c in content if isinstance(c, dict))
-                if isinstance(content, list)
-                else len(str(content))
-            )
-            payload["content"] = f"[reasoning cleared: {total} chars]"
-    elif line_type == "event_msg":
-        if payload.get("type") == "agent_reasoning":
-            msg = payload.get("message", "")
-            payload["message"] = f"[reasoning cleared: {len(msg)} chars]"
-    return obj
+        return None
+
+    timestamp = normalize_timestamp_iso(
+        obj.get("timestamp") or payload.get("timestamp")
+    )
+    ptype = payload.get("type")
+
+    # 3a. Drop developer (system prompt) messages
+    if ptype == "message" and payload.get("role") == "developer":
+        return None
+
+    # 3b. User messages
+    if ptype == "message" and payload.get("role") == "user":
+        text = _extract_message_text(payload.get("content"))
+        if not text:
+            return None
+        return make_canonical_entry("user", "user", text, timestamp)
+
+    # 3c. Assistant messages -- strip <think> blocks
+    if ptype == "message" and payload.get("role") == "assistant":
+        text = _extract_message_text(payload.get("content"))
+        if not text:
+            return None
+        text = re.sub(r"<think>[\s\S]*?</think>", "[thinking cleared]", text)
+        return make_canonical_entry("assistant", "assistant", text, timestamp)
+
+    # 3d. Function calls
+    if ptype == "function_call":
+        content = [
+            {
+                "type": "tool_use",
+                "name": payload.get("name", ""),
+                "input": payload.get("arguments", ""),
+            }
+        ]
+        return make_canonical_entry("assistant", "assistant", content, timestamp)
+
+    # 3e. Function call outputs -- clear content (idempotent)
+    if ptype == "function_call_output":
+        output = payload.get("output", "")
+        output_str = str(output)
+        if output_str.startswith("[cleared:"):
+            descriptor = output_str
+        else:
+            descriptor = f"[cleared: {len(output_str)} chars]"
+        content = [{"type": "tool_result", "content": descriptor}]
+        return make_canonical_entry("assistant", "assistant", content, timestamp)
+
+    # 3f. Reasoning blocks -- drop
+    if ptype == "reasoning":
+        return None
+
+    # 4. Any other payload type -- drop
+    return None
 
 
 def compact_trace(raw_text: str) -> str:

@@ -20,54 +20,42 @@ dir = "~/.lerim"
 scope = "project_fallback_global"   # project_fallback_global | project_only | global_only
 project_dir_name = ".lerim"
 
-[memory.decay]
-enabled = true
-decay_days = 180                    # days of no access before full decay
-min_confidence_floor = 0.1          # decay never drops below this multiplier
-archive_threshold = 0.2             # effective confidence below this → archive candidate
-recent_access_grace_days = 30       # recently accessed memories skip archiving
-
 [server]
 host = "127.0.0.1"
 port = 8765
-sync_interval_minutes = 10          # sync hot path interval
-maintain_interval_minutes = 60      # maintain cold path interval
+sync_interval_minutes = 30          # sync hot path interval
+maintain_interval_minutes = 60       # maintain cold path interval
 sync_window_days = 7
 sync_max_sessions = 50
+parallel_pipelines = true               # run extract pipelines in parallel (set false for local/Ollama models)
 
 [roles.lead]
-provider = "minimax"                   # minimax | zai | openrouter | openai
-model = "MiniMax-M2.5"
+provider = "opencode_go"               # opencode_go | minimax | zai | openrouter | openai | ollama
+model = "minimax-m2.5"                 # OpenCode Go models: minimax-m2.7, minimax-m2.5, kimi-k2.5, glm-5
 api_base = ""
-fallback_models = ["zai:glm-4.7"]
-timeout_seconds = 300
-max_iterations = 10
+# Model names are auto-normalized per provider (e.g. minimax-m2.5 → MiniMax-M2.5 for minimax provider).
+fallback_models = ["minimax:MiniMax-M2.5"]  # auto-switch on quota/rate-limit errors
+timeout_seconds = 600
+max_iterations = 30
+max_iters_sync = 50                    # max ReAct iterations for lead agent in sync flow
+max_iters_maintain = 100               # max ReAct iterations for lead agent in maintain flow
+max_iters_ask = 30                     # max ReAct iterations for lead agent in ask flow
 openrouter_provider_order = []
-thinking = true                        # enable model thinking/reasoning (Ollama Qwen 3.5)
+thinking = true
+max_tokens = 32000
 
 [roles.extract]
-provider = "minimax"
-model = "MiniMax-M2.5"
+provider = "opencode_go"
+model = "minimax-m2.5"                 # DSPy extraction model
 api_base = ""
-fallback_models = ["zai:glm-4.5-air"]
-timeout_seconds = 180
-max_window_tokens = 300000
+fallback_models = []
+timeout_seconds = 300
+max_window_tokens = 100000
 window_overlap_tokens = 5000
 openrouter_provider_order = []
 thinking = true
-max_workers = 4                        # parallel window processing (set 1 for local/Ollama models)
-
-[roles.summarize]
-provider = "minimax"
-model = "MiniMax-M2.5"
-api_base = ""
-fallback_models = ["zai:glm-4.5-air"]
-timeout_seconds = 180
-max_window_tokens = 300000
-window_overlap_tokens = 5000
-openrouter_provider_order = []
-thinking = true
-max_workers = 4                        # parallel window processing (set 1 for local/Ollama models)
+max_tokens = 32000
+max_workers = 4
 
 [providers]
 # Default API base URLs per provider.
@@ -77,6 +65,7 @@ minimax = "https://api.minimax.io/v1"
 zai = "https://api.z.ai/api/coding/paas/v4"
 openai = "https://api.openai.com/v1"
 openrouter = "https://openrouter.ai/api/v1"
+opencode_go = "https://opencode.ai/zen/go/v1"
 ollama = "http://127.0.0.1:11434"
 # Docker: use "http://host.docker.internal:11434" if Ollama runs on the host.
 litellm_proxy = "http://127.0.0.1:4000"
@@ -88,6 +77,10 @@ enabled = false                          # set true or LERIM_TRACING=1 to enable
 include_httpx = false                    # capture raw HTTP request/response bodies
 include_content = true                   # include prompt/completion text in spans
 
+[cloud]
+endpoint = "https://api.lerim.dev"
+# token is set via `lerim auth` or LERIM_CLOUD_TOKEN env var
+
 [agents]
 # Map agent names to session directory paths.
 # claude = "~/.claude/projects"
@@ -98,6 +91,10 @@ include_content = true                   # include prompt/completion text in spa
 [projects]
 # Map project short names to absolute host paths.
 # my-project = "~/codes/my-project"
+
+# --- Planned features (uncomment when implemented) ---
+# [embeddings]
+# ...
 ```
 
 ---
@@ -129,25 +126,9 @@ Memory scope and project directory naming.
 | `project_only` | Memories stored per-project only. |
 | `global_only` | Memories stored in `~/.lerim/memory/` (for use outside git repos). |
 
-### `[memory.decay]`
+### Memory decay (roadmap)
 
-Time-based memory decay and archiving policy. The maintain path uses these
-settings to gradually reduce confidence of unaccessed memories and archive
-low-value entries.
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `enabled` | bool | `true` | Enable time-based confidence decay during maintain runs. |
-| `decay_days` | int | `180` | Days of no access before a memory reaches full decay. |
-| `min_confidence_floor` | float | `0.1` | Decay never drops the effective confidence multiplier below this value. |
-| `archive_threshold` | float | `0.2` | Effective confidence below this value makes the memory an archive candidate. |
-| `recent_access_grace_days` | int | `30` | Memories accessed within this many days skip archiving regardless of confidence. |
-
-!!! tip "How decay works"
-    Decay is applied during `lerim maintain`. A memory's effective confidence is:
-    `original_confidence * decay_multiplier`. The multiplier decreases linearly from
-    1.0 to `min_confidence_floor` over `decay_days` of no access. Memories below
-    `archive_threshold` (and not recently accessed) are moved to `memory/archived/`.
+Time-based decay and numeric **confidence** scores are **not** implemented in the current runtime — there is no `[memory.decay]` section in the shipped `default.toml`. The maintain agent archives or merges memories using prompts and tools only.
 
 ### `[server]`
 
@@ -157,48 +138,41 @@ HTTP server and daemon loop configuration.
 |-----|------|---------|-------------|
 | `host` | string | `"127.0.0.1"` | Bind address for the HTTP server. Use `0.0.0.0` for Docker. |
 | `port` | int | `8765` | Port for the JSON API (`lerim serve`). |
-| `sync_interval_minutes` | int | `10` | How often the daemon runs the sync hot path. |
+| `sync_interval_minutes` | int | `30` | How often the daemon runs the sync hot path. |
 | `maintain_interval_minutes` | int | `60` | How often the daemon runs the maintain cold path. |
 | `sync_window_days` | int | `7` | Default time window for session discovery (can be overridden with `--window`). |
 | `sync_max_sessions` | int | `50` | Max sessions to extract per sync run. |
 
 ### `[roles.*]` -- Model roles
 
-Four roles control which LLM handles each task. See [Model Roles](model-roles.md)
-for a full breakdown.
+See [Model Roles](model-roles.md) for detail. Shipped defaults define **`[roles.lead]`** and **`[roles.extract]`**.
 
-**Orchestration role** (`lead`) -- used by DSPy ReAct agent modules:
+**Lead** (`lead`) -- this is the **only** `dspy.LM` used by `LerimRuntime` for **sync, maintain, and ask** (DSPy ReAct). It must be configured for your provider.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `provider` | string | `"minimax"` | Provider backend: `minimax`, `zai`, `openrouter`, `openai`, `ollama`, `mlx`. |
-| `model` | string | varies | Model identifier (e.g. `MiniMax-M2.5`). |
+| `provider` | string | `opencode_go` | Provider backend (`opencode_go`, `minimax`, `zai`, `openrouter`, `openai`, `ollama`, …). |
+| `model` | string | varies | Model identifier. |
 | `api_base` | string | `""` | Custom API base URL. Empty = use provider default from `[providers]`. |
 | `fallback_models` | list | `[]` | Fallback model chain (format: `"model"` or `"provider:model"`). |
-| `timeout_seconds` | int | `300`/`180` | Request timeout. |
-| `max_iterations` | int | `10` | Max agent tool-call iterations. |
-| `openrouter_provider_order` | list | `[]` | OpenRouter-specific provider ordering preference. |
-| `thinking` | bool | `true` | Enable model thinking/reasoning. Set `false` for non-reasoning models. |
-
-**Codex role** (`codex`) -- optional; parsed for Cloud / future use. **Not** consumed by `LerimRuntime` at runtime today.
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `provider` | string | `opencode_go` | Provider backend for the codex role slot. |
-| `model` | string | `minimax-m2.5` | Model identifier. |
-| `api_base` | string | `""` | Custom API base. Empty = use default from `[providers]`. |
 | `timeout_seconds` | int | `600` | Request timeout. |
-| `idle_timeout_seconds` | int | `120` | Idle timeout (reserved). |
+| `max_iterations` | int | `30` | Max ReAct iterations (generic cap). |
+| `max_iters_sync` | int | `50` | Max iterations for sync (`ExtractAgent`). |
+| `max_iters_maintain` | int | `100` | Max iterations for maintain (`MaintainAgent`). |
+| `max_iters_ask` | int | `30` | Max iterations for ask (`AskAgent`). |
+| `max_tokens` | int | `32000` | Max completion tokens. |
+| `openrouter_provider_order` | list | `[]` | OpenRouter-specific provider ordering preference. |
+| `thinking` | bool | `true` | Enable model thinking/reasoning. |
 
-**DSPy roles** (`extract`, `summarize`) -- used by DSPy ChainOfThought pipelines:
+**Extract** (`extract`) -- loaded into `Config` for API / tooling (e.g. windowing parameters). **The ReAct flows do not switch to a separate LM**; runtime uses `lead` for `ExtractAgent`.
 
-All keys from orchestration roles (including `thinking`), plus:
+| Key | Type | Description |
+|-----|------|-------------|
+| `max_window_tokens` | int | Reserved for windowed processing / future use. |
+| `window_overlap_tokens` | int | Overlap between windows. |
+| `max_workers` | int | Parallel workers for batch extraction when used. |
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `max_window_tokens` | int | `300000` | Maximum tokens per transcript window for DSPy processing. |
-| `window_overlap_tokens` | int | `5000` | Overlap between consecutive windows when splitting large transcripts. |
-| `max_workers` | int | `4` | Parallel window processing threads. Set `1` for local/Ollama models to avoid RAM contention. |
+**Codex** (`codex`) -- optional block parsed for Cloud / future use; **not** consumed by `LerimRuntime` today.
 
 ### `[providers]`
 
@@ -210,6 +184,7 @@ Default API base URLs per provider. Per-role `api_base` takes precedence over th
 | `zai` | string | `"https://api.z.ai/api/coding/paas/v4"` | Z.AI API base (Coding Plan). |
 | `openai` | string | `"https://api.openai.com/v1"` | OpenAI API base. |
 | `openrouter` | string | `"https://openrouter.ai/api/v1"` | OpenRouter API base. |
+| `opencode_go` | string | `"https://opencode.ai/zen/go/v1"` | OpenCode Go API base. |
 | `ollama` | string | `"http://127.0.0.1:11434"` | Ollama local API base. Use `http://host.docker.internal:11434` inside Docker. |
 | `litellm_proxy` | string | `"http://127.0.0.1:4000"` | LiteLLM proxy base (used for Ollama think-off routing). |
 | `mlx` | string | `"http://127.0.0.1:8000/v1"` | vllm-mlx local API base (Apple Silicon). |
@@ -224,6 +199,14 @@ OpenTelemetry tracing via Logfire. See [Tracing](tracing.md) for setup instructi
 | `enabled` | bool | `false` | Enable tracing. Also toggleable via `LERIM_TRACING=1` env var. |
 | `include_httpx` | bool | `false` | Capture raw HTTP request/response bodies in spans. |
 | `include_content` | bool | `true` | Include prompt and completion text in spans. |
+
+### `[cloud]`
+
+Lerim Cloud web UI / API endpoint (token via `lerim auth` or `LERIM_CLOUD_TOKEN`).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `endpoint` | string | `https://api.lerim.dev` | Cloud API base URL. |
 
 ### `[agents]`
 

@@ -24,15 +24,13 @@
 
 ## The Solution
 
-Lerim is the **context graph layer** for coding agents -- it watches sessions, extracts the reasoning behind decisions, and builds a shared context graph across agents, projects, and teams.
+Lerim is a **continual learning layer** for coding agents -- it watches sessions, extracts durable decisions and learnings, and stores them as plain markdown so every agent can reuse them later.
 
 - **Watches** your agent sessions across all supported coding agents
-- **Extracts** the reasoning behind decisions -- the *why*, not just the *what* -- using LLM pipelines (DSPy ReAct)
+- **Extracts** the reasoning behind decisions -- the *why*, not just the *what* -- using a DSPy ReAct lead agent (`LerimRuntime`)
 - **Stores** everything as plain markdown files in your repo (`.lerim/`)
-- **Refines** knowledge continuously -- merges duplicates, archives stale entries, applies time-based decay
-- **Connects** learnings into a context graph -- related decisions and patterns are linked
-- **Remembers** across sessions -- hot-memory and cross-session intelligence keep agents informed
-- **Unifies** knowledge across all your agents -- what one agent learns, every other can recall
+- **Refines** knowledge over time -- the maintain flow merges duplicates, archives low-value entries, and refreshes `MEMORY.md`
+- **Unifies** knowledge across agents -- what one session stores, the next can read via the same memory files
 - **Answers** questions about past context: `lerim ask "why did we choose Postgres?"`
 
 No proprietary format. No database lock-in. Just markdown files that both humans and agents can read. Knowledge compounds over time, not stale.
@@ -58,71 +56,62 @@ Lerim is file-first.
 - Flat layout: `memory/*.md` (plus `memory/summaries/`)
 - Project memory: `<repo>/.lerim/`
 - Global fallback: `~/.lerim/`
-- Search: file-based (no index required)
-- Orchestration: DSPy ReAct (`LerimRuntime`) with per-flow tools; all providers via `dspy.LM`
-- Extraction/summarization: DSPy pipelines with transcript windowing
+- Search: file-based (`lerim memory search`, `lerim ask`)
+- Orchestration: DSPy ReAct (`LerimRuntime`) with per-flow tools; the **lead** model (`[roles.lead]`) drives sync, maintain, and ask via `dspy.LM`
 
 ### Sync path
 
-Runtime shape: one **lead agent** (DSPy ReAct) calls **tools**; `extract_pipeline` / `summarize_pipeline` run **DSPy** with your `[roles.extract]` and `[roles.summarize]` models.
+One **ExtractAgent** (DSPy ReAct) runs per session. It uses **`[roles.lead]`** as its language model and calls **filesystem tools** in [`make_extract_tools`](src/lerim/agents/tools.py): read the trace, scan existing memories, dedupe via `write_memory` / `edit_memory`, update `MEMORY.md`, and write an episodic summary with `write_summary`.
 
 ```mermaid
 flowchart TB
     subgraph lead["Lead"]
-        RT[LerimRuntime · DSPy ReAct]
+        RT[LerimRuntime · ExtractAgent]
+    end
+    subgraph lm["LM"]
+        L[roles.lead · dspy.LM]
     end
     subgraph syncTools["Sync tools"]
-        ep[extract_pipeline]
-        sp[summarize_pipeline]
-        bd[batch_dedup_candidates]
-        wm[write_memory]
-        wr[write_report]
-        rf["read_file · list_files"]
+        t1["read_file · read_trace · grep_trace"]
+        sm[scan_memory_manifest]
+        wm["write_memory · edit_memory"]
+        ui["update_memory_index · write_summary"]
+        lf[list_files]
     end
-    subgraph dspy["DSPy LMs"]
-        ex[roles.extract]
-        su[roles.summarize]
-    end
-    RT --> ep
-    RT --> sp
-    RT --> bd
+    RT --> L
+    RT --> t1
+    RT --> sm
     RT --> wm
-    RT --> wr
-    RT --> rf
-    ep -.-> ex
-    sp -.-> su
+    RT --> ui
+    RT --> lf
 ```
 
-Before that run, adapters **discover** sessions, **index** them, and **compact** traces — then the agent + tools above decide, write, and summarize.
+Before that run, adapters **discover** sessions, **index** them, and **compact** traces — then the agent decides what to remember and writes markdown under `.lerim/memory/`.
 
 ### Maintain path
 
-Same **lead agent** pattern; **maintain** tools only (no DSPy pipelines on this flow).
+Same **lead** model, different tools: **MaintainAgent** uses [`make_maintain_tools`](src/lerim/agents/tools.py) — scan the manifest, read files, merge or archive memories, and refresh the index.
 
 ```mermaid
 flowchart TB
     subgraph lead_m["Lead"]
-        RT_m[LerimRuntime · DSPy ReAct]
+        RT_m[LerimRuntime · MaintainAgent]
     end
     subgraph maintainTools["Maintain tools"]
-        ms[memory_search]
+        t2["read_file · list_files"]
+        sm2[scan_memory_manifest]
+        wm2["write_memory · edit_memory"]
         ar[archive_memory]
-        em[edit_memory]
-        wh[write_hot_memory]
-        wm2[write_memory]
-        wr2[write_report]
-        rf2["read_file · list_files"]
+        ui2[update_memory_index]
     end
-    RT_m --> ms
-    RT_m --> ar
-    RT_m --> em
-    RT_m --> wh
+    RT_m --> t2
+    RT_m --> sm2
     RT_m --> wm2
-    RT_m --> wr2
-    RT_m --> rf2
+    RT_m --> ar
+    RT_m --> ui2
 ```
 
-The maintainer prompt guides merge, archive, consolidate, decay, and hot-memory — the agent chooses **how** to use the tools above.
+The maintainer prompt guides merge, archive, consolidate, and re-index — the agent chooses **how** to use the tools above.
 
 ## Quick start
 

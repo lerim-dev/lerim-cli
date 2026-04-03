@@ -307,27 +307,6 @@ def list_files(ctx: RuntimeContext, directory: str, pattern: str = "*.md") -> st
     return json.dumps(sorted(str(f) for f in resolved.glob(pattern)))
 
 
-def write_report(ctx: RuntimeContext, file_path: str, content: str) -> str:
-    """Write a JSON report to the run workspace.
-
-    Args:
-        file_path: Absolute path within run_folder.
-        content: Valid JSON string.
-    """
-    resolved = Path(file_path).resolve()
-    if not ctx.run_folder:
-        return "Error: run_folder is not set"
-    if not _is_within(resolved, ctx.run_folder):
-        return f"Error: path {file_path} is outside workspace {ctx.run_folder}"
-    try:
-        json.loads(content)
-    except json.JSONDecodeError:
-        return "Error: content is not valid JSON"
-    resolved.parent.mkdir(parents=True, exist_ok=True)
-    resolved.write_text(content, encoding="utf-8")
-    return f"Report written to {file_path}"
-
-
 # ---------------------------------------------------------------------------
 # Tool lists — partial-bind ctx, pass to dspy.ReAct
 # ---------------------------------------------------------------------------
@@ -345,8 +324,8 @@ def make_extract_tools(ctx: RuntimeContext) -> list:
     """Tools for ExtractAgent."""
     return [_bind(fn, ctx) for fn in [
         read_file, read_trace, grep_trace, scan_memory_manifest,
-        write_memory, edit_memory, archive_memory,
-        update_memory_index, write_summary, list_files, write_report,
+        write_memory, edit_memory,
+        update_memory_index, write_summary, list_files,
     ]]
 
 
@@ -354,7 +333,7 @@ def make_maintain_tools(ctx: RuntimeContext) -> list:
     """Tools for MaintainAgent."""
     return [_bind(fn, ctx) for fn in [
         read_file, scan_memory_manifest, write_memory, edit_memory,
-        archive_memory, update_memory_index, list_files, write_report,
+        archive_memory, update_memory_index, list_files,
     ]]
 
 
@@ -363,3 +342,16 @@ def make_ask_tools(ctx: RuntimeContext) -> list:
     return [_bind(fn, ctx) for fn in [
         read_file, scan_memory_manifest, list_files,
     ]]
+
+
+if __name__ == "__main__":
+    import inspect
+
+    def _sample(ctx: object, n: int) -> str:
+        """Toy tool: ctx first (like real tools), remaining args for the model."""
+        return f"ctx={ctx!r} n={n}"
+
+    bound = _bind(_sample, ctx="demo-ctx")
+    print(inspect.signature(_sample))
+    print(inspect.signature(bound))
+    print(bound(n=7))

@@ -26,37 +26,100 @@ from lerim.adapters.common import (
     compact_jsonl,
     in_window,
     load_jsonl_dict_lines,
+    make_canonical_entry,
+    normalize_timestamp_iso,
     parse_timestamp,
     readonly_connect,
     write_session_cache,
 )
 
 
-def _clean_entry(obj: dict[str, Any]) -> dict[str, Any]:
-    """Apply Cursor-specific cleaning to a single JSONL entry.
+def _clean_entry(obj: dict[str, Any]) -> dict[str, Any] | None:
+    """Convert a raw Cursor DB row into a canonical compacted entry.
 
-    Clears: toolFormerData[].result (replaced with size descriptor).
-    Clears: thinking block text (capabilityType 30, replaced with size descriptor).
-    Strips: empty array/dict/None fields to reduce noise.
+    Output schema: ``{"type": "user|assistant", "message": {"role": ..., "content": ...}, "timestamp": "..."}``
+
+    Returns ``None`` for rows that should be dropped (header rows, thinking
+    blocks, entries with empty text).
     """
-    # Clear tool results in toolFormerData
-    tool_data = obj.get("toolFormerData")
-    if isinstance(tool_data, list):
-        for tool in tool_data:
-            if not isinstance(tool, dict):
-                continue
-            result = tool.get("result")
-            if result is not None:
-                tool["result"] = f"[cleared: {len(str(result))} chars]"
-    # Clear thinking blocks
-    if obj.get("capabilityType") == 30:
-        thinking = obj.get("thinking")
-        if isinstance(thinking, dict):
-            text = thinking.get("text", "")
-            thinking["text"] = f"[thinking cleared: {len(text)} chars]"
-            thinking.pop("signature", None)
-    # Strip empty array/dict/None fields to reduce noise
-    return {k: v for k, v in obj.items() if v or v == 0 or v is False}
+    # 1. Header row: has composerId but no usable integer type -> drop
+    if "composerId" in obj and not isinstance(obj.get("type"), int):
+        return None
+
+    entry_type = obj.get("type")
+
+    # 2. type == 1 -> user message
+    if entry_type == 1:
+        text = _extract_text(obj.get("text"))
+        if not text or not text.strip():
+            return None
+        return make_canonical_entry(
+            "user", "user", text, normalize_timestamp_iso(obj.get("createdAt"))
+        )
+
+    # 3-5. type == 2 -> assistant (thinking / tool call / plain text)
+    if entry_type == 2:
+        capability = obj.get("capabilityType")
+
+        # 3. Thinking block -> drop entirely
+        if capability == 30:
+            return None
+
+        # 4. Tool call (capabilityType 15) -> assistant with tool_use blocks
+        if capability == 15:
+            tool_data = obj.get("toolFormerData")
+            # Normalise to list
+            if isinstance(tool_data, dict):
+                tool_data = [tool_data]
+            if not isinstance(tool_data, list):
+                return None
+
+            content_blocks: list[dict[str, Any]] = []
+            for tool in tool_data:
+                if not isinstance(tool, dict):
+                    continue
+                content_blocks.append(
+                    {
+                        "type": "tool_use",
+                        "name": tool.get("name", "unknown"),
+                        "input": tool.get("params", {}),
+                    }
+                )
+                result = tool.get("result")
+                if result is not None:
+                    if str(result).startswith("[cleared:"):
+                        content_blocks.append(
+                            {"type": "tool_result", "content": str(result)}
+                        )
+                    else:
+                        content_blocks.append(
+                            {
+                                "type": "tool_result",
+                                "content": f"[cleared: {len(str(result))} chars]",
+                            }
+                        )
+            if not content_blocks:
+                return None
+            return make_canonical_entry(
+                "assistant",
+                "assistant",
+                content_blocks,
+                normalize_timestamp_iso(obj.get("createdAt")),
+            )
+
+        # 5. Plain text assistant response
+        text = _extract_text(obj.get("text"))
+        if not text or not text.strip():
+            return None
+        return make_canonical_entry(
+            "assistant",
+            "assistant",
+            text,
+            normalize_timestamp_iso(obj.get("createdAt")),
+        )
+
+    # 6. Any other type value -> drop
+    return None
 
 
 def compact_trace(raw_text: str) -> str:
@@ -363,13 +426,52 @@ def read_session(
 
 
 def _read_session_jsonl(path: Path, session_id: str | None) -> ViewerSession | None:
-    """Parse an exported Cursor JSONL file into a ViewerSession."""
+    """Parse an exported Cursor JSONL file into a ViewerSession.
+
+    Handles both old format (composerData header + raw bubbles) and new
+    canonical format (each line is ``{"type": "user|assistant", "message": ...}``).
+    """
     lines = load_jsonl_dict_lines(path)
     if not lines:
         return None
-    metadata = lines[0]
+
+    first = lines[0]
+
+    # Detect canonical format: first line has "type" in {"user", "assistant"}
+    if first.get("type") in ("user", "assistant") and "message" in first:
+        # New canonical format
+        resolved_id = session_id or path.stem
+        messages: list[ViewerMessage] = []
+        for entry in lines:
+            msg = entry.get("message")
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role", "assistant")
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                if not content.strip():
+                    continue
+                messages.append(ViewerMessage(role=role, content=content))
+            elif isinstance(content, list):
+                # Tool-use blocks: extract text representation
+                parts: list[str] = []
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "tool_use":
+                        parts.append(f"[tool_use: {block.get('name', '?')}]")
+                    elif block.get("type") == "tool_result":
+                        parts.append(str(block.get("content", "")))
+                if parts:
+                    messages.append(
+                        ViewerMessage(role=role, content="\n".join(parts))
+                    )
+        return ViewerSession(session_id=resolved_id, messages=messages)
+
+    # Old format: first line is composerData header, rest are raw bubbles
+    metadata = first
     resolved_id = session_id or metadata.get("composerId") or path.stem
-    messages: list[ViewerMessage] = []
+    messages = []
     for bubble in lines[1:]:
         role = _normalize_role(bubble.get("type"))
         text = _extract_text(bubble.get("text"))

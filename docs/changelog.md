@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - **Migrated from PydanticAI to DSPy ReAct** -- the lead agent now runs on DSPy ReAct modules (`SyncAgent`, `MaintainAgent`, `AskAgent`). All providers are supported via `dspy.LM` through unified `providers.py`.
-- **Removed explorer subagent** -- search, read, and writes go through DSPy ReAct tool functions on the lead agent (e.g. `read_file`, `list_files`, `memory_search`, `write_memory`) instead of a nested explorer.
+- **Removed explorer subagent** -- search, read, and writes go through DSPy ReAct tool functions on the lead agent (e.g. `read_file`, `list_files`, `scan_memory_manifest`, `write_memory`) instead of a nested explorer.
 - Removed `max_explorers` config option (no longer applicable).
 - Removed `[roles.explorer]` config section.
 - Runtime module reorganized: `agent.py` replaced by `runtime.py`, `tools.py`/`subagents.py` replaced by `tools.py`, `providers.py`, `context.py`, `helpers.py`.

@@ -799,7 +799,7 @@ def test_find_session_path_nonexistent_root(tmp_path, monkeypatch):
 
 
 def test_exported_jsonl_contains_compacted_data():
-	"""Exported JSONL preserves non-empty fields after compaction."""
+	"""Exported JSONL uses canonical schema after compaction."""
 	with TemporaryDirectory() as tmp:
 		db_path = Path(tmp) / "state.vscdb"
 		cache_dir = Path(tmp) / "cache"
@@ -811,6 +811,7 @@ def test_exported_jsonl_contains_compacted_data():
 		bubble_data = {
 			"type": 1,
 			"text": "raw message",
+			"createdAt": 1700000000000,
 			"_v": 3,
 			"lints": [{"code": "x"}],
 			"extra_field": True,
@@ -825,28 +826,25 @@ def test_exported_jsonl_contains_compacted_data():
 		jsonl_path = cache_dir / "raw.jsonl"
 		assert jsonl_path.is_file()
 		lines = jsonl_path.read_text(encoding="utf-8").strip().splitlines()
-		assert len(lines) == 2
+		# Header row is dropped, only the user bubble remains
+		assert len(lines) == 1
 
-		meta = json.loads(lines[0])
-		assert meta["composerId"] == "raw"
-		assert meta["status"] == "active"
-
-		bubble = json.loads(lines[1])
-		assert bubble["type"] == 1
-		assert bubble["text"] == "raw message"
-		assert bubble["_v"] == 3
-		assert bubble["lints"] == [{"code": "x"}]
-		assert bubble["extra_field"] is True
+		entry = json.loads(lines[0])
+		assert entry["type"] == "user"
+		assert entry["message"]["role"] == "user"
+		assert entry["message"]["content"] == "raw message"
+		assert "timestamp" in entry
 
 
 # --- compact_trace tests ---
 
 
 def test_compact_trace_clears_tool_results():
-	"""compact_trace replaces toolFormerData result with size descriptor."""
+	"""compact_trace converts tool calls to canonical schema with cleared results."""
 	bubble = {
 		"type": 2,
-		"text": "I ran the command",
+		"capabilityType": 15,
+		"createdAt": 1700000000000,
 		"toolFormerData": [
 			{
 				"name": "run_terminal_command_v2",
@@ -858,15 +856,18 @@ def test_compact_trace_clears_tool_results():
 	}
 	result = compact_trace(json.dumps(bubble) + "\n")
 	parsed = json.loads(result.strip())
-	tool = parsed["toolFormerData"][0]
-	assert tool["name"] == "run_terminal_command_v2"
-	assert tool["params"] == {"cmd": "ls"}
-	assert tool["result"] == "[cleared: 5000 chars]"
-	assert tool["status"] == "done"
+	assert parsed["type"] == "assistant"
+	assert parsed["message"]["role"] == "assistant"
+	blocks = parsed["message"]["content"]
+	assert blocks[0]["type"] == "tool_use"
+	assert blocks[0]["name"] == "run_terminal_command_v2"
+	assert blocks[0]["input"] == {"cmd": "ls"}
+	assert blocks[1]["type"] == "tool_result"
+	assert blocks[1]["content"] == "[cleared: 5000 chars]"
 
 
 def test_compact_trace_clears_thinking_blocks():
-	"""compact_trace replaces thinking text with size descriptor on capabilityType 30."""
+	"""compact_trace drops thinking blocks (capabilityType 30) entirely."""
 	bubble = {
 		"type": 2,
 		"capabilityType": 30,
@@ -874,16 +875,16 @@ def test_compact_trace_clears_thinking_blocks():
 		"text": "",
 	}
 	result = compact_trace(json.dumps(bubble) + "\n")
-	parsed = json.loads(result.strip())
-	assert parsed["thinking"]["text"] == "[thinking cleared: 10000 chars]"
-	assert "signature" not in parsed["thinking"]
+	# Thinking blocks are dropped entirely, so result should be empty
+	assert result.strip() == ""
 
 
 def test_compact_trace_strips_empty_fields():
-	"""compact_trace removes fields with empty/falsy values."""
+	"""compact_trace converts to canonical schema, stripping all raw fields."""
 	bubble = {
 		"type": 1,
 		"text": "hello",
+		"createdAt": 1700000000000,
 		"lints": [],
 		"commits": [],
 		"attachments": [],
@@ -891,8 +892,9 @@ def test_compact_trace_strips_empty_fields():
 	}
 	result = compact_trace(json.dumps(bubble) + "\n")
 	parsed = json.loads(result.strip())
-	assert parsed["type"] == 1
-	assert parsed["text"] == "hello"
+	assert parsed["type"] == "user"
+	assert parsed["message"]["content"] == "hello"
+	# Raw fields are not present in canonical output
 	assert "lints" not in parsed
 	assert "commits" not in parsed
 	assert "attachments" not in parsed
@@ -900,36 +902,43 @@ def test_compact_trace_strips_empty_fields():
 
 
 def test_compact_trace_preserves_user_assistant_text():
-	"""compact_trace preserves text content of user and assistant bubbles."""
+	"""compact_trace preserves text content in canonical message.content."""
 	lines = [
 		json.dumps({"type": 1, "text": "user message"}),
 		json.dumps({"type": 2, "text": "assistant reply"}),
 	]
 	result = compact_trace("\n".join(lines) + "\n")
 	parsed = [json.loads(line) for line in result.strip().split("\n")]
-	assert parsed[0]["text"] == "user message"
-	assert parsed[1]["text"] == "assistant reply"
+	assert parsed[0]["message"]["content"] == "user message"
+	assert parsed[0]["type"] == "user"
+	assert parsed[1]["message"]["content"] == "assistant reply"
+	assert parsed[1]["type"] == "assistant"
 
 
 def test_compact_trace_preserves_false_and_zero():
-	"""compact_trace keeps False and 0 values (only strips empty containers and None)."""
+	"""compact_trace canonical schema does not carry over raw bubble fields."""
 	bubble = {
 		"type": 1,
 		"text": "msg",
+		"createdAt": 1700000000000,
 		"enabled": False,
 		"count": 0,
 	}
 	result = compact_trace(json.dumps(bubble) + "\n")
 	parsed = json.loads(result.strip())
-	assert parsed["enabled"] is False
-	assert parsed["count"] == 0
+	# Canonical schema only has type, message, timestamp
+	assert parsed["type"] == "user"
+	assert parsed["message"]["content"] == "msg"
+	assert "enabled" not in parsed
+	assert "count" not in parsed
 
 
 def test_compact_trace_non_dict_tool_former_data_entry():
-	"""compact_trace handles non-dict entries in toolFormerData gracefully."""
+	"""compact_trace skips non-dict entries in toolFormerData tool list."""
 	bubble = {
 		"type": 2,
-		"text": "mixed",
+		"capabilityType": 15,
+		"createdAt": 1700000000000,
 		"toolFormerData": [
 			"not a dict",
 			{"name": "tool", "result": "data"},
@@ -937,9 +946,13 @@ def test_compact_trace_non_dict_tool_former_data_entry():
 	}
 	result = compact_trace(json.dumps(bubble) + "\n")
 	parsed = json.loads(result.strip())
-	tools = parsed["toolFormerData"]
-	assert tools[0] == "not a dict"
-	assert tools[1]["result"] == "[cleared: 4 chars]"
+	assert parsed["type"] == "assistant"
+	blocks = parsed["message"]["content"]
+	# Only the dict entry produces a tool_use block; "not a dict" is skipped
+	assert blocks[0]["type"] == "tool_use"
+	assert blocks[0]["name"] == "tool"
+	assert blocks[1]["type"] == "tool_result"
+	assert blocks[1]["content"] == "[cleared: 4 chars]"
 
 
 # ---------------------------------------------------------------------------

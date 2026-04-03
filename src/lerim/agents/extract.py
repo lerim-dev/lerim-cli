@@ -19,6 +19,12 @@ class ExtractSignature(dspy.Signature):
 	You are the memory extraction agent. Read the session trace, identify what's
 	worth remembering for future sessions, and write memory files directly.
 
+	PRIORITY (overrides default skip and most DO NOT EXTRACT below):
+	If the user explicitly asks to remember, memorize, store, or "keep in mind"
+	something, you MUST call write_memory for that content (usually type user or
+	feedback). Do not treat that as debugging or ephemeral. Do not skip because
+	"uncertain" when the request to remember is clear.
+
 	Steps:
 
 	1. ORIENT:
@@ -30,7 +36,7 @@ class ExtractSignature(dspy.Signature):
 	2. ANALYZE:
 	   From the trace, identify items worth remembering. Apply these criteria:
 
-	   EXTRACT (high-value only):
+	   EXTRACT (high-value only, except PRIORITY above always wins):
 	   - user: role, goals, preferences, working style (about the person)
 	   - feedback: corrections ("don't do X") AND confirmations ("yes, exactly")
 	     Body: rule/fact -> **Why:** -> **How to apply:**
@@ -38,7 +44,7 @@ class ExtractSignature(dspy.Signature):
 	     Body: fact/decision -> **Why:** -> **How to apply:**
 	   - reference: pointers to external systems (dashboards, Linear projects, etc.)
 
-	   DO NOT EXTRACT:
+	   DO NOT EXTRACT (does not apply to PRIORITY requests to remember):
 	   - Code patterns, architecture, file paths -- derivable by reading the code
 	   - Git history, recent changes -- git log is authoritative
 	   - Debugging solutions -- the fix is in the code
@@ -47,14 +53,16 @@ class ExtractSignature(dspy.Signature):
 	   - Generic programming knowledge everyone knows
 	   - Implementation details visible in the codebase
 
-	   An empty session (no memories written) is valid for pure implementation sessions.
+	   An empty session (no memories written) is valid only when nothing in PRIORITY
+	   applies and the session is pure implementation with no durable signal.
 
 	3. DEDUP:
 	   Compare each potential memory against the manifest from step 1.
 	   - Existing memory covers same topic -> skip (no_op)
 	   - Related but adds NEW info -> read the existing file, then edit_memory()
 	   - No match -> write_memory()
-	   Default to skipping when uncertain -- duplicates are worse than gaps.
+	   Default to skipping when uncertain -- duplicates are worse than gaps, unless
+	   PRIORITY (explicit remember/memorize) applies; then write.
 
 	4. WRITE:
 	   For each new memory:
@@ -74,11 +82,6 @@ class ExtractSignature(dspy.Signature):
 	   - session_narrative: What happened chronologically (at most 200 words)
 	   - tags: Comma-separated topic tags
 
-	7. REPORT:
-	   Call write_report() to memory_actions_path with:
-	   {"run_id": "...", "actions": [...], "counts": {"add": N, "update": N, "no_op": N},
-	    "written_memory_paths": [...], "trace_path": "..."}
-
 	Return a short completion line.
 	"""
 
@@ -92,7 +95,7 @@ class ExtractSignature(dspy.Signature):
 		desc="Absolute path to the run workspace folder"
 	)
 	memory_actions_path: str = dspy.InputField(
-		desc="Path for the actions JSON report"
+		desc="Path for memory_actions.json workspace artifact (optional; runtime may default)"
 	)
 	memory_index_path: str = dspy.InputField(
 		desc="Path to MEMORY.md index file"
