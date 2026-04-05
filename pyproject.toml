@@ -81,8 +81,8 @@ extend-select = ["B006"]
 ignore = ["E501"]
 
 [tool.vulture]
-paths = ["src/"]
-min_confidence = 100
+paths = ["src/lerim/", "vulture_whitelist.py"]
+min_confidence = 60
 
 [dependency-groups]
 dev = [

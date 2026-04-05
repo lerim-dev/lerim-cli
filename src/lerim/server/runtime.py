@@ -585,9 +585,6 @@ class LerimRuntime:
 		Returns:
 			(response_text, session_id, cost_usd) tuple.
 		"""
-		runtime_cwd = (
-			Path(cwd or self._default_cwd or str(Path.cwd())).expanduser().resolve()
-		)
 		resolved_memory_root = (
 			Path(memory_root).expanduser().resolve()
 			if memory_root

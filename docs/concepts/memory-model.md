@@ -15,7 +15,7 @@ Each memory file uses a `type` field in frontmatter:
 | `project` | Decisions and context not obvious from code alone |
 | `reference` | Pointers to external systems (dashboards, tickets, docs) |
 
-Episodic **session summaries** live under `memory/summaries/` (written by the `write_summary` tool during sync). They complement durable memories but are not the same format.
+Episodic **session summaries** live under `memory/summaries/` (written by `write(type="summary", ...)` during sync). They complement durable memories but are not the same format.
 
 ---
 
@@ -26,9 +26,9 @@ Each project stores memories under `.lerim/memory/`:
 ```text
 <repo>/.lerim/memory/
 ├── *.md                         # flat memory files (one file per memory)
-├── MEMORY.md                    # optional index (updated by the agent)
+├── index.md                     # optional index (updated by the agent)
 ├── summaries/YYYYMMDD/HHMMSS/   # episodic session summaries
-└── archived/                    # soft-deleted memories (from archive_memory)
+└── archived/                    # soft-deleted memories (from archive)
 ```
 
 ---
@@ -38,18 +38,18 @@ Each project stores memories under `.lerim/memory/`:
 ```mermaid
 flowchart LR
     A["Agent session"] --> B["ExtractAgent sync"]
-    B --> C["Dedupe via manifest + edits"]
-    C -->|New| D["write_memory"]
-    C -->|Update| E["edit_memory"]
+    B --> C["Dedupe via scan + edits"]
+    C -->|New| D["write"]
+    C -->|Update| E["edit"]
     D --> F["Active .md files"]
     E --> F
     F --> G["MaintainAgent"]
-    G -->|Duplicate / stale| H["archive_memory"]
+    G -->|Duplicate / stale| H["archive"]
     G -->|Consolidate| F
 ```
 
 1. **Sync** -- the lead agent reads the trace and writes or edits markdown memories.
-2. **Maintain** -- a separate pass merges duplicates, archives noise, and refreshes `MEMORY.md`.
+2. **Maintain** -- a separate pass merges duplicates, archives noise, and refreshes `index.md`.
 
 ---
 

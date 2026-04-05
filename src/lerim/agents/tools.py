@@ -36,16 +36,26 @@ class MemoryTools:
 		self.run_folder = Path(run_folder) if run_folder else None
 
 	def _resolve(self, filename: str) -> Path | None:
-		"""Resolve a filename to an absolute path. Not a tool."""
+		"""Resolve a filename to an absolute path within allowed roots.
+
+		Returns None for empty filenames, path traversal attempts, or
+		unconfigured trace. Not a tool.
+		"""
+		if not filename or not filename.strip():
+			return None
 		if filename in ("trace", "trace.jsonl"):
 			return self.trace_path
 		# Summary files live in summaries/ subdir
 		if filename.startswith("summary_"):
-			path = self.memory_root / "summaries" / filename
-			if path.exists():
+			path = (self.memory_root / "summaries" / filename).resolve()
+			if path.is_relative_to(self.memory_root.resolve()):
 				return path
+			return None
 		# Memory files, index.md — flat in memory_root
-		return self.memory_root / filename
+		path = (self.memory_root / filename).resolve()
+		if path.is_relative_to(self.memory_root.resolve()):
+			return path
+		return None
 
 	# ── Read ────────────────────────────────────────────────────────────
 
@@ -64,7 +74,11 @@ class MemoryTools:
 		"""
 		path = self._resolve(filename)
 		if path is None:
-			return "Error: no trace path configured"
+			if not filename or not filename.strip():
+				return "Error: filename cannot be empty"
+			if filename in ("trace", "trace.jsonl"):
+				return "Error: no trace path configured"
+			return f"Error: invalid filename: {filename}"
 		if not path.exists():
 			return f"Error: file not found: {filename}"
 		if not path.is_file():
@@ -102,20 +116,27 @@ class MemoryTools:
 
 		path = self._resolve(filename)
 		if path is None:
-			return "Error: no trace path configured"
+			if not filename or not filename.strip():
+				return "Error: filename cannot be empty"
+			if filename in ("trace", "trace.jsonl"):
+				return "Error: no trace path configured"
+			return f"Error: invalid filename: {filename}"
 		if not path.exists():
 			return f"Error: file not found: {filename}"
 
 		if shutil.which("rg"):
-			result = subprocess.run(
-				[
-					"rg", "--no-heading", "-n", "-i",
-					"-C", str(context_lines),
-					"--max-count", "20",
-					pattern, str(path),
-				],
-				capture_output=True, text=True, timeout=10,
-			)
+			try:
+				result = subprocess.run(
+					[
+						"rg", "--no-heading", "-n", "-i",
+						"-C", str(context_lines),
+						"--max-count", "20",
+						pattern, str(path),
+					],
+					capture_output=True, text=True, timeout=10,
+				)
+			except subprocess.TimeoutExpired:
+				return f"Error: search timed out in {filename}"
 			if result.returncode == 1:
 				return f"No matches for '{pattern}' in {filename}"
 			if result.returncode != 0:
@@ -247,7 +268,7 @@ class MemoryTools:
 
 		# --- Generate filename and target path ---
 		from datetime import datetime, timezone
-		slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+		slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")[:128]
 
 		if type == "summary":
 			timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -303,7 +324,9 @@ class MemoryTools:
 
 		path = self._resolve(filename)
 		if path is None:
-			return "Error: no trace path configured"
+			if not filename or not filename.strip():
+				return "Error: filename cannot be empty"
+			return f"Error: invalid filename: {filename}"
 		if not path.exists():
 			return f"Error: file not found: {filename}"
 		if path.suffix != ".md":
@@ -340,7 +363,9 @@ class MemoryTools:
 		"""
 		path = self._resolve(filename)
 		if path is None:
-			return "Error: no trace path configured"
+			if not filename or not filename.strip():
+				return "Error: filename cannot be empty"
+			return f"Error: invalid filename: {filename}"
 		if not path.exists():
 			return f"Error: file not found: {filename}"
 

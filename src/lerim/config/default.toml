@@ -26,8 +26,8 @@ api_base = ""
 fallback_models = ["minimax:MiniMax-M2.5"]  # auto-switch on quota/rate-limit errors
 timeout_seconds = 600
 max_iterations = 30
-max_iters_sync = 50                    # max ReAct iterations for lead agent in sync flow
-max_iters_maintain = 100               # max ReAct iterations for lead agent in maintain flow
+max_iters_sync = 15                    # max ReAct iterations for lead agent in sync flow
+max_iters_maintain = 30                # max ReAct iterations for lead agent in maintain flow
 max_iters_ask = 30                     # max ReAct iterations for lead agent in ask flow
 openrouter_provider_order = []
 thinking = true
@@ -44,7 +44,6 @@ window_overlap_tokens = 5000
 openrouter_provider_order = []
 thinking = true
 max_tokens = 32000
-max_workers = 4
 
 [providers]
 # Default API base URLs per provider.

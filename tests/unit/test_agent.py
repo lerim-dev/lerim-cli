@@ -540,27 +540,3 @@ def test_run_with_fallback_retries_same_model_on_non_quota_error(
 	)
 	assert result.completion_summary == "recovered"
 	assert attempt_count == 3
-
-
-# ---------------------------------------------------------------------------
-# is_within tests
-# ---------------------------------------------------------------------------
-
-
-def test_is_within_same_path(tmp_path):
-	"""is_within should return True for the same path."""
-	from lerim.agents.contracts import is_within
-	assert is_within(tmp_path, tmp_path) is True
-
-
-def test_is_within_child_path(tmp_path):
-	"""is_within should return True for a child path."""
-	from lerim.agents.contracts import is_within
-	child = tmp_path / "sub" / "file.txt"
-	assert is_within(child, tmp_path) is True
-
-
-def test_is_within_outside_path(tmp_path):
-	"""is_within should return False for an unrelated path."""
-	from lerim.agents.contracts import is_within
-	assert is_within(Path("/tmp/other"), tmp_path) is False

@@ -10,7 +10,7 @@ A **`[roles.codex]`** block may be parsed for Lerim Cloud; it is **not** consume
 
 | Role | Used by | Purpose |
 |------|---------|---------|
-| `lead` | `LerimRuntime` | **Only** LLM for DSPy ReAct: sync, maintain, ask. Tools are plain Python functions in `lerim.agents.tools` (`write_memory`, `read_file`, `scan_memory_manifest`, …). |
+| `lead` | `LerimRuntime` | **Only** LLM for DSPy ReAct: sync, maintain, ask. Tools are methods on `MemoryTools` in `lerim.agents.tools` (`read`, `grep`, `scan`, `write`, `edit`, `archive`). |
 | `extract` | Config / HTTP API | Windowing and provider metadata; not a second ReAct LM. |
 
 ## Architecture
@@ -42,15 +42,15 @@ Each role is configured under `[roles.<name>]` in your TOML config.
 	fallback_models = ["minimax:MiniMax-M2.5"]
 	timeout_seconds = 600
 	max_iterations = 30
-	max_iters_sync = 50
-	max_iters_maintain = 100
+	max_iters_sync = 15
+	max_iters_maintain = 30
 	max_iters_ask = 30
 	openrouter_provider_order = []
 	thinking = true
 	max_tokens = 32000
 	```
 
-	The lead model is the only component that runs **DSPy ReAct** for user-facing flows. It calls tools defined in `lerim.agents.tools` through `dspy.ReAct`.
+	The lead model is the only component that runs **DSPy ReAct** for user-facing flows. It calls bound methods on `MemoryTools` (defined in `lerim.agents.tools`) through `dspy.ReAct`.
 
 === "Extract"
 

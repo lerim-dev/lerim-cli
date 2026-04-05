@@ -11,17 +11,6 @@ from pathlib import Path
 from pydantic import BaseModel
 
 
-# ---------------------------------------------------------------------------
-# Path guard (available for path-safety checks)
-# ---------------------------------------------------------------------------
-
-def is_within(path: Path, root: Path) -> bool:
-	"""Return whether path equals or is inside root."""
-	resolved = path.resolve()
-	root_resolved = root.resolve()
-	return resolved == root_resolved or root_resolved in resolved.parents
-
-
 class SyncResultContract(BaseModel):
 	"""Stable sync return payload schema used by CLI and daemon."""
 

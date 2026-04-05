@@ -37,8 +37,8 @@ api_base = ""
 fallback_models = ["minimax:MiniMax-M2.5"]  # auto-switch on quota/rate-limit errors
 timeout_seconds = 600
 max_iterations = 30
-max_iters_sync = 50                    # max ReAct iterations for lead agent in sync flow
-max_iters_maintain = 100               # max ReAct iterations for lead agent in maintain flow
+max_iters_sync = 15                    # max ReAct iterations for lead agent in sync flow
+max_iters_maintain = 30                # max ReAct iterations for lead agent in maintain flow
 max_iters_ask = 30                     # max ReAct iterations for lead agent in ask flow
 openrouter_provider_order = []
 thinking = true
@@ -157,8 +157,8 @@ See [Model Roles](model-roles.md) for detail. Shipped defaults define **`[roles.
 | `fallback_models` | list | `[]` | Fallback model chain (format: `"model"` or `"provider:model"`). |
 | `timeout_seconds` | int | `600` | Request timeout. |
 | `max_iterations` | int | `30` | Max ReAct iterations (generic cap). |
-| `max_iters_sync` | int | `50` | Max iterations for sync (`ExtractAgent`). |
-| `max_iters_maintain` | int | `100` | Max iterations for maintain (`MaintainAgent`). |
+| `max_iters_sync` | int | `15` | Max iterations for sync (`ExtractAgent`). |
+| `max_iters_maintain` | int | `30` | Max iterations for maintain (`MaintainAgent`). |
 | `max_iters_ask` | int | `30` | Max iterations for ask (`AskAgent`). |
 | `max_tokens` | int | `32000` | Max completion tokens. |
 | `openrouter_provider_order` | list | `[]` | OpenRouter-specific provider ordering preference. |

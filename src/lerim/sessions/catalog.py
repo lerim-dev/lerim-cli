@@ -23,7 +23,6 @@ JOB_STATUS_RUNNING = "running"
 JOB_STATUS_DONE = "done"
 JOB_STATUS_FAILED = "failed"
 JOB_STATUS_DEAD_LETTER = "dead_letter"
-SESSION_JOB_TERMINAL = {JOB_STATUS_DONE, JOB_STATUS_DEAD_LETTER}
 SESSION_JOB_ACTIVE = {JOB_STATUS_PENDING, JOB_STATUS_RUNNING}
 _DB_INIT_LOCK = threading.Lock()
 _DB_INITIALIZED_PATH: Path | None = None
@@ -411,23 +410,6 @@ def list_sessions_window(
             [*params, limit, offset],
         ).fetchall()
     return rows, int((total_row or {}).get("total") or 0)
-
-
-def list_sessions_for_vectors(limit: int = 2000) -> list[dict[str, Any]]:
-    """Return recent sessions with summary text for optional vector indexing."""
-    _ensure_sessions_db_initialized()
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT run_id, summary_text, agent_type, start_time
-            FROM session_docs
-            WHERE summary_text IS NOT NULL AND summary_text != ''
-            ORDER BY start_time DESC, indexed_at DESC
-            LIMIT ?
-            """,
-            (max(1, int(limit)),),
-        ).fetchall()
-    return rows
 
 
 def index_new_sessions(

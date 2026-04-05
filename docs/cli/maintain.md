@@ -42,11 +42,11 @@ lerim maintain --dry-run      # preview only, no writes
 
 ## What maintenance does
 
-1. **Scan** — Inspect memories (manifest + files under `memory/`)
+1. **Scan** — Inspect memories (index + files under `memory/`)
 2. **Merge duplicates** — Consolidate overlapping markdown files
 3. **Archive low-value** — Move unneeded files to `memory/archived/`
 4. **Consolidate** — Strengthen related entries via edits or new files
-5. **Re-index** — Refresh `MEMORY.md` when instructed by the agent
+5. **Re-index** — Refresh `index.md` when instructed by the agent
 
 !!! info "Non-destructive"
     Maintenance is non-destructive — archived memories are moved to `memory/archived/` rather than deleted.

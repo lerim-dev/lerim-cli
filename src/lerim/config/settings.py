@@ -34,7 +34,7 @@ class RoleConfig:
 	"""Configuration for any LLM role (lead, extract).
 
 	All fields have defaults so the same class works for lead (uses max_iters_*),
-	extract (uses max_window_tokens, max_workers), or any future role.
+	extract (uses max_window_tokens), or any future role.
 	"""
 
 	provider: str
@@ -47,14 +47,12 @@ class RoleConfig:
 	max_tokens: int = 32000
 	# Lead-specific
 	max_iterations: int = 10
-	max_explorers: int = 4
-	max_iters_sync: int = 50
-	max_iters_maintain: int = 100
+	max_iters_sync: int = 15
+	max_iters_maintain: int = 30
 	max_iters_ask: int = 30
 	# DSPy-specific
 	max_window_tokens: int = 100000
 	window_overlap_tokens: int = 5000
-	max_workers: int = 4
 
 
 def load_toml_file(path: Path | None) -> dict[str, Any]:
@@ -156,39 +154,6 @@ def ensure_user_config_exists() -> Path:
     )
     return path
 
-
-def _ensure_project_config_exists(data_root: Path) -> Path:
-    """Create project config scaffold under a resolved data root when missing."""
-    path = data_root / "config.toml"
-    if path.exists() or os.getenv("PYTEST_CURRENT_TEST"):
-        return path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        """\
-# Lerim project overrides
-# Only set what this repo needs.
-
-# [memory]
-# scope = "project_fallback_global"
-
-# [roles.lead]
-# model = "qwen/qwen3-coder-30b-a3b-instruct"
-""",
-        encoding="utf-8",
-    )
-    gitignore = data_root / ".gitignore"
-    if not gitignore.exists():
-        gitignore.write_text(
-            """\
-# Lerim data (not committed by default)
-memory/
-index/
-workspace/
-meta/
-""",
-            encoding="utf-8",
-        )
-    return path
 
 
 def _load_layers() -> tuple[dict[str, Any], list[dict[str, str]]]:
@@ -343,13 +308,11 @@ def _build_role(
 		thinking=bool(raw.get("thinking", True)),
 		max_tokens=int(raw.get("max_tokens", 32000)),
 		max_iterations=int(raw.get("max_iterations", 10)),
-		max_explorers=int(raw.get("max_explorers", 4)),
-		max_iters_sync=int(raw.get("max_iters_sync", 50)),
-		max_iters_maintain=int(raw.get("max_iters_maintain", 100)),
+		max_iters_sync=int(raw.get("max_iters_sync", 15)),
+		max_iters_maintain=int(raw.get("max_iters_maintain", 30)),
 		max_iters_ask=int(raw.get("max_iters_ask", 30)),
 		max_window_tokens=int(raw.get("max_window_tokens", 100000)),
 		window_overlap_tokens=int(raw.get("window_overlap_tokens", 5000)),
-		max_workers=int(raw.get("max_workers", 4)),
 	)
 
 
@@ -445,7 +408,6 @@ def load_config() -> Config:
 
     for data_root in scope.ordered_data_dirs:
         ensure_memory_paths(build_memory_paths(data_root))
-        _ensure_project_config_exists(data_root)
 
     lead_role, extract_role = _build_all_roles(roles)
 
@@ -516,23 +478,8 @@ def load_config() -> Config:
     )
 
 
-_CONFIG_OVERRIDE: Config | None = None
-
-
-def set_config_override(config: Config | None) -> None:
-    """Set a process-wide config override for isolated execution.
-
-    When set, get_config() returns this instead of the cached load_config().
-    Call set_config_override(None) to clear.
-    """
-    global _CONFIG_OVERRIDE
-    _CONFIG_OVERRIDE = config
-
-
 def get_config() -> Config:
-    """Return config override if set, otherwise cached config."""
-    if _CONFIG_OVERRIDE is not None:
-        return _CONFIG_OVERRIDE
+    """Return cached config from TOML layers + env."""
     return load_config()
 
 
@@ -601,85 +548,6 @@ def _write_config_full(data: dict[str, Any]) -> Config:
     _toml_write_dict(lines, data, prefix="")
     user_path.write_text("".join(lines), encoding="utf-8")
     return reload_config()
-
-
-def build_isolated_config(
-    roles_override: dict[str, dict[str, Any]], temp_data_dir: Path
-) -> Config:
-    """Build an isolated Config without any disk side effects.
-
-    Reads base TOML layers (read-only) and env API keys, deep-merges
-    roles_override into the roles section, and returns a Config with all paths
-    pointing to temp_data_dir. Does NOT call ensure_user_config_exists(),
-    ensure_memory_paths(), _ensure_project_config_exists(), or
-    save_config_patch().
-    """
-    load_dotenv()
-    toml_data, _sources = _load_layers()
-
-    memory = toml_data.get("memory", {})
-    server = toml_data.get("server", {})
-    roles = _ensure_dict(toml_data, "roles")
-    tracing = _ensure_dict(toml_data, "tracing")
-
-    # Deep-merge roles_override into roles section
-    for role_name, overrides in roles_override.items():
-        existing = _ensure_dict(roles, role_name)
-        roles[role_name] = _deep_merge(existing, overrides)
-
-    lead_role, extract_role = _build_all_roles(roles)
-
-    port = _require_int(server, "port", minimum=1)
-    if port > 65535:
-        port = 8765
-
-    agents = _parse_string_table(_ensure_dict(toml_data, "agents"))
-    projects = _parse_string_table(_ensure_dict(toml_data, "projects"))
-
-    memory_scope = (
-        _to_non_empty_string(memory.get("scope")).lower() or "project_fallback_global"
-    )
-
-    return Config(
-        data_dir=temp_data_dir,
-        global_data_dir=temp_data_dir,
-        memory_dir=temp_data_dir / "memory",
-        index_dir=temp_data_dir / "index",
-        sessions_db_path=temp_data_dir / "index" / "sessions.sqlite3",
-        platforms_path=temp_data_dir / "platforms.json",
-        memory_scope=memory_scope,
-        memory_project_dir_name=_to_non_empty_string(memory.get("project_dir_name"))
-        or ".lerim",
-        server_host=_to_non_empty_string(server.get("host")) or "127.0.0.1",
-        server_port=port,
-        sync_interval_minutes=_require_int(server, "sync_interval_minutes", minimum=1),
-        maintain_interval_minutes=_require_int(
-            server, "maintain_interval_minutes", minimum=1
-        ),
-        sync_window_days=_require_int(server, "sync_window_days", minimum=1),
-        sync_max_sessions=_require_int(server, "sync_max_sessions", minimum=1),
-        parallel_pipelines=bool(server.get("parallel_pipelines", True)),
-        lead_role=lead_role,
-        extract_role=extract_role,
-        tracing_enabled=bool(tracing.get("enabled", False))
-        or os.getenv("LERIM_TRACING", "").strip().lower() in ("1", "true", "yes", "on"),
-        tracing_include_httpx=bool(tracing.get("include_httpx", False)),
-        tracing_include_content=bool(tracing.get("include_content", True)),
-        anthropic_api_key=_to_non_empty_string(os.environ.get("ANTHROPIC_API_KEY"))
-        or None,
-        openai_api_key=_to_non_empty_string(os.environ.get("OPENAI_API_KEY")) or None,
-        zai_api_key=_to_non_empty_string(os.environ.get("ZAI_API_KEY")) or None,
-        openrouter_api_key=_to_non_empty_string(os.environ.get("OPENROUTER_API_KEY"))
-        or None,
-        minimax_api_key=_to_non_empty_string(os.environ.get("MINIMAX_API_KEY")) or None,
-        opencode_api_key=None,
-        provider_api_bases=_parse_string_table(_ensure_dict(toml_data, "providers")),
-        auto_unload=bool(_ensure_dict(toml_data, "providers").get("auto_unload", True)),
-        cloud_endpoint="https://api.lerim.dev",
-        cloud_token=None,
-        agents=agents,
-        projects=projects,
-    )
 
 
 if __name__ == "__main__":

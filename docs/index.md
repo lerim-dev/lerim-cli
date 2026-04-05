@@ -119,7 +119,7 @@ LLM pipelines extract decisions and learnings from sessions
 
 #### :material-refresh: Continuous refinement
 
-Merges duplicates, archives stale entries, maintains `MEMORY.md`
+Merges duplicates, archives stale entries, maintains `index.md`
 
 </div>
 
@@ -178,7 +178,7 @@ lerim connect auto
 
 ### Sync sessions
 
-Lerim reads session transcripts and runs **ExtractAgent** (DSPy ReAct) with the **`[roles.lead]`** model. The agent calls tools to read the trace, scan existing memories, write or edit markdown, update `MEMORY.md`, and save a session summary:
+Lerim reads session transcripts and runs **ExtractAgent** (DSPy ReAct) with the **`[roles.lead]`** model. The agent calls methods on `MemoryTools` to read the trace, scan existing memories, write or edit markdown, and save a session summary:
 
 ```mermaid
 flowchart TB
@@ -188,19 +188,13 @@ flowchart TB
     subgraph lm["LM"]
         L[roles.lead]
     end
-    subgraph syncTools["Sync tools"]
-        t1["read_file · read_trace · grep_trace"]
-        sm[scan_memory_manifest]
-        wm["write_memory · edit_memory"]
-        ui["update_memory_index · write_summary"]
-        lf[list_files]
+    subgraph syncTools["Sync tools (5)"]
+        t1["read · grep · scan"]
+        wm["write · edit"]
     end
     RT --> L
     RT --> t1
-    RT --> sm
     RT --> wm
-    RT --> ui
-    RT --> lf
 ```
 
 </div>
@@ -216,18 +210,14 @@ flowchart TB
     subgraph lead_m["Lead"]
         RT_m[LerimRuntime · MaintainAgent]
     end
-    subgraph maintainTools["Maintain tools"]
-        t2["read_file · list_files"]
-        sm2[scan_memory_manifest]
-        wm2["write_memory · edit_memory"]
-        ar[archive_memory]
-        ui2[update_memory_index]
+    subgraph maintainTools["Maintain tools (5)"]
+        t2["read · scan"]
+        wm2["write · edit"]
+        ar[archive]
     end
     RT_m --> t2
-    RT_m --> sm2
     RT_m --> wm2
     RT_m --> ar
-    RT_m --> ui2
 ```
 
 </div>

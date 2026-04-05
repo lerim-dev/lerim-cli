@@ -1528,19 +1528,3 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
     def do_DELETE(self) -> None:  # noqa: N802
         """Reject mutating DELETE requests in read-only dashboard mode."""
         self._error(HTTPStatus.FORBIDDEN, READ_ONLY_MESSAGE)
-
-
-def run_dashboard_server(host: str | None = None, port: int | None = None) -> int:
-    """Run HTTP server (JSON API; same handler as ``lerim serve``)."""
-    config = get_config()
-    bind_host = host or config.server_host or "127.0.0.1"
-    bind_port = int(port or config.server_port or 8765)
-    init_sessions_db()
-    httpd = ThreadingHTTPServer((bind_host, bind_port), DashboardHandler)
-    logger.info("Lerim API server at http://{}:{}/", bind_host, bind_port)
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        logger.info("Shutting down dashboard server")
-        httpd.shutdown()
-    return 0

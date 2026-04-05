@@ -57,7 +57,7 @@ flowchart TD
 
 The sync path processes new agent sessions and turns them into memories.
 
-**Agent / tools view** -- `LerimRuntime` runs **ExtractAgent** (DSPy ReAct) with the **`[roles.lead]`** language model. The agent calls tools in `make_extract_tools` (see `lerim.agents.tools`) to read the trace, inspect existing memories, write or edit files, refresh `MEMORY.md`, and call `write_summary`:
+**Agent / tools view** -- `LerimRuntime` runs **ExtractAgent** (DSPy ReAct) with the **`[roles.lead]`** language model. The agent calls methods on `MemoryTools(memory_root, trace_path)` to read the trace, inspect existing memories, write or edit files, and save summaries:
 
 ```mermaid
 flowchart TB
@@ -67,19 +67,13 @@ flowchart TB
     subgraph lm["LM"]
         L[roles.lead]
     end
-    subgraph syncTools["Sync tools"]
-        t1["read_file · read_trace · grep_trace"]
-        sm[scan_memory_manifest]
-        wm["write_memory · edit_memory"]
-        ui["update_memory_index · write_summary"]
-        lf[list_files]
+    subgraph syncTools["Sync tools (5)"]
+        t1["read · grep · scan"]
+        wm["write · edit"]
     end
     RT --> L
     RT --> t1
-    RT --> sm
     RT --> wm
-    RT --> ui
-    RT --> lf
 ```
 
 **Pipeline steps** (ingest + agent run):
@@ -88,8 +82,8 @@ flowchart TB
 2. **Index** -- new sessions are cataloged with metadata (agent type, repo path, timestamps)
 3. **Compact** -- traces are compacted by stripping tool outputs and reasoning blocks (typically 40-90% size reduction), cached in `~/.lerim/cache/`
 4. **Extract (ReAct)** -- the lead agent reads the transcript and existing memories, then writes high-value items as typed markdown (`user`, `feedback`, `project`, `reference`)
-5. **Dedupe** -- happens inside the agent loop via `scan_memory_manifest`, `read_file`, `write_memory`, and `edit_memory`
-6. **Summarize** -- `write_summary` stores an episodic summary under `memory/summaries/`
+5. **Dedupe** -- happens inside the agent loop via `scan`, `read`, `write`, and `edit` on `MemoryTools`
+6. **Summarize** -- `write(type="summary", ...)` stores an episodic summary under `memory/summaries/`
 
 ---
 
@@ -97,34 +91,30 @@ flowchart TB
 
 The maintain path refines existing memories offline.
 
-**Agent / tools view** — same **`[roles.lead]`** model; **MaintainAgent** uses `make_maintain_tools` (no trace ingestion):
+**Agent / tools view** — same **`[roles.lead]`** model; **MaintainAgent** uses `MemoryTools(memory_root)` (no trace ingestion):
 
 ```mermaid
 flowchart TB
     subgraph lead_m["Lead"]
         RT_m[LerimRuntime · MaintainAgent]
     end
-    subgraph maintainTools["Maintain tools"]
-        t2["read_file · list_files"]
-        sm2[scan_memory_manifest]
-        wm2["write_memory · edit_memory"]
-        ar[archive_memory]
-        ui2[update_memory_index]
+    subgraph maintainTools["Maintain tools (5)"]
+        t2["read · scan"]
+        wm2["write · edit"]
+        ar[archive]
     end
     RT_m --> t2
-    RT_m --> sm2
     RT_m --> wm2
     RT_m --> ar
-    RT_m --> ui2
 ```
 
 **Pipeline steps** (what the maintainer prompt instructs):
 
-1. **Scan** -- `scan_memory_manifest()` plus optional reads of `MEMORY.md` and `summaries/`
+1. **Scan** -- `scan()` plus optional reads of `index.md` and `summaries/`
 2. **Merge duplicates** -- archive or edit redundant files
-3. **Archive low-value** -- `archive_memory()` moves files to `memory/archived/`
-4. **Consolidate** -- combine topics via `edit_memory()` / `write_memory()`
-5. **Re-index** -- `update_memory_index()` refreshes `MEMORY.md`
+3. **Archive low-value** -- `archive()` moves files to `memory/archived/`
+4. **Consolidate** -- combine topics via `edit()` / `write()`
+5. **Re-index** -- agent uses `edit("index.md", ...)` to refresh the memory index
 
 ---
 
@@ -176,7 +166,7 @@ lerim up/down     (host only, manages Docker)
 <repo>/.lerim/
 ├── memory/
 │   ├── *.md                     # flat memory files (YAML frontmatter)
-│   ├── MEMORY.md                # optional index (maintained by the agent)
+│   ├── index.md                 # optional index (maintained by the agent)
 │   ├── summaries/YYYYMMDD/HHMMSS/  # episodic session summaries
 │   └── archived/                # soft-deleted memories
 └── workspace/                   # run artifacts (logs, per-run JSON)
