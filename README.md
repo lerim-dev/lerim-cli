@@ -278,18 +278,17 @@ tests/run_tests.sh unit
 tests/run_tests.sh all
 ```
 
-### Tracing (OpenTelemetry)
+### Tracing (MLflow)
 
-When enabled, tracing uses Logfire (OpenTelemetry): `logfire.instrument_dspy()` covers all DSPy ReAct agents, extraction, and summarization; optional httpx captures raw LLM HTTP traffic.
+When enabled (`LERIM_MLFLOW=true`), tracing uses MLflow: `mlflow.dspy.autolog()` covers all DSPy ReAct agents, extraction, and summarization. View traces via `mlflow ui`.
 
 ```bash
 # Enable tracing
-LERIM_TRACING=1 lerim sync
+LERIM_MLFLOW=true lerim sync
 
-# or in config
-# .lerim/config.toml
-[tracing]
-enabled = true
+# or in .env
+# ~/.lerim/.env
+LERIM_MLFLOW=true
 ```
 
 ## Memory layout

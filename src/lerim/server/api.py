@@ -459,26 +459,6 @@ _API_KEY_ENV_NAMES = (
 )
 
 
-def _read_logfire_token() -> str | None:
-    """Try to read the Logfire write-token from the local credentials file.
-
-    Logfire stores project credentials in ``.logfire/logfire_credentials.json``
-    relative to the CWD (created by ``logfire projects use`` or ``logfire auth``).
-    Returns the token string or *None* if the file doesn't exist / is invalid.
-    """
-    import json as _json
-
-    creds_path = Path.cwd() / ".logfire" / "logfire_credentials.json"
-    if not creds_path.is_file():
-        creds_path = Path.home() / ".logfire" / "logfire_credentials.json"
-    if not creds_path.is_file():
-        return None
-    try:
-        data = _json.loads(creds_path.read_text(encoding="utf-8"))
-        return data.get("token") or None
-    except Exception:
-        return None
-
 
 def _find_package_root() -> Path | None:
     """Locate the Lerim source tree root by walking up from this file."""
@@ -528,19 +508,9 @@ def _generate_compose_yml(build_local: bool = False) -> str:
     for key in _API_KEY_ENV_NAMES:
         if os.environ.get(key):
             env_lines.append(f"      - {key}")
-    # Forward tracing flag so Logfire is enabled inside the container
-    if os.environ.get("LERIM_TRACING"):
-        env_lines.append("      - LERIM_TRACING")
-    # Forward LOGFIRE_TOKEN so the container can send traces.
-    # Logfire normally reads from .logfire/logfire_credentials.json relative
-    # to the CWD, which doesn't exist in the container.  The LOGFIRE_TOKEN
-    # env var is the recommended approach for non-local environments.
-    if not os.environ.get("LOGFIRE_TOKEN") and config.tracing_enabled:
-        token = _read_logfire_token()
-        if token:
-            os.environ["LOGFIRE_TOKEN"] = token
-    if os.environ.get("LOGFIRE_TOKEN"):
-        env_lines.append("      - LOGFIRE_TOKEN")
+    # Forward MLflow flag so tracing is enabled inside the container
+    if os.environ.get("LERIM_MLFLOW"):
+        env_lines.append("      - LERIM_MLFLOW")
     env_block = "\n".join(env_lines)
 
     if build_local:

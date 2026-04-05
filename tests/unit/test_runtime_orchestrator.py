@@ -481,11 +481,6 @@ class TestSyncFlow:
 			lambda **kw: MagicMock(return_value=pred),
 		)
 
-		# Patch logfire.span to be a no-op context manager
-		mock_span = MagicMock()
-		mock_span.__enter__ = MagicMock(return_value=mock_span)
-		mock_span.__exit__ = MagicMock(return_value=False)
-		monkeypatch.setattr("lerim.server.runtime.logfire.span", lambda *a, **kw: mock_span)
 
 		result = rt.sync(
 			trace_path=trace_file,
@@ -518,10 +513,6 @@ class TestSyncFlow:
 			"lerim.server.runtime.ExtractAgent",
 			lambda **kw: MagicMock(return_value=pred),
 		)
-		mock_span = MagicMock()
-		mock_span.__enter__ = MagicMock(return_value=mock_span)
-		mock_span.__exit__ = MagicMock(return_value=False)
-		monkeypatch.setattr("lerim.server.runtime.logfire.span", lambda *a, **kw: mock_span)
 
 		result = rt.sync(
 			trace_path=trace_file,
@@ -562,10 +553,6 @@ class TestMaintainFlow:
 			"lerim.server.runtime.MaintainAgent",
 			lambda **kw: MagicMock(return_value=pred),
 		)
-		mock_span = MagicMock()
-		mock_span.__enter__ = MagicMock(return_value=mock_span)
-		mock_span.__exit__ = MagicMock(return_value=False)
-		monkeypatch.setattr("lerim.server.runtime.logfire.span", lambda *a, **kw: mock_span)
 
 		result = rt.maintain(
 			memory_root=str(tmp_path / "memory"),
@@ -593,10 +580,6 @@ class TestMaintainFlow:
 			"lerim.server.runtime.MaintainAgent",
 			lambda **kw: MagicMock(return_value=pred),
 		)
-		mock_span = MagicMock()
-		mock_span.__enter__ = MagicMock(return_value=mock_span)
-		mock_span.__exit__ = MagicMock(return_value=False)
-		monkeypatch.setattr("lerim.server.runtime.logfire.span", lambda *a, **kw: mock_span)
 
 		result = rt.maintain(
 			memory_root=str(tmp_path / "memory"),
@@ -617,10 +600,6 @@ class TestMaintainFlow:
 			"lerim.server.runtime.MaintainAgent",
 			lambda **kw: MagicMock(side_effect=RuntimeError("LLM failed")),
 		)
-		mock_span = MagicMock()
-		mock_span.__enter__ = MagicMock(return_value=mock_span)
-		mock_span.__exit__ = MagicMock(return_value=False)
-		monkeypatch.setattr("lerim.server.runtime.logfire.span", lambda *a, **kw: mock_span)
 
 		with pytest.raises(RuntimeError, match="Failed after trying"):
 			rt.maintain(

@@ -12,8 +12,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-import logfire
-
 from lerim.config.project_scope import match_session_project
 from lerim.config.settings import get_config, reload_config
 from lerim.server.runtime import LerimRuntime
@@ -372,13 +370,12 @@ def _process_one_job(job: dict[str, Any]) -> dict[str, Any]:
 
     attempts = max(int(job.get("attempts") or 1), 1)
     try:
-        with logfire.span("process_session", run_id=rid, repo_path=repo_path):
-            session_path = str(job.get("session_path") or "").strip()
-            if not session_path:
-                doc = fetch_session_doc(rid) or {}
-                session_path = str(doc.get("session_path") or "").strip()
-            agent = LerimRuntime(default_cwd=repo_path)
-            result = agent.sync(Path(session_path), memory_root=project_memory)
+        session_path = str(job.get("session_path") or "").strip()
+        if not session_path:
+            doc = fetch_session_doc(rid) or {}
+            session_path = str(doc.get("session_path") or "").strip()
+        agent = LerimRuntime(default_cwd=repo_path)
+        result = agent.sync(Path(session_path), memory_root=project_memory)
     except Exception as exc:
         fail_session_job(
             rid,
@@ -461,8 +458,6 @@ def run_sync_once(
             )
             return EXIT_LOCK_BUSY, _empty_sync_summary()
 
-    _sync_span = logfire.span("sync_cycle", trigger=trigger, max_sessions=max_sessions)
-    _sync_span.__enter__()
     try:
         record_service_run(
             job_type="sync",
@@ -612,7 +607,6 @@ def run_sync_once(
             trigger=trigger,
             details=op_result.to_details_json(),
         )
-        _sync_span.set_attributes(op_result.to_span_attrs())
         if not dry_run and extracted:
             log_activity(
                 "sync",
@@ -639,7 +633,6 @@ def run_sync_once(
         )
         return EXIT_FATAL, _empty_sync_summary()
     finally:
-        _sync_span.__exit__(None, None, None)
         if lock:
             lock.release()
 
@@ -693,8 +686,6 @@ def run_maintain_once(
         )
         return EXIT_LOCK_BUSY, {"error": str(exc)}
 
-    _maintain_span = logfire.span("maintain_cycle", trigger=trigger)
-    _maintain_span.__enter__()
     try:
         config = get_config()
         projects = config.projects or {}
@@ -710,23 +701,22 @@ def run_maintain_once(
                 continue
             project_memory = str(project_path / ".lerim" / "memory")
             try:
-                with logfire.span("maintain_project", project=project_name):
-                    agent = LerimRuntime(default_cwd=str(project_path))
-                    result = agent.maintain(memory_root=project_memory)
-                    results[project_name] = result
-                    # Check for memory index
-                    memory_index_path = Path(project_memory) / "index.md"
-                    if memory_index_path.exists():
-                        result["memory_index_exists"] = True
-                    maintain_cost = float(result.get("cost_usd") or 0)
-                    if maintain_cost:
-                        log_activity(
-                            "maintain",
-                            project_name,
-                            "maintenance completed",
-                            time.monotonic() - t0,
-                            cost_usd=maintain_cost,
-                        )
+                agent = LerimRuntime(default_cwd=str(project_path))
+                result = agent.maintain(memory_root=project_memory)
+                results[project_name] = result
+                # Check for memory index
+                memory_index_path = Path(project_memory) / "index.md"
+                if memory_index_path.exists():
+                    result["memory_index_exists"] = True
+                maintain_cost = float(result.get("cost_usd") or 0)
+                if maintain_cost:
+                    log_activity(
+                        "maintain",
+                        project_name,
+                        "maintenance completed",
+                        time.monotonic() - t0,
+                        cost_usd=maintain_cost,
+                    )
             except Exception as exc:
                 failed_projects.append(project_name)
                 results[project_name] = {"error": str(exc)}
@@ -750,7 +740,6 @@ def run_maintain_once(
             trigger=trigger,
             details=op_result.to_details_json(),
         )
-        _maintain_span.set_attributes(op_result.to_span_attrs())
         code = (
             EXIT_FATAL
             if status == "failed"
@@ -774,7 +763,6 @@ def run_maintain_once(
         )
         return EXIT_FATAL, {"error": str(exc)}
     finally:
-        _maintain_span.__exit__(None, None, None)
         writer.release()
 
 

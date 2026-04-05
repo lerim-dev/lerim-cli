@@ -17,8 +17,6 @@ from pathlib import Path
 from typing import Any
 
 import dspy
-import logfire
-
 from lerim.config.settings import Config, get_config
 from lerim.agents.ask import AskAgent
 from lerim.agents.contracts import (
@@ -358,8 +356,7 @@ class LerimRuntime:
 			raise FileNotFoundError(f"trace_path_missing:{trace_file}")
 
 		repo_root = Path(self._default_cwd or Path.cwd()).expanduser().resolve()
-		with logfire.span("extract_agent", trace_path=str(trace_file), repo=repo_root.name):
-			return self._sync_inner(trace_file, repo_root, memory_root, workspace_root)
+		return self._sync_inner(trace_file, repo_root, memory_root, workspace_root)
 
 	def _sync_inner(
 		self,
@@ -368,7 +365,7 @@ class LerimRuntime:
 		memory_root: str | Path | None,
 		workspace_root: str | Path | None,
 	) -> dict[str, Any]:
-		"""Inner sync logic wrapped by a Logfire span in sync()."""
+		"""Inner sync logic called by sync()."""
 		resolved_memory_root, resolved_workspace_root = _resolve_runtime_roots(
 			config=self.config,
 			memory_root=memory_root,
@@ -401,12 +398,11 @@ class LerimRuntime:
 		history_start = len(getattr(self._lead_lm, "history", []) or [])
 		start_cost_tracking()
 		try:
-			with logfire.span("sync_react_run"):
-				prediction = self._run_with_fallback(
-					flow="sync",
-					module=agent,
-					input_args={},
-				)
+			prediction = self._run_with_fallback(
+				flow="sync",
+				module=agent,
+				input_args={},
+			)
 
 			capture_dspy_cost(self._lead_lm, history_start)
 			cost_usd = stop_cost_tracking()
@@ -475,8 +471,7 @@ class LerimRuntime:
 			RuntimeError: On agent failure or missing artifacts.
 		"""
 		repo_root = Path(self._default_cwd or Path.cwd()).expanduser().resolve()
-		with logfire.span("maintain_agent", repo=repo_root.name):
-			return self._maintain_inner(repo_root, memory_root, workspace_root)
+		return self._maintain_inner(repo_root, memory_root, workspace_root)
 
 	def _maintain_inner(
 		self,
@@ -484,7 +479,7 @@ class LerimRuntime:
 		memory_root: str | Path | None,
 		workspace_root: str | Path | None,
 	) -> dict[str, Any]:
-		"""Inner maintain logic wrapped by a Logfire span in maintain()."""
+		"""Inner maintain logic called by maintain()."""
 		resolved_memory_root, resolved_workspace_root = _resolve_runtime_roots(
 			config=self.config,
 			memory_root=memory_root,
@@ -507,12 +502,11 @@ class LerimRuntime:
 		history_start = len(getattr(self._lead_lm, "history", []) or [])
 		start_cost_tracking()
 		try:
-			with logfire.span("maintain_react_run"):
-				prediction = self._run_with_fallback(
-					flow="maintain",
-					module=agent,
-					input_args={},
-				)
+			prediction = self._run_with_fallback(
+				flow="maintain",
+				module=agent,
+				input_args={},
+			)
 
 			capture_dspy_cost(self._lead_lm, history_start)
 			cost_usd = stop_cost_tracking()

@@ -203,9 +203,7 @@ class Config:
 
     agent_role: RoleConfig
 
-    tracing_enabled: bool
-    tracing_include_httpx: bool
-    tracing_include_content: bool
+    mlflow_enabled: bool
 
     anthropic_api_key: str | None
     openai_api_key: str | None
@@ -250,9 +248,7 @@ class Config:
                 ),
             },
             "parallel_pipelines": self.parallel_pipelines,
-            "tracing_enabled": self.tracing_enabled,
-            "tracing_include_httpx": self.tracing_include_httpx,
-            "tracing_include_content": self.tracing_include_content,
+            "mlflow_enabled": self.mlflow_enabled,
             "provider_api_bases": dict(self.provider_api_bases),
             "auto_unload": self.auto_unload,
             "cloud_endpoint": self.cloud_endpoint,
@@ -358,8 +354,6 @@ def load_config() -> Config:
     memory = toml_data.get("memory", {})
     server = toml_data.get("server", {})
     roles = _ensure_dict(toml_data, "roles")
-    tracing = _ensure_dict(toml_data, "tracing")
-
     global_data_dir = _expand(data.get("dir"), GLOBAL_DATA_DIR)
 
     memory_scope = (
@@ -432,10 +426,8 @@ def load_config() -> Config:
         sync_max_sessions=_require_int(server, "sync_max_sessions", minimum=1),
         parallel_pipelines=bool(server.get("parallel_pipelines", True)),
         agent_role=agent_role,
-        tracing_enabled=bool(tracing.get("enabled", False))
-        or os.getenv("LERIM_TRACING", "").strip().lower() in ("1", "true", "yes", "on"),
-        tracing_include_httpx=bool(tracing.get("include_httpx", False)),
-        tracing_include_content=bool(tracing.get("include_content", True)),
+        mlflow_enabled=os.getenv("LERIM_MLFLOW", "").strip().lower()
+        in ("1", "true", "yes", "on"),
         anthropic_api_key=_to_non_empty_string(os.environ.get("ANTHROPIC_API_KEY"))
         or None,
         openai_api_key=_to_non_empty_string(os.environ.get("OPENAI_API_KEY")) or None,
@@ -536,9 +528,7 @@ if __name__ == "__main__":
     assert cfg.agent_role.provider
     assert cfg.agent_role.model
     assert isinstance(cfg.agent_role.fallback_models, tuple)
-    assert isinstance(cfg.tracing_enabled, bool)
-    assert isinstance(cfg.tracing_include_httpx, bool)
-    assert isinstance(cfg.tracing_include_content, bool)
+    assert isinstance(cfg.mlflow_enabled, bool)
     assert isinstance(cfg.agents, dict)
     assert isinstance(cfg.projects, dict)
     payload = cfg.public_dict()

@@ -72,11 +72,6 @@ litellm_proxy = "http://127.0.0.1:4000"
 mlx = "http://127.0.0.1:8000/v1"
 auto_unload = true                     # unload Ollama models after each sync/maintain cycle to free RAM
 
-[tracing]
-enabled = false                          # set true or LERIM_TRACING=1 to enable
-include_httpx = false                    # capture raw HTTP request/response bodies
-include_content = true                   # include prompt/completion text in spans
-
 [cloud]
 endpoint = "https://api.lerim.dev"
 # token is set via `lerim auth` or LERIM_CLOUD_TOKEN env var
@@ -189,16 +184,6 @@ Default API base URLs per provider. Per-role `api_base` takes precedence over th
 | `litellm_proxy` | string | `"http://127.0.0.1:4000"` | LiteLLM proxy base (used for Ollama think-off routing). |
 | `mlx` | string | `"http://127.0.0.1:8000/v1"` | vllm-mlx local API base (Apple Silicon). |
 | `auto_unload` | bool | `true` | Unload Ollama models from RAM after each sync/maintain cycle. Set `false` to keep models loaded between cycles. |
-
-### `[tracing]`
-
-OpenTelemetry tracing via Logfire. See [Tracing](tracing.md) for setup instructions.
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `enabled` | bool | `false` | Enable tracing. Also toggleable via `LERIM_TRACING=1` env var. |
-| `include_httpx` | bool | `false` | Capture raw HTTP request/response bodies in spans. |
-| `include_content` | bool | `true` | Include prompt and completion text in spans. |
 
 ### `[cloud]`
 

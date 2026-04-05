@@ -1,7 +1,7 @@
 """Unit tests for api.py functions: detect_agents, write_init_config,
 api_sync, api_maintain, api_health, api_status, api_project_*,
 api_retry_all_dead_letter, api_skip_all_dead_letter, looks_like_auth_error,
-docker_available, and _read_logfire_token.
+and docker_available.
 
 Focuses on functions testable without Docker/Ollama by mocking the runtime,
 filesystem, and subprocess calls.
@@ -10,7 +10,6 @@ filesystem, and subprocess calls.
 from __future__ import annotations
 
 from contextlib import contextmanager
-import json
 import subprocess
 import urllib.error
 import urllib.request
@@ -24,7 +23,6 @@ import pytest
 import lerim.server.api as api_mod
 from lerim.server.api import (
 	AGENT_DEFAULT_PATHS,
-	_read_logfire_token,
 	api_connect,
 	api_connect_list,
 	api_health,
@@ -500,59 +498,6 @@ def test_api_connect(monkeypatch, tmp_path) -> None:
 	result = api_connect("claude", "/custom/path")
 	assert result["platform"] == "claude"
 	assert result["connected"] is True
-
-
-# ---------------------------------------------------------------------------
-# _read_logfire_token
-# ---------------------------------------------------------------------------
-
-
-def test_read_logfire_token_from_cwd(monkeypatch, tmp_path) -> None:
-	"""_read_logfire_token reads token from .logfire/logfire_credentials.json in cwd."""
-	creds_dir = tmp_path / ".logfire"
-	creds_dir.mkdir()
-	creds_file = creds_dir / "logfire_credentials.json"
-	creds_file.write_text(json.dumps({"token": "lf-test-token"}), encoding="utf-8")
-
-	monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-
-	result = _read_logfire_token()
-	assert result == "lf-test-token"
-
-
-def test_read_logfire_token_missing_file(monkeypatch, tmp_path) -> None:
-	"""_read_logfire_token returns None when file does not exist."""
-	monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-	monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-	result = _read_logfire_token()
-	assert result is None
-
-
-def test_read_logfire_token_invalid_json(monkeypatch, tmp_path) -> None:
-	"""_read_logfire_token returns None on invalid JSON."""
-	creds_dir = tmp_path / ".logfire"
-	creds_dir.mkdir()
-	creds_file = creds_dir / "logfire_credentials.json"
-	creds_file.write_text("not json", encoding="utf-8")
-
-	monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-
-	result = _read_logfire_token()
-	assert result is None
-
-
-def test_read_logfire_token_empty_token(monkeypatch, tmp_path) -> None:
-	"""_read_logfire_token returns None when token field is empty."""
-	creds_dir = tmp_path / ".logfire"
-	creds_dir.mkdir()
-	creds_file = creds_dir / "logfire_credentials.json"
-	creds_file.write_text(json.dumps({"token": ""}), encoding="utf-8")
-
-	monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-
-	result = _read_logfire_token()
-	assert result is None
 
 
 # ---------------------------------------------------------------------------

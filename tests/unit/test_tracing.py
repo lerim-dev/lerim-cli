@@ -1,60 +1,42 @@
-"""Tests for OpenTelemetry tracing configuration (logfire instrumentation)."""
+"""Tests for MLflow tracing configuration (DSPy autologging)."""
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock, patch
 
-from lerim.config.tracing import configure_tracing
+# Seed sys.modules with mock mlflow before importing the tracing module.
+_mock_mlflow = MagicMock()
+_mock_mlflow_dspy = MagicMock()
+_mock_mlflow.dspy = _mock_mlflow_dspy
+
+if "mlflow" not in sys.modules:
+	sys.modules["mlflow"] = _mock_mlflow
+	sys.modules["mlflow.dspy"] = _mock_mlflow_dspy
+
+from lerim.config.tracing import configure_tracing  # noqa: E402
 
 
-def _make_config(
-	*, enabled: bool, include_httpx: bool = False, include_content: bool = True
-):
+def _make_config(*, enabled: bool):
 	"""Build a minimal mock Config for tracing tests."""
 	cfg = MagicMock()
-	cfg.tracing_enabled = enabled
-	cfg.tracing_include_httpx = include_httpx
-	cfg.tracing_include_content = include_content
+	cfg.mlflow_enabled = enabled
 	return cfg
 
 
-@patch("lerim.config.tracing.logfire")
-def test_tracing_disabled_does_nothing(mock_logfire: MagicMock) -> None:
-	"""When tracing is disabled, no logfire calls should be made."""
+@patch("lerim.config.tracing.mlflow")
+def test_tracing_disabled_does_nothing(mock_mlflow: MagicMock) -> None:
+	"""When mlflow_enabled is False, no mlflow calls should be made."""
 	configure_tracing(_make_config(enabled=False))
-	mock_logfire.configure.assert_not_called()
-	mock_logfire.instrument_dspy.assert_not_called()
-	mock_logfire.instrument_httpx.assert_not_called()
+	mock_mlflow.set_experiment.assert_not_called()
+	mock_mlflow.dspy.autolog.assert_not_called()
 
 
-@patch("lerim.config.tracing.logfire")
-def test_tracing_enabled_configures_logfire(mock_logfire: MagicMock) -> None:
-	"""When tracing is enabled, logfire.configure is called with service_name='lerim'."""
+@patch("lerim.config.tracing.mlflow")
+def test_tracing_enabled_sets_experiment_and_autologs(
+	mock_mlflow: MagicMock,
+) -> None:
+	"""When mlflow_enabled is True, set_experiment and dspy.autolog are called."""
 	configure_tracing(_make_config(enabled=True))
-	call_kwargs = mock_logfire.configure.call_args.kwargs
-	assert call_kwargs["send_to_logfire"] == "if-token-present"
-	assert call_kwargs["service_name"] == "lerim"
-	assert call_kwargs["console"] is False
-	# Scrubbing allows 'session' fields through (coding sessions, not auth)
-	assert call_kwargs["scrubbing"] is not None
-
-
-@patch("lerim.config.tracing.logfire")
-def test_tracing_enabled_instruments_dspy(mock_logfire: MagicMock) -> None:
-	"""instrument_dspy is always called when tracing is enabled."""
-	configure_tracing(_make_config(enabled=True))
-	mock_logfire.instrument_dspy.assert_called_once()
-
-
-@patch("lerim.config.tracing.logfire")
-def test_tracing_httpx_off_by_default(mock_logfire: MagicMock) -> None:
-	"""instrument_httpx is NOT called when include_httpx is False."""
-	configure_tracing(_make_config(enabled=True, include_httpx=False))
-	mock_logfire.instrument_httpx.assert_not_called()
-
-
-@patch("lerim.config.tracing.logfire")
-def test_tracing_httpx_on_when_configured(mock_logfire: MagicMock) -> None:
-	"""instrument_httpx IS called with capture_all=True when include_httpx is True."""
-	configure_tracing(_make_config(enabled=True, include_httpx=True))
-	mock_logfire.instrument_httpx.assert_called_once_with(capture_all=True)
+	mock_mlflow.set_experiment.assert_called_once_with("lerim")
+	mock_mlflow.dspy.autolog.assert_called_once()

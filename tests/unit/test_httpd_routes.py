@@ -350,13 +350,6 @@ def test_server(tmp_path, monkeypatch):
 		"skipped": 1, "queue": {"pending": 1},
 	})
 
-	# Mock logfire.propagate for POST handlers that import it
-	import types
-	fake_logfire_propagate = types.ModuleType("logfire.propagate")
-	fake_logfire_propagate.get_context = lambda: {}
-	fake_logfire_propagate.attach_context = lambda ctx: None
-	monkeypatch.setitem(__import__("sys").modules, "logfire.propagate", fake_logfire_propagate)
-
 	# Mock save_config_patch to avoid writing real config
 	monkeypatch.setattr("lerim.server.httpd.save_config_patch", lambda patch: config)
 
@@ -1051,7 +1044,7 @@ def test_serialize_full_config(tmp_path):
 	assert "server" in result
 	assert "roles" in result
 	assert "memory" in result
-	assert "tracing" in result
+	assert "mlflow_enabled" in result
 	assert result["server"]["port"] == 8765
 	assert "agent" in result["roles"]
 
