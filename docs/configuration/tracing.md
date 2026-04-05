@@ -8,9 +8,10 @@ Tracing is opt-in and controlled by the `LERIM_MLFLOW` environment variable.
 When tracing is enabled, MLflow records:
 
 - **DSPy LM calls** -- via `mlflow.dspy.autolog()`, every language model invocation
-  across ReAct agents (sync, maintain, ask) is captured automatically.
-- **Orchestration spans** -- sync cycles, maintain cycles, and ask queries each
-  produce a top-level MLflow run with nested spans.
+  across ReAct agents (sync, maintain, ask) is captured automatically, including
+  input prompts, outputs, token counts, and latency.
+- **Module executions** -- DSPy module calls, tool invocations, and ReAct
+  reasoning steps are traced as nested spans within each run.
 - **agent_trace.json** -- each sync/maintain run also writes a local
   `agent_trace.json` under the run workspace for a full tool/message history
   (not MLflow-specific).
