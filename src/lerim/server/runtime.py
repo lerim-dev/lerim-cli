@@ -188,7 +188,7 @@ def _trajectory_to_trace_list(trajectory: dict) -> list[dict]:
 
 
 class LerimRuntime:
-	"""Lead runtime orchestrator for DSPy ReAct sync, maintain, and ask flows."""
+	"""Runtime orchestrator for DSPy ReAct sync, maintain, and ask flows."""
 
 	def __init__(
 		self,
@@ -205,16 +205,16 @@ class LerimRuntime:
 		self.config = cfg
 		self._default_cwd = default_cwd
 
-		# Validate lead provider.
+		# Validate agent provider.
 		from lerim.config.providers import validate_provider_for_role
-		validate_provider_for_role(cfg.lead_role.provider, "lead")
+		validate_provider_for_role(cfg.agent_role.provider, "agent")
 
-		# Build lead LM via DSPy provider builder.
-		self._lead_lm: dspy.LM = build_dspy_lm("lead", config=cfg)
+		# Build agent LM via DSPy provider builder.
+		self._lead_lm: dspy.LM = build_dspy_lm("agent", config=cfg)
 
 		# Build fallback LMs from config (e.g. fallback_models = ["minimax:minimax-m2.5"]).
 		self._fallback_lms: list[dspy.LM] = build_dspy_fallback_lms(
-			"lead", config=cfg,
+			"agent", config=cfg,
 		)
 
 	# ------------------------------------------------------------------
@@ -269,7 +269,7 @@ class LerimRuntime:
 
 		for model_idx, lm in enumerate(lms):
 			model_label = (
-				self.config.lead_role.model
+				self.config.agent_role.model
 				if model_idx == 0
 				else f"fallback-{model_idx}"
 			)
@@ -292,8 +292,8 @@ class LerimRuntime:
 						)
 						if model_idx < len(lms) - 1:
 							fb_label = (
-								self.config.lead_role.fallback_models[model_idx]
-								if model_idx < len(self.config.lead_role.fallback_models)
+								self.config.agent_role.fallback_models[model_idx]
+								if model_idx < len(self.config.agent_role.fallback_models)
 								else f"fallback-{model_idx + 1}"
 							)
 							logger.warning(
@@ -396,7 +396,7 @@ class LerimRuntime:
 			memory_root=resolved_memory_root,
 			trace_path=trace_file,
 			run_folder=run_folder,
-			max_iters=self.config.lead_role.max_iters_sync,
+			max_iters=self.config.agent_role.max_iters_sync,
 		)
 		history_start = len(getattr(self._lead_lm, "history", []) or [])
 		start_cost_tracking()
@@ -502,7 +502,7 @@ class LerimRuntime:
 		# Create the MaintainAgent module and run with retry + fallback.
 		agent = MaintainAgent(
 			memory_root=resolved_memory_root,
-			max_iters=self.config.lead_role.max_iters_maintain,
+			max_iters=self.config.agent_role.max_iters_maintain,
 		)
 		history_start = len(getattr(self._lead_lm, "history", []) or [])
 		start_cost_tracking()
@@ -598,7 +598,7 @@ class LerimRuntime:
 		# Create the AskAgent module and run with retry + fallback.
 		agent = AskAgent(
 			memory_root=resolved_memory_root,
-			max_iters=self.config.lead_role.max_iters_ask,
+			max_iters=self.config.agent_role.max_iters_ask,
 		)
 		history_start = len(getattr(self._lead_lm, "history", []) or [])
 		start_cost_tracking()

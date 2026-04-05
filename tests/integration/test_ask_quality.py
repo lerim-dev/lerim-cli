@@ -47,7 +47,7 @@ def _seed_all_memories(memory_root: Path) -> list[str]:
 def test_ask_cites_specific_files(tmp_lerim_root):
 	"""Ask answer should reference auth-related content and cite memory filenames."""
 	config = get_config()
-	lm = build_dspy_lm("lead", config=config)
+	lm = build_dspy_lm("agent", config=config)
 	memory_root = tmp_lerim_root / "memory"
 	filenames = _seed_all_memories(memory_root)
 
@@ -81,7 +81,7 @@ def test_ask_cites_specific_files(tmp_lerim_root):
 def test_ask_relevant_to_question(tmp_lerim_root):
 	"""Ask about queues should reference queue memory, not auth memory."""
 	config = get_config()
-	lm = build_dspy_lm("lead", config=config)
+	lm = build_dspy_lm("agent", config=config)
 	memory_root = tmp_lerim_root / "memory"
 	_seed_all_memories(memory_root)
 

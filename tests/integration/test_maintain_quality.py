@@ -57,7 +57,7 @@ def _seed_files(memory_root: Path, filenames: list[str]) -> None:
 def test_maintain_merges_near_duplicates(tmp_lerim_root):
 	"""Near-duplicate memories should be merged or one archived after maintain."""
 	config = get_config()
-	lm = build_dspy_lm("lead", config=config)
+	lm = build_dspy_lm("agent", config=config)
 	memory_root = tmp_lerim_root / "memory"
 	_seed_files(memory_root, [
 		"learning_duplicate_a.md",
@@ -86,7 +86,7 @@ def test_maintain_merges_near_duplicates(tmp_lerim_root):
 def test_maintain_archives_stale(tmp_lerim_root):
 	"""Stale/outdated memory (CSS IE11 hack) should be archived or flagged."""
 	config = get_config()
-	lm = build_dspy_lm("lead", config=config)
+	lm = build_dspy_lm("agent", config=config)
 	memory_root = tmp_lerim_root / "memory"
 	_seed_files(memory_root, ["learning_stale.md"])
 
@@ -125,7 +125,7 @@ def test_maintain_archives_stale(tmp_lerim_root):
 def test_maintain_fixes_index(tmp_lerim_root):
 	"""Maintain should fix a broken index.md so verify_index returns OK."""
 	config = get_config()
-	lm = build_dspy_lm("lead", config=config)
+	lm = build_dspy_lm("agent", config=config)
 	memory_root = tmp_lerim_root / "memory"
 
 	# Seed memories
@@ -163,7 +163,7 @@ def test_maintain_fixes_index(tmp_lerim_root):
 def test_maintain_preserves_summaries(tmp_lerim_root):
 	"""Maintain must not modify or archive summary files."""
 	config = get_config()
-	lm = build_dspy_lm("lead", config=config)
+	lm = build_dspy_lm("agent", config=config)
 	memory_root = tmp_lerim_root / "memory"
 
 	# Seed memories

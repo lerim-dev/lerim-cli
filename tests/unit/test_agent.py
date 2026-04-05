@@ -286,7 +286,7 @@ def _runtime_config(tmp_path, **overrides):
 
 
 def test_runtime_init(tmp_path):
-	"""LerimRuntime should initialize with lead LM."""
+	"""LerimRuntime should initialize with agent LM."""
 	config = _runtime_config(tmp_path)
 	runtime = LerimRuntime(config=config)
 	assert hasattr(runtime, "_lead_lm")
@@ -310,7 +310,7 @@ def test_runtime_init_builds_fallback_lms(tmp_path):
 		fallback_models=("openrouter:qwen/qwen3-coder",),
 		timeout_seconds=120,
 	)
-	cfg = replace(cfg, lead_role=role, openrouter_api_key="test-key")
+	cfg = replace(cfg, agent_role=role, openrouter_api_key="test-key")
 	runtime = LerimRuntime(default_cwd=str(tmp_path), config=cfg)
 	assert len(runtime._fallback_lms) == 1
 
@@ -438,7 +438,7 @@ def test_run_with_fallback_succeeds_on_primary(tmp_path, monkeypatch):
 		fallback_models=("openrouter:qwen/qwen3-coder",),
 		timeout_seconds=120,
 	)
-	cfg = replace(cfg, lead_role=role, openrouter_api_key="test-key")
+	cfg = replace(cfg, agent_role=role, openrouter_api_key="test-key")
 	runtime = LerimRuntime(default_cwd=str(tmp_path), config=cfg)
 
 	call_count = 0
@@ -470,7 +470,7 @@ def test_run_with_fallback_switches_on_quota_error(tmp_path, monkeypatch):
 		fallback_models=("openrouter:qwen/qwen3-coder",),
 		timeout_seconds=120,
 	)
-	cfg = replace(cfg, lead_role=role, openrouter_api_key="test-key")
+	cfg = replace(cfg, agent_role=role, openrouter_api_key="test-key")
 	runtime = LerimRuntime(default_cwd=str(tmp_path), config=cfg)
 
 	models_tried = []

@@ -25,9 +25,9 @@ TRACE_PATH = TRACES_DIR / "claude_short.jsonl"
 
 @pytest.fixture
 def lead_lm():
-	"""Build the lead LM from test config."""
+	"""Build the agent LM from test config."""
 	config = get_config()
-	return build_dspy_lm("lead", config=config)
+	return build_dspy_lm("agent", config=config)
 
 
 @pytest.fixture

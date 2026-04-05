@@ -18,7 +18,7 @@ sync_window_days = 7
 sync_max_sessions = 50
 parallel_pipelines = true               # run extract pipelines in parallel (set false for local/Ollama models)
 
-[roles.lead]
+[roles.agent]
 provider = "opencode_go"               # opencode_go | minimax | zai | openrouter | openai | ollama
 model = "minimax-m2.5"                 # OpenCode Go models: minimax-m2.7, minimax-m2.5, kimi-k2.5, glm-5
 api_base = ""
@@ -26,9 +26,9 @@ api_base = ""
 fallback_models = ["minimax:MiniMax-M2.5"]  # auto-switch on quota/rate-limit errors
 timeout_seconds = 600
 max_iterations = 30
-max_iters_sync = 15                    # max ReAct iterations for lead agent in sync flow
-max_iters_maintain = 30                # max ReAct iterations for lead agent in maintain flow
-max_iters_ask = 30                     # max ReAct iterations for lead agent in ask flow
+max_iters_sync = 15                    # max ReAct iterations for agent role in sync flow
+max_iters_maintain = 30                # max ReAct iterations for agent role in maintain flow
+max_iters_ask = 30                     # max ReAct iterations for agent role in ask flow
 openrouter_provider_order = []
 thinking = true
 max_tokens = 32000

@@ -41,7 +41,7 @@ def _summary_files(memory_root: Path) -> list[Path]:
 def test_extract_body_has_why_and_how(tmp_lerim_root):
 	"""Feedback/project memories must contain Why and How to apply sections."""
 	config = get_config()
-	lm = build_dspy_lm("lead", config=config)
+	lm = build_dspy_lm("agent", config=config)
 	memory_root = tmp_lerim_root / "memory"
 	(memory_root / "index.md").write_text("# Memory Index\n")
 	trace = TRACES_DIR / "claude_short.jsonl"
@@ -73,7 +73,7 @@ def test_extract_body_has_why_and_how(tmp_lerim_root):
 def test_extract_dedup_does_not_duplicate(tmp_lerim_root):
 	"""Running extraction twice on the same trace must not create duplicates."""
 	config = get_config()
-	lm = build_dspy_lm("lead", config=config)
+	lm = build_dspy_lm("agent", config=config)
 	memory_root = tmp_lerim_root / "memory"
 	(memory_root / "index.md").write_text("# Memory Index\n")
 	trace = TRACES_DIR / "claude_short.jsonl"
@@ -103,7 +103,7 @@ def test_extract_dedup_does_not_duplicate(tmp_lerim_root):
 def test_extract_respects_do_not_extract(tmp_lerim_root):
 	"""Trivial/empty traces should produce 0 memory files."""
 	config = get_config()
-	lm = build_dspy_lm("lead", config=config)
+	lm = build_dspy_lm("agent", config=config)
 	memory_root = tmp_lerim_root / "memory"
 	(memory_root / "index.md").write_text("# Memory Index\n")
 	trace = TRACES_DIR / "edge_short.jsonl"
@@ -124,7 +124,7 @@ def test_extract_respects_do_not_extract(tmp_lerim_root):
 def test_extract_summary_has_sections(tmp_lerim_root):
 	"""Session summary must contain User Intent and What Happened sections."""
 	config = get_config()
-	lm = build_dspy_lm("lead", config=config)
+	lm = build_dspy_lm("agent", config=config)
 	memory_root = tmp_lerim_root / "memory"
 	(memory_root / "index.md").write_text("# Memory Index\n")
 	trace = TRACES_DIR / "claude_short.jsonl"
@@ -151,7 +151,7 @@ def test_extract_summary_has_sections(tmp_lerim_root):
 def test_extract_index_has_all_files(tmp_lerim_root):
 	"""After extraction, verify_index must return OK."""
 	config = get_config()
-	lm = build_dspy_lm("lead", config=config)
+	lm = build_dspy_lm("agent", config=config)
 	memory_root = tmp_lerim_root / "memory"
 	(memory_root / "index.md").write_text("# Memory Index\n")
 	trace = TRACES_DIR / "claude_short.jsonl"

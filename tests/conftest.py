@@ -50,7 +50,7 @@ def _build_test_config_toml(tmp_dir: Path) -> Path:
     with TEST_CONFIG_PATH.open("rb") as f:
         base = tomllib.load(f)
     roles = base.get("roles", {})
-    for role_name in ("lead", "extract"):
+    for role_name in ("agent", "extract"):
         role = roles.get(role_name, {})
         if provider:
             role["provider"] = provider
@@ -64,7 +64,7 @@ def _build_test_config_toml(tmp_dir: Path) -> Path:
     lines: list[str] = []
     for section, fields in base.items():
         if isinstance(fields, dict):
-            # Handle nested sections like roles.lead
+            # Handle nested sections like roles.agent
             has_nested = any(isinstance(v, dict) for v in fields.values())
             if has_nested:
                 for sub_name, sub_fields in fields.items():

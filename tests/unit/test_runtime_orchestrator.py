@@ -402,8 +402,8 @@ class TestRunWithFallback:
 		monkeypatch.setattr(time, "sleep", lambda _: None)
 
 		cfg = make_config(tmp_path)
-		cfg = replace(cfg, lead_role=replace(
-			cfg.lead_role, fallback_models=("fallback/model-1",)
+		cfg = replace(cfg, agent_role=replace(
+			cfg.agent_role, fallback_models=("fallback/model-1",)
 		))
 
 		rt, _ = _build_runtime(tmp_path, monkeypatch, config=cfg)

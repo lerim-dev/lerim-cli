@@ -1,4 +1,4 @@
-"""Unit tests for provider builders (DSPy pipelines and lead agent LM)."""
+"""Unit tests for provider builders (DSPy pipelines and agent role LM)."""
 
 from __future__ import annotations
 
@@ -49,8 +49,8 @@ def test_build_dspy_lm_ollama(tmp_path):
         max_window_tokens=300000,
         window_overlap_tokens=5000,
     )
-    cfg = replace(cfg, lead_role=ollama_role)
-    lm = build_dspy_lm("lead", config=cfg)
+    cfg = replace(cfg, agent_role=ollama_role)
+    lm = build_dspy_lm("agent", config=cfg)
     assert isinstance(lm, dspy.LM)
 
 
@@ -70,8 +70,8 @@ def test_build_dspy_lm_openrouter(tmp_path):
         window_overlap_tokens=5000,
         openrouter_provider_order=("nebius",),
     )
-    cfg = replace(cfg, lead_role=or_role)
-    lm = build_dspy_lm("lead", config=cfg)
+    cfg = replace(cfg, agent_role=or_role)
+    lm = build_dspy_lm("agent", config=cfg)
     assert isinstance(lm, dspy.LM)
 
 
@@ -89,8 +89,8 @@ def test_build_dspy_lm_zai(tmp_path):
         max_window_tokens=300000,
         window_overlap_tokens=5000,
     )
-    cfg = replace(cfg, lead_role=zai_role, zai_api_key="test-key")
-    lm = build_dspy_lm("lead", config=cfg)
+    cfg = replace(cfg, agent_role=zai_role, zai_api_key="test-key")
+    lm = build_dspy_lm("agent", config=cfg)
     assert isinstance(lm, dspy.LM)
 
 
@@ -108,8 +108,8 @@ def test_build_dspy_lm_mlx(tmp_path):
         max_window_tokens=300000,
         window_overlap_tokens=5000,
     )
-    cfg = replace(cfg, lead_role=mlx_role)
-    lm = build_dspy_lm("lead", config=cfg)
+    cfg = replace(cfg, agent_role=mlx_role)
+    lm = build_dspy_lm("agent", config=cfg)
     assert isinstance(lm, dspy.LM)
 
 
@@ -146,35 +146,35 @@ def test_missing_api_key_raises(tmp_path):
         max_window_tokens=300000,
         window_overlap_tokens=5000,
     )
-    cfg = replace(cfg, lead_role=or_role)
+    cfg = replace(cfg, agent_role=or_role)
     with pytest.raises(RuntimeError, match="missing_api_key"):
-        build_dspy_lm("lead", config=cfg)
+        build_dspy_lm("agent", config=cfg)
 
 
-def test_build_dspy_lm_lead(tmp_path):
-    """build_dspy_lm with 'lead' role should construct a DSPy LM."""
+def test_build_dspy_lm_agent(tmp_path):
+    """build_dspy_lm with 'agent' role should construct a DSPy LM."""
     import dspy
     from dataclasses import replace
     from lerim.config.providers import build_dspy_lm
 
     cfg = make_config(tmp_path)
     cfg = replace(cfg, openrouter_api_key="test-key")
-    lm = build_dspy_lm("lead", config=cfg)
+    lm = build_dspy_lm("agent", config=cfg)
     assert isinstance(lm, dspy.LM)
 
 
-def test_build_dspy_fallback_lms_lead_empty(tmp_path):
-    """build_dspy_fallback_lms with 'lead' role and no fallbacks returns empty list."""
+def test_build_dspy_fallback_lms_agent_empty(tmp_path):
+    """build_dspy_fallback_lms with 'agent' role and no fallbacks returns empty list."""
     from lerim.config.providers import build_dspy_fallback_lms
 
     cfg = make_config(tmp_path)
-    lms = build_dspy_fallback_lms("lead", config=cfg)
+    lms = build_dspy_fallback_lms("agent", config=cfg)
     assert isinstance(lms, list)
     assert lms == []
 
 
-def test_build_dspy_fallback_lms_lead_with_fallbacks(tmp_path):
-    """build_dspy_fallback_lms with 'lead' role and fallbacks returns LM list."""
+def test_build_dspy_fallback_lms_agent_with_fallbacks(tmp_path):
+    """build_dspy_fallback_lms with 'agent' role and fallbacks returns LM list."""
     import dspy
     from dataclasses import replace
     from lerim.config.providers import build_dspy_fallback_lms
@@ -186,8 +186,8 @@ def test_build_dspy_fallback_lms_lead_with_fallbacks(tmp_path):
         fallback_models=("openrouter:qwen/qwen3-coder",),
         timeout_seconds=120,
     )
-    cfg = replace(cfg, lead_role=role, openrouter_api_key="test-key")
-    lms = build_dspy_fallback_lms("lead", config=cfg)
+    cfg = replace(cfg, agent_role=role, openrouter_api_key="test-key")
+    lms = build_dspy_fallback_lms("agent", config=cfg)
     assert len(lms) == 1
     assert isinstance(lms[0], dspy.LM)
 

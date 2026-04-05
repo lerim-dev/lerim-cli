@@ -17,12 +17,12 @@ class TestValidateProviderForRole:
 
 	def test_valid_provider_and_role_passes(self):
 		"""Known provider + supported role should not raise."""
-		validate_provider_for_role("minimax", "lead")
+		validate_provider_for_role("minimax", "agent")
 
 	def test_unknown_provider_raises_with_supported_list(self):
 		"""Unknown provider should raise RuntimeError listing all supported providers."""
 		with pytest.raises(RuntimeError, match="Unknown provider 'bogus'") as exc_info:
-			validate_provider_for_role("bogus", "lead")
+			validate_provider_for_role("bogus", "agent")
 		# The error message must list at least some known providers.
 		for name in ("minimax", "openai", "ollama"):
 			assert name in str(exc_info.value)
@@ -66,10 +66,10 @@ class TestNormalizeModelName:
 		assert normalize_model_name("zai", "glm-4.5-air") == "glm-4.5-air"
 
 
-class TestAllProvidersHaveLeadRole:
-	"""Every registered provider must support the 'lead' role."""
+class TestAllProvidersHaveAgentRole:
+	"""Every registered provider must support the 'agent' role."""
 
 	@pytest.mark.parametrize("provider", list(PROVIDER_CAPABILITIES.keys()))
-	def test_lead_in_roles(self, provider):
+	def test_agent_in_roles(self, provider):
 		caps = PROVIDER_CAPABILITIES[provider]
-		assert "lead" in caps["roles"], f"Provider '{provider}' is missing 'lead' role"
+		assert "agent" in caps["roles"], f"Provider '{provider}' is missing 'agent' role"

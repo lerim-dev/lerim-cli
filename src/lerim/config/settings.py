@@ -31,7 +31,7 @@ _LAST_CONFIG_SOURCES: list[dict[str, str]] = []
 
 @dataclass(frozen=True)
 class RoleConfig:
-	"""Configuration for the lead LLM role.
+	"""Configuration for the agent LLM role.
 
 	All fields have defaults so the same class works for any future role.
 	"""
@@ -44,7 +44,7 @@ class RoleConfig:
 	openrouter_provider_order: tuple[str, ...] = ()
 	thinking: bool = True
 	max_tokens: int = 32000
-	# Lead-specific
+	# Agent-specific
 	max_iterations: int = 10
 	max_iters_sync: int = 15
 	max_iters_maintain: int = 30
@@ -141,7 +141,7 @@ def ensure_user_config_exists() -> Path:
 # Lerim user overrides
 # Override only keys you need.
 
-# [roles.lead]
+# [roles.agent]
 # provider = "openrouter"
 # model = "qwen/qwen3-coder-30b-a3b-instruct"
 """,
@@ -201,7 +201,7 @@ class Config:
     sync_max_sessions: int
     parallel_pipelines: bool
 
-    lead_role: RoleConfig
+    agent_role: RoleConfig
 
     tracing_enabled: bool
     tracing_include_httpx: bool
@@ -238,15 +238,15 @@ class Config:
             "server_port": self.server_port,
             "sync_interval_minutes": self.sync_interval_minutes,
             "maintain_interval_minutes": self.maintain_interval_minutes,
-            "lead_role": {
-                "provider": self.lead_role.provider,
-                "model": self.lead_role.model,
-                "api_base": self.lead_role.api_base,
-                "fallback_models": list(self.lead_role.fallback_models),
-                "timeout_seconds": self.lead_role.timeout_seconds,
-                "max_iterations": self.lead_role.max_iterations,
+            "agent_role": {
+                "provider": self.agent_role.provider,
+                "model": self.agent_role.model,
+                "api_base": self.agent_role.api_base,
+                "fallback_models": list(self.agent_role.fallback_models),
+                "timeout_seconds": self.agent_role.timeout_seconds,
+                "max_iterations": self.agent_role.max_iterations,
                 "openrouter_provider_order": list(
-                    self.lead_role.openrouter_provider_order
+                    self.agent_role.openrouter_provider_order
                 ),
             },
             "parallel_pipelines": self.parallel_pipelines,
@@ -299,10 +299,10 @@ def _build_role(
 	)
 
 
-def _build_lead_role(roles: dict[str, Any]) -> RoleConfig:
-	"""Build lead role config from TOML roles section."""
+def _build_agent_role(roles: dict[str, Any]) -> RoleConfig:
+	"""Build agent role config from TOML roles section."""
 	return _build_role(
-		_ensure_dict(roles, "lead"),
+		_ensure_dict(roles, "agent"),
 		default_provider="openrouter",
 		default_model="qwen/qwen3-coder-30b-a3b-instruct",
 	)
@@ -386,7 +386,7 @@ def load_config() -> Config:
     for data_root in scope.ordered_data_dirs:
         ensure_memory_paths(build_memory_paths(data_root))
 
-    lead_role = _build_lead_role(roles)
+    agent_role = _build_agent_role(roles)
 
     port = _require_int(server, "port", minimum=1)
     if port > 65535:
@@ -431,7 +431,7 @@ def load_config() -> Config:
         sync_window_days=_require_int(server, "sync_window_days", minimum=1),
         sync_max_sessions=_require_int(server, "sync_max_sessions", minimum=1),
         parallel_pipelines=bool(server.get("parallel_pipelines", True)),
-        lead_role=lead_role,
+        agent_role=agent_role,
         tracing_enabled=bool(tracing.get("enabled", False))
         or os.getenv("LERIM_TRACING", "").strip().lower() in ("1", "true", "yes", "on"),
         tracing_include_httpx=bool(tracing.get("include_httpx", False)),
@@ -533,23 +533,23 @@ if __name__ == "__main__":
     assert cfg.memory_dir
     assert cfg.index_dir
     assert cfg.sessions_db_path.name == "sessions.sqlite3"
-    assert cfg.lead_role.provider
-    assert cfg.lead_role.model
-    assert isinstance(cfg.lead_role.fallback_models, tuple)
+    assert cfg.agent_role.provider
+    assert cfg.agent_role.model
+    assert isinstance(cfg.agent_role.fallback_models, tuple)
     assert isinstance(cfg.tracing_enabled, bool)
     assert isinstance(cfg.tracing_include_httpx, bool)
     assert isinstance(cfg.tracing_include_content, bool)
     assert isinstance(cfg.agents, dict)
     assert isinstance(cfg.projects, dict)
     payload = cfg.public_dict()
-    assert "lead_role" in payload
+    assert "agent_role" in payload
     assert "agents" in payload
     assert "projects" in payload
     print(
         f"""\
 Config loaded: \
 data_dir={cfg.data_dir}, \
-lead={cfg.lead_role.provider}/{cfg.lead_role.model}, \
+agent={cfg.agent_role.provider}/{cfg.agent_role.model}, \
 agents={list(cfg.agents.keys())}, \
 projects={list(cfg.projects.keys())}"""
     )

@@ -26,7 +26,7 @@ def make_config(base: Path) -> Config:
         server_port=8765,
         sync_interval_minutes=5,
         maintain_interval_minutes=5,
-        lead_role=RoleConfig(
+        agent_role=RoleConfig(
             provider="openrouter",
             model="x-ai/grok-4.1-fast",
             timeout_seconds=300,
@@ -73,7 +73,7 @@ def write_test_config(tmp_path: Path, **sections: dict[str, Any]) -> Path:
 
     legacy_agent = sections.pop("agent", None)
     if isinstance(legacy_agent, dict):
-        lead = all_sections.setdefault("roles.lead", {})
+        lead = all_sections.setdefault("roles.agent", {})
         if "provider" in legacy_agent:
             lead["provider"] = legacy_agent["provider"]
         if "model" in legacy_agent:

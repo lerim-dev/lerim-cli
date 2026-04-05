@@ -23,11 +23,11 @@ from tests.helpers import make_config
 def _make_ollama_config(
     tmp_path: Path,
     *,
-    lead_provider: str = "ollama",
-    lead_model: str = "qwen3.5:4b-q8_0",
+    agent_provider: str = "ollama",
+    agent_model: str = "qwen3.5:4b-q8_0",
     auto_unload: bool = True,
 ) -> Config:
-    """Build a Config with Ollama lead role for testing."""
+    """Build a Config with Ollama agent role for testing."""
     base = make_config(tmp_path)
     return Config(
         data_dir=base.data_dir,
@@ -42,9 +42,9 @@ def _make_ollama_config(
         server_port=base.server_port,
         sync_interval_minutes=base.sync_interval_minutes,
         maintain_interval_minutes=base.maintain_interval_minutes,
-        lead_role=RoleConfig(
-            provider=lead_provider,
-            model=lead_model,
+        agent_role=RoleConfig(
+            provider=agent_provider,
+            model=agent_model,
             timeout_seconds=300,
         ),
         sync_window_days=7,
@@ -85,22 +85,22 @@ class TestOllamaModels:
         assert len(models) == 1
         assert models[0] == ("http://127.0.0.1:11434", "qwen3.5:4b-q8_0")
 
-    def test_single_lead_model(self, tmp_path: Path) -> None:
-        """Lead ollama model appears once."""
+    def test_single_agent_model(self, tmp_path: Path) -> None:
+        """Agent ollama model appears once."""
         config = _make_ollama_config(
             tmp_path,
-            lead_model="qwen3.5:9b-q8_0",
+            agent_model="qwen3.5:9b-q8_0",
         )
         models = _ollama_models(config)
         assert len(models) == 1
         assert models[0] == ("http://127.0.0.1:11434", "qwen3.5:9b-q8_0")
 
-    def test_non_ollama_lead_returns_empty(self, tmp_path: Path) -> None:
-        """Non-ollama lead role produces no ollama models."""
+    def test_non_ollama_agent_returns_empty(self, tmp_path: Path) -> None:
+        """Non-ollama agent role produces no ollama models."""
         config = _make_ollama_config(
             tmp_path,
-            lead_provider="minimax",
-            lead_model="MiniMax-M2.5",
+            agent_provider="minimax",
+            agent_model="MiniMax-M2.5",
         )
         models = _ollama_models(config)
         assert len(models) == 0
@@ -188,17 +188,17 @@ class TestOllamaLifecycle:
     @patch("lerim.server.api._unload_model")
     @patch("lerim.server.api._load_model")
     @patch("lerim.server.api._is_ollama_reachable", return_value=True)
-    def test_single_lead_model_lifecycle(
+    def test_single_agent_model_lifecycle(
         self,
         mock_reachable: MagicMock,
         mock_load: MagicMock,
         mock_unload: MagicMock,
         tmp_path: Path,
     ) -> None:
-        """Lead ollama model is loaded and unloaded exactly once."""
+        """Agent ollama model is loaded and unloaded exactly once."""
         config = _make_ollama_config(
             tmp_path,
-            lead_model="qwen3.5:9b-q8_0",
+            agent_model="qwen3.5:9b-q8_0",
         )
         with ollama_lifecycle(config):
             assert mock_load.call_count == 1

@@ -34,7 +34,7 @@ Full agent flows as a user would invoke them. Files: `test_sync_flow.py`, `test_
 
 - **Agents**: `ExtractAgent`, `MaintainAgent`, `AskAgent` -- all DSPy ReAct modules taking `Path` args directly (no RuntimeContext).
 - **Tools**: `MemoryTools` class with 7 methods: `read`, `grep`, `scan`, `write`, `edit`, `archive`, `verify_index`.
-- **Config**: single `[roles.lead]` role (no separate extract_role).
+- **Config**: single `[roles.agent]` role (no separate extract_role).
 - **Memory**: 3-field frontmatter (`name`, `description`, `type`), `index.md`, `summaries/` with date-prefixed files.
 - **No** explorer subagent, no windowing pipeline.
 

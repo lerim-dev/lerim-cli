@@ -906,7 +906,7 @@ def _serialize_full_config(config: Config) -> dict[str, Any]:
             "dir": str(config.memory_dir),
         },
         "roles": {
-            "lead": _role_dict(config.lead_role),
+            "agent": _role_dict(config.agent_role),
         },
         "tracing": {
             "enabled": config.tracing_enabled,
@@ -1269,7 +1269,7 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
     def _api_config_models(self, query: dict[str, list[str]]) -> None:
         """Return available model list for the selected provider."""
         config = get_config()
-        provider = _query_param(query, "provider", config.lead_role.provider)
+        provider = _query_param(query, "provider", config.agent_role.provider)
         models = sorted(set(list_provider_models(provider)))
         self._json({"models": models})
 

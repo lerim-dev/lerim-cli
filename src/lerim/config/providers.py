@@ -13,7 +13,7 @@ import dspy
 
 from lerim.config.settings import Config, RoleConfig, get_config
 
-DSPyRoleName = Literal["lead"]
+DSPyRoleName = Literal["agent"]
 
 
 # ---------------------------------------------------------------------------
@@ -22,34 +22,34 @@ DSPyRoleName = Literal["lead"]
 
 PROVIDER_CAPABILITIES: dict[str, dict] = {
 	"minimax": {
-		"roles": ["lead"],
+		"roles": ["agent"],
 		"api_key_env": "MINIMAX_API_KEY",
 		"models": ["MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-M2"],
 	},
 	"opencode_go": {
-		"roles": ["lead"],
+		"roles": ["agent"],
 		"api_key_env": "OPENCODE_API_KEY",
 		"models": ["minimax-m2.7", "minimax-m2.5", "kimi-k2.5", "glm-5"],
 	},
 	"zai": {
-		"roles": ["lead"],
+		"roles": ["agent"],
 		"api_key_env": "ZAI_API_KEY",
 		"models": ["glm-4.7", "glm-4.5-air", "glm-4.5"],
 	},
 	"openai": {
-		"roles": ["lead"],
+		"roles": ["agent"],
 		"api_key_env": "OPENAI_API_KEY",
 	},
 	"openrouter": {
-		"roles": ["lead"],
+		"roles": ["agent"],
 		"api_key_env": "OPENROUTER_API_KEY",
 	},
 	"ollama": {
-		"roles": ["lead"],
+		"roles": ["agent"],
 		"api_key_env": None,
 	},
 	"mlx": {
-		"roles": ["lead"],
+		"roles": ["agent"],
 		"api_key_env": None,
 	},
 }
@@ -97,7 +97,7 @@ class FallbackSpec:
 
 def _dspy_role_config(config: Config, role: DSPyRoleName) -> RoleConfig:
 	"""Return role config for DSPy LM construction."""
-	return config.lead_role
+	return config.agent_role
 
 
 def _default_api_base(provider: str, config: Config | None = None) -> str:
@@ -220,7 +220,7 @@ def build_dspy_lm(
 	*,
 	config: Config | None = None,
 ) -> dspy.LM:
-	"""Build a DSPy LM object for extract/lead roles.
+	"""Build a DSPy LM object for the agent role.
 
 	Returns the LM without calling dspy.configure() globally.
 	Callers should use dspy.context(lm=lm) for thread-safe execution.
@@ -302,11 +302,11 @@ if __name__ == "__main__":
 	assert isinstance(list_provider_models("ollama"), list)
 
 	# -- DSPy builder test --
-	dspy_model = build_dspy_lm("lead", config=cfg)
+	dspy_model = build_dspy_lm("agent", config=cfg)
 	assert isinstance(dspy_model, dspy.LM)
 
 	print(
 		f"""\
 providers: \
-lead={cfg.lead_role.provider}/{cfg.lead_role.model}"""
+agent={cfg.agent_role.provider}/{cfg.agent_role.model}"""
 	)

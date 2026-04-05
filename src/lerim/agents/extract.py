@@ -135,14 +135,13 @@ class ExtractAgent(dspy.Module):
 
 if __name__ == "__main__":
 	"""Self-test: run ExtractAgent on a fixture trace and inspect results."""
-	import json
 	import sys
 
 	from lerim.config.settings import get_config
 	from lerim.config.providers import build_dspy_lm
 
 	config = get_config()
-	lm = build_dspy_lm("lead", config=config)
+	lm = build_dspy_lm("agent", config=config)
 
 	# Use fixture trace or first CLI arg
 	trace_path = Path(sys.argv[1]) if len(sys.argv) > 1 else (
@@ -162,14 +161,14 @@ if __name__ == "__main__":
 
 		print(f"Trace: {trace_path}")
 		print(f"Memory root: {memory_root}")
-		print(f"LM: {config.lead_role.provider}/{config.lead_role.model}")
-		print(f"Max iters: {config.lead_role.max_iters_sync}")
+		print(f"LM: {config.agent_role.provider}/{config.agent_role.model}")
+		print(f"Max iters: {config.agent_role.max_iters_sync}")
 		print()
 
 		agent = ExtractAgent(
 			memory_root=memory_root,
 			trace_path=trace_path,
-			max_iters=config.lead_role.max_iters_sync,
+			max_iters=config.agent_role.max_iters_sync,
 		)
 
 		with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):

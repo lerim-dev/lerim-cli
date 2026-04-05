@@ -8,7 +8,7 @@
 [memory]
 scope = "global_only"
 
-[roles.lead]
+[roles.agent]
 provider = "minimax"
 model = "MiniMax-M2.5"
 fallback_models = ["zai:glm-4.7"]
