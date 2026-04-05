@@ -134,6 +134,8 @@ print_kv "ZAI_CODING_API_KEY" "$(key_status ZAI_CODING_API_KEY)"
 print_kv "OPENAI_API_KEY" "$(key_status OPENAI_API_KEY)"
 print_kv "OPENROUTER_API_KEY" "$(key_status OPENROUTER_API_KEY)"
 print_kv "ANTHROPIC_API_KEY" "$(key_status ANTHROPIC_API_KEY)"
+print_kv "MINIMAX_API_KEY" "$(key_status MINIMAX_API_KEY)"
+print_kv "OPENCODE_API_KEY" "$(key_status OPENCODE_API_KEY)"
 
 # Config comes from TOML layers now (src/lerim/config/default.toml -> ~/.lerim/config.toml -> project).
 # Only API keys are read from env (ANTHROPIC_API_KEY, OPENROUTER_API_KEY, ZAI_API_KEY).
