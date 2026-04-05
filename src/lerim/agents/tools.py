@@ -1,357 +1,615 @@
-"""DSPy ReAct tools for lerim agents.
+"""MemoryTools — class-based tools for Lerim agents.
 
-Plain functions. Each takes ctx as first arg. Use functools.partial(fn, ctx)
-to bind ctx before passing to dspy.ReAct.
+All tools are methods of MemoryTools. Context (paths, memory root, trace path)
+lives in __init__. The model never sees or generates absolute paths.
 
-Memory types: user, feedback, project, reference.
-All memories stored flat under memory_root.
+Each agent picks which methods to use:
+    extract_tools  = [tools.read, tools.grep, tools.scan, tools.write, tools.edit]
+    maintain_tools = [tools.read, tools.scan, tools.write, tools.edit, tools.archive]
+    ask_tools      = [tools.read, tools.scan]
 """
 
 from __future__ import annotations
 
-import json
 import re
-import shutil
-from functools import partial
 from pathlib import Path
 
-from lerim.agents.context import RuntimeContext
-from lerim.agents.contracts import is_within as _is_within
-from lerim.agents.schemas import (
-    MEMORY_TYPES,
-    MemoryRecord,
-    canonical_memory_filename,
-    slugify,
-    staleness_note,
-)
+MEMORY_TYPES = ("user", "feedback", "project", "reference", "summary")
 
 
-def _allowed_roots(ctx: RuntimeContext) -> list[Path]:
-    roots: list[Path] = []
-    if ctx.memory_root:
-        roots.append(ctx.memory_root)
-    if ctx.run_folder:
-        roots.append(ctx.run_folder)
-    for extra in ctx.extra_read_roots or ():
-        roots.append(extra)
-    return roots
+class MemoryTools:
+	"""Tools for memory extraction, maintenance, and retrieval.
+
+	Instantiate once per run with the relevant paths, then pass selected
+	bound methods to dspy.ReAct. The model sees only the method arguments
+	(filename, offset, pattern, etc.) — never absolute paths.
+	"""
+
+	def __init__(
+		self,
+		memory_root: Path,
+		trace_path: Path | None = None,
+		run_folder: Path | None = None,
+	):
+		self.memory_root = Path(memory_root)
+		self.trace_path = Path(trace_path) if trace_path else None
+		self.run_folder = Path(run_folder) if run_folder else None
+
+	def _resolve(self, filename: str) -> Path | None:
+		"""Resolve a filename to an absolute path. Not a tool."""
+		if filename in ("trace", "trace.jsonl"):
+			return self.trace_path
+		# Summary files live in summaries/ subdir
+		if filename.startswith("summary_"):
+			path = self.memory_root / "summaries" / filename
+			if path.exists():
+				return path
+		# Memory files, index.md — flat in memory_root
+		return self.memory_root / filename
+
+	# ── Read ────────────────────────────────────────────────────────────
+
+	def read(self, filename: str, offset: int = 0, limit: int = 0) -> str:
+		"""Read a file with optional pagination. Returns content with line numbers.
+
+		Use offset/limit to page through large files like session traces.
+		For small files (memories, index.md), call with defaults to read the
+		entire file.
+
+		Args:
+			filename: File to read. Use "trace" for the session trace, or a
+				memory filename like "feedback_tabs.md" or "index.md".
+			offset: Line number to start from (0-based). Default 0.
+			limit: Max lines to return. 0 means entire file. Default 0.
+		"""
+		path = self._resolve(filename)
+		if path is None:
+			return "Error: no trace path configured"
+		if not path.exists():
+			return f"Error: file not found: {filename}"
+		if not path.is_file():
+			return f"Error: not a file: {filename}"
+
+		lines = path.read_text(encoding="utf-8").splitlines()
+		total = len(lines)
+
+		if limit > 0:
+			chunk = lines[offset:offset + limit]
+			numbered = [f"{offset + i + 1}\t{line}" for i, line in enumerate(chunk)]
+			header = f"[{total} lines, showing {offset + 1}-{offset + len(chunk)}]"
+			return header + "\n" + "\n".join(numbered)
+
+		# Full file read
+		numbered = [f"{i + 1}\t{line}" for i, line in enumerate(lines)]
+		return "\n".join(numbered)
+
+	# ── Grep (ripgrep) ─────────────────────────────────────────────────
+
+	def grep(self, filename: str, pattern: str, context_lines: int = 2) -> str:
+		"""Search a file for lines matching a regex pattern.
+
+		Uses ripgrep internally for speed. Falls back to Python regex
+		if rg is not available.
+
+		Args:
+			filename: File to search. Use "trace" for the session trace,
+				or a memory filename like "feedback_tabs.md".
+			pattern: Regex pattern to search for (case-insensitive).
+			context_lines: Lines of context around each match. Default 2.
+		"""
+		import shutil
+		import subprocess
+
+		path = self._resolve(filename)
+		if path is None:
+			return "Error: no trace path configured"
+		if not path.exists():
+			return f"Error: file not found: {filename}"
+
+		if shutil.which("rg"):
+			result = subprocess.run(
+				[
+					"rg", "--no-heading", "-n", "-i",
+					"-C", str(context_lines),
+					"--max-count", "20",
+					pattern, str(path),
+				],
+				capture_output=True, text=True, timeout=10,
+			)
+			if result.returncode == 1:
+				return f"No matches for '{pattern}' in {filename}"
+			if result.returncode != 0:
+				return f"Error: rg failed: {result.stderr.strip()}"
+			return result.stdout.rstrip()
+
+		# Python fallback
+		import re
+		lines = path.read_text(encoding="utf-8").splitlines()
+		try:
+			pat = re.compile(pattern, re.IGNORECASE)
+		except re.error as exc:
+			return f"Error: invalid regex: {exc}"
+		matches = []
+		for i, line in enumerate(lines):
+			if pat.search(line):
+				start = max(0, i - context_lines)
+				end = min(len(lines), i + context_lines + 1)
+				block = [
+					f"{j + 1}\t{lines[j]}" for j in range(start, end)
+				]
+				matches.append("\n".join(block))
+				if len(matches) >= 20:
+					break
+		if not matches:
+			return f"No matches for '{pattern}' in {filename}"
+		return "\n--\n".join(matches)
 
 
-# ---------------------------------------------------------------------------
-# Tools
-# ---------------------------------------------------------------------------
+	# ── Scan ────────────────────────────────────────────────────────────
+
+	def scan(self, directory: str = "", pattern: str = "*.md") -> str:
+		"""List memory files with metadata, or list files in a subdirectory.
+
+		For the memory root (directory=""), returns a rich manifest with
+		name, description, type, and age for each memory file.
+		For subdirectories like "summaries" or "archived", returns a
+		simple file listing.
+
+		Args:
+			directory: Subdirectory under memory root to scan.
+				"" for the memory root itself. Use "summaries" or
+				"archived" for those subdirectories.
+			pattern: Glob pattern to match files. Default "*.md".
+		"""
+		import json
+		from datetime import datetime, timezone
+
+		import frontmatter as fm_lib
+
+		scan_dir = self.memory_root / directory if directory else self.memory_root
+		if not scan_dir.is_dir():
+			return json.dumps({"count": 0, "memories": []})
+
+		files = sorted(scan_dir.glob(pattern))
+
+		# Rich manifest for memory root (files with frontmatter)
+		if not directory:
+			memories = []
+			for f in files:
+				if f.name == "index.md":
+					continue
+				try:
+					post = fm_lib.load(str(f))
+					created = post.get("created", "")
+					if created:
+						try:
+							dt = datetime.fromisoformat(str(created))
+							delta = datetime.now(timezone.utc) - dt.replace(tzinfo=timezone.utc)
+							age = f"{delta.days}d ago" if delta.days > 0 else "today"
+						except (ValueError, TypeError):
+							age = ""
+					else:
+						age = ""
+					memories.append({
+						"name": post.get("name", f.stem),
+						"description": post.get("description", ""),
+						"type": post.get("type", "unknown"),
+						"filename": f.name,
+						"age": age,
+					})
+				except Exception:
+					memories.append({
+						"name": f.stem,
+						"description": "",
+						"type": "unknown",
+						"filename": f.name,
+						"age": "",
+					})
+			return json.dumps({"count": len(memories), "memories": memories}, indent=2)
+
+		# Simple listing for subdirectories
+		file_list = [f.name for f in files if f.is_file()]
+		return json.dumps({"count": len(file_list), "files": file_list}, indent=2)
 
 
-def read_file(ctx: RuntimeContext, file_path: str) -> str:
-    """Read a memory file's full text content.
+	# ── Write ───────────────────────────────────────────────────────────
 
-    For large session traces, use read_trace() or grep_trace() instead.
+	def write(self, type: str, name: str, description: str, body: str) -> str:
+		"""Create a new file. If a file with this name already exists,
+		returns an error — use read() then edit() to update existing files.
 
-    Args:
-        file_path: Absolute path to the file.
-    """
-    resolved = Path(file_path).resolve()
-    roots = _allowed_roots(ctx)
-    if not any(_is_within(resolved, r) for r in roots):
-        return f"Error: path {file_path} is outside allowed roots"
-    if not resolved.exists():
-        return f"Error: file not found: {file_path}"
-    if not resolved.is_file():
-        return f"Error: not a file: {file_path}"
-    return resolved.read_text(encoding="utf-8")
+		Auto-generates filename from type and name.
+		Frontmatter (name, description, type) is generated internally.
 
+		For summaries, use type="summary" — the file is written to the
+		summaries/ subdirectory.
 
-def read_trace(ctx: RuntimeContext, file_path: str, offset: int = 0, limit: int = 200) -> str:
-    """Read a section of a session trace file (paginated).
+		Args:
+			type: One of "user", "feedback", "project", "reference",
+				"summary".
+			name: Short title, max ~10 words. Used to generate filename.
+			description: One-line retrieval hook, ~150 chars.
+			body: Content. For feedback/project: rule, then Why, then
+				How to apply. For summary: ## User Intent and
+				## What Happened sections.
+		"""
+		import json
 
-    Traces can be thousands of lines. Use offset/limit to read chunks.
+		# --- Validate ---
+		if type not in MEMORY_TYPES:
+			return f"Error: type must be one of {MEMORY_TYPES}, got '{type}'"
+		if not name or not name.strip():
+			return "Error: name cannot be empty"
+		if not description or not description.strip():
+			return "Error: description cannot be empty"
+		if not body or not body.strip():
+			return "Error: body cannot be empty"
 
-    Args:
-        file_path: Absolute path to the trace file (.jsonl).
-        offset: Line number to start from (0-based). Default 0.
-        limit: Max lines to return. Default 200.
-    """
-    resolved = Path(file_path).resolve()
-    roots = _allowed_roots(ctx)
-    if not any(_is_within(resolved, r) for r in roots):
-        return f"Error: path {file_path} is outside allowed roots"
-    if not resolved.exists():
-        return f"Error: file not found: {file_path}"
-    lines = resolved.read_text(encoding="utf-8").splitlines()
-    total = len(lines)
-    chunk = lines[offset:offset + limit]
-    return f"[trace: {total} lines total, showing {offset}-{offset + len(chunk)}]\n" + "\n".join(chunk)
+		# --- Generate filename and target path ---
+		slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+		filename = f"{type}_{slug}.md"
 
+		if type == "summary":
+			target_dir = self.memory_root / "summaries"
+		else:
+			target_dir = self.memory_root
 
-def grep_trace(ctx: RuntimeContext, file_path: str, pattern: str, context_lines: int = 2) -> str:
-    """Search a session trace for lines matching a pattern.
+		target = target_dir / filename
 
-    Use this to find decisions, user statements, or errors in a large trace.
+		# --- If file exists, tell model to use read + edit ---
+		if target.exists():
+			return (
+				f"Error: '{filename}' already exists. "
+				f"Use read(\"{filename}\") to see its content, "
+				f"then edit(\"{filename}\", old_string, new_string) to update it."
+			)
 
-    Args:
-        file_path: Absolute path to the trace file (.jsonl).
-        pattern: Case-insensitive substring to search for.
-        context_lines: Lines of context around each match. Default 2.
-    """
-    resolved = Path(file_path).resolve()
-    roots = _allowed_roots(ctx)
-    if not any(_is_within(resolved, r) for r in roots):
-        return f"Error: path {file_path} is outside allowed roots"
-    if not resolved.exists():
-        return f"Error: file not found: {file_path}"
-    lines = resolved.read_text(encoding="utf-8").splitlines()
-    pat = re.compile(re.escape(pattern), re.IGNORECASE)
-    matches = []
-    for i, line in enumerate(lines):
-        if pat.search(line):
-            start = max(0, i - context_lines)
-            end = min(len(lines), i + context_lines + 1)
-            block = [f"{'>>>' if j == i else '   '} L{j}: {lines[j]}" for j in range(start, end)]
-            matches.append("\n".join(block))
-    if not matches:
-        return f"No matches for '{pattern}' in {resolved.name} ({len(lines)} lines)"
-    if len(matches) > 20:
-        matches = matches[:20]
-        matches.append("... (more matches truncated)")
-    return f"[{len(matches)} matches for '{pattern}']\n\n" + "\n---\n".join(matches)
+		# --- Build frontmatter + body ---
+		content = (
+			f"---\n"
+			f"name: {name.strip()}\n"
+			f"description: {description.strip()}\n"
+			f"type: {type}\n"
+			f"---\n"
+			f"\n"
+			f"{body.strip()}\n"
+		)
+
+		target.parent.mkdir(parents=True, exist_ok=True)
+		target.write_text(content, encoding="utf-8")
+		return json.dumps({
+			"filename": filename,
+			"bytes": len(content.encode("utf-8")),
+			"type": type,
+		})
 
 
-def scan_memory_manifest(ctx: RuntimeContext) -> str:
-    """Scan all memory files and return a compact manifest.
+	# ── Archive (Maintain only) ──────────────────────────────────────
 
-    Returns JSON: {count, memories: [{name, description, type, filename, age}]}.
-    """
-    import frontmatter as fm_lib
+	def archive(self, filename: str) -> str:
+		"""Soft-delete a memory by moving it to the archived/ subdirectory.
 
-    if not ctx.memory_root or not Path(ctx.memory_root).is_dir():
-        return json.dumps({"error": "memory_root not set or missing"})
-    root = Path(ctx.memory_root)
-    manifest = []
-    for md_file in sorted(root.glob("*.md")):
-        if md_file.name == "MEMORY.md":
-            continue
-        try:
-            post = fm_lib.load(str(md_file))
-            manifest.append({
-                "name": post.get("name", md_file.stem),
-                "description": post.get("description", ""),
-                "type": post.get("type", "project"),
-                "filename": md_file.name,
-                "age": staleness_note(post.get("created", "")),
-            })
-        except Exception:
-            manifest.append({"name": md_file.stem, "filename": md_file.name, "type": "unknown", "description": "", "age": ""})
-    return json.dumps({"count": len(manifest), "memories": manifest}, indent=2)
+		The file is not permanently deleted -- it can be restored by moving
+		it back. Only .md files in the memory root can be archived.
 
+		Args:
+			filename: Memory filename to archive (e.g. "feedback_old.md").
+		"""
+		import json
+		import shutil
 
-def write_memory(ctx: RuntimeContext, type: str, name: str, description: str, body: str) -> str:
-    """Create a new memory file.
+		path = self._resolve(filename)
+		if path is None:
+			return "Error: no trace path configured"
+		if not path.exists():
+			return f"Error: file not found: {filename}"
+		if path.suffix != ".md":
+			return f"Error: only .md files can be archived, got: {filename}"
+		if filename == "index.md":
+			return "Error: cannot archive index.md"
 
-    Returns JSON: {"file_path": str, "bytes": int, "type": str}.
+		archive_dir = self.memory_root / "archived"
+		archive_dir.mkdir(parents=True, exist_ok=True)
+		target = archive_dir / path.name
+		shutil.move(str(path), str(target))
+		return json.dumps({"archived": filename, "moved_to": f"archived/{filename}"})
 
-    Args:
-        type: One of "user", "feedback", "project", "reference".
-        name: Short title (max ~10 words).
-        description: One-line hook for retrieval (~150 chars).
-        body: Full content. For feedback/project: rule → **Why:** → **How to apply:**
-    """
-    if not ctx.memory_root:
-        return "ERROR: memory_root is not set."
-    if type not in MEMORY_TYPES:
-        return f"ERROR: Invalid type='{type}'. Must be one of: {', '.join(MEMORY_TYPES)}."
-    if not name or not name.strip():
-        return "ERROR: name cannot be empty."
-    if not description or not description.strip():
-        return "ERROR: description cannot be empty."
-    if not body or not body.strip():
-        return "ERROR: body cannot be empty."
-    try:
-        record = MemoryRecord(
-            type=type, name=name.strip(), description=description.strip(),
-            body=body.strip(), id=slugify(name), source=ctx.run_id,
-        )
-    except Exception as exc:
-        return f"ERROR: Invalid memory fields: {exc}"
-    filename = canonical_memory_filename(title=name, run_id=ctx.run_id)
-    target = ctx.memory_root / filename
-    content = record.to_markdown()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
-    return json.dumps({"file_path": str(target), "bytes": len(content.encode("utf-8")), "type": type})
+	# ── Edit ────────────────────────────────────────────────────────────
 
+	def edit(self, filename: str, old_string: str, new_string: str,
+	         near_line: int = 0) -> str:
+		"""Replace old_string with new_string in a file. Surgical edit.
 
-def edit_memory(ctx: RuntimeContext, file_path: str, new_content: str) -> str:
-    """Replace content of an existing memory file. Must start with ---.
+		Three-phase matching:
+		1. Exact match on old_string.
+		2. Fuzzy fallback: normalizes whitespace and retries.
+		3. If multiple matches, near_line (1-based) picks the closest.
 
-    Args:
-        file_path: Absolute path to the memory file.
-        new_content: Complete replacement (frontmatter + body).
-    """
-    if not ctx.memory_root:
-        return "ERROR: memory_root is not set."
-    resolved = Path(file_path).resolve()
-    if not _is_within(resolved, ctx.memory_root):
-        return f"ERROR: path {file_path} is outside memory_root"
-    if not resolved.exists():
-        return f"ERROR: file not found: {file_path}"
-    if not new_content.strip().startswith("---"):
-        return "ERROR: new_content must start with YAML frontmatter (---)"
-    resolved.write_text(new_content, encoding="utf-8")
-    return json.dumps({"edited": True, "file_path": str(resolved), "bytes": len(new_content.encode("utf-8"))})
+		Use read() first to see line numbers, then edit with near_line
+		for disambiguation when needed.
 
+		Args:
+			filename: File to edit (e.g. "feedback_tabs.md" or "index.md").
+			old_string: The exact text to find and replace.
+			new_string: The replacement text.
+			near_line: Hint for disambiguation when multiple matches exist.
+				1-based line number. 0 means no hint. Default 0.
+		"""
+		path = self._resolve(filename)
+		if path is None:
+			return "Error: no trace path configured"
+		if not path.exists():
+			return f"Error: file not found: {filename}"
 
-def archive_memory(ctx: RuntimeContext, file_path: str) -> str:
-    """Soft-delete a memory by moving to archived/.
+		content = path.read_text(encoding="utf-8")
 
-    Args:
-        file_path: Absolute path to a .md memory file.
-    """
-    if not ctx.memory_root:
-        return "ERROR: memory_root is not set."
-    resolved = Path(file_path).resolve()
-    if not _is_within(resolved, ctx.memory_root):
-        return f"ERROR: path {file_path} is outside memory_root"
-    if not resolved.exists():
-        return f"ERROR: file not found: {file_path}"
-    if resolved.suffix != ".md":
-        return f"ERROR: only .md files can be archived. Got: {resolved.name}"
-    target = ctx.memory_root / "archived" / resolved.name
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(resolved), str(target))
-    return json.dumps({"archived": True, "source": str(resolved), "target": str(target)})
+		# --- Phase 1: exact match ---
+		indices = _find_occurrences(content, old_string)
 
+		# --- Phase 2: fuzzy whitespace fallback ---
+		fuzzy = False
+		if not indices:
+			norm_content = _normalize_whitespace(content)
+			norm_search = _normalize_whitespace(old_string)
+			indices = _find_occurrences(norm_content, norm_search)
+			if indices:
+				fuzzy = True
+				content = norm_content
+				old_string = norm_search
+			else:
+				return f"Error: old_string not found in {filename}"
 
-def update_memory_index(ctx: RuntimeContext, content: str) -> str:
-    """Write MEMORY.md index file. One line per memory, max 200 lines.
+		# --- Phase 3: disambiguation ---
+		if len(indices) == 1:
+			chosen = indices[0]
+		elif near_line > 0:
+			chosen = min(
+				indices,
+				key=lambda idx: abs(_index_to_line(content, idx) - near_line),
+			)
+		else:
+			lines = [_index_to_line(content, i) for i in indices]
+			return (
+				f"Error: old_string matches {len(indices)} locations "
+				f"(lines {lines}). Provide near_line to disambiguate."
+			)
 
-    Format: `- [Title](filename.md) — one-line description`
+		# --- Phase 4: apply ---
+		edit_line = _index_to_line(content, chosen)
 
-    Args:
-        content: Full text content for MEMORY.md.
-    """
-    if not ctx.memory_root:
-        return json.dumps({"error": "memory_root not set"})
-    root = Path(ctx.memory_root)
-    index_path = root / "MEMORY.md"
-    lines = content.strip().splitlines()
-    if len(lines) > 200:
-        lines = lines[:200]
-        lines.append("> WARNING: Truncated to 200 lines.")
-    final = "\n".join(lines) + "\n"
-    if len(final.encode("utf-8")) > 25_000:
-        final = final.encode("utf-8")[:25_000].decode("utf-8", errors="ignore")
-        final += "\n> WARNING: Truncated to 25KB.\n"
-    index_path.write_text(final, encoding="utf-8")
-    return json.dumps({"file_path": str(index_path), "bytes": len(final), "lines": len(final.splitlines())})
+		if fuzzy:
+			# Re-read original, do line-level replacement
+			original = path.read_text(encoding="utf-8")
+			old_lines = old_string.split("\n")
+			orig_lines = original.split("\n")
+			new_lines = new_string.split("\n")
+			start = edit_line - 1
+			end = start + len(old_lines)
+			orig_lines[start:end] = new_lines
+			new_content = "\n".join(orig_lines)
+		else:
+			new_content = content[:chosen] + new_string + content[chosen + len(old_string):]
+
+		path.write_text(new_content, encoding="utf-8")
+		return f"Edited {filename} at line {edit_line}"
 
 
-def write_summary(ctx: RuntimeContext, title: str, description: str, user_intent: str, session_narrative: str, tags: str = "") -> str:
-    """Write a session summary to memory_root/summaries/.
-
-    Args:
-        title: Short session title (max 10 words).
-        description: One-line description of what was achieved.
-        user_intent: The user's goal (max 150 words).
-        session_narrative: What happened chronologically (max 200 words).
-        tags: Comma-separated topic tags.
-    """
-    import frontmatter as fm_lib
-    from datetime import datetime, timezone
-
-    if not ctx.memory_root:
-        return "ERROR: memory_root is not set."
-    if not title or not title.strip():
-        return "ERROR: title cannot be empty."
-    if not user_intent or not user_intent.strip():
-        return "ERROR: user_intent cannot be empty."
-    if not session_narrative or not session_narrative.strip():
-        return "ERROR: session_narrative cannot be empty."
-
-    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    slug = slugify(title)
-    date_compact = datetime.now(timezone.utc).strftime("%Y%m%d")
-    time_compact = datetime.now(timezone.utc).strftime("%H%M%S")
-    summaries_dir = ctx.memory_root / "summaries" / date_compact / time_compact
-    summaries_dir.mkdir(parents=True, exist_ok=True)
-    summary_path = summaries_dir / f"{slug}.md"
-
-    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
-    fm_dict = {"id": slug, "title": title.strip(), "created": now_iso, "source": ctx.run_id, "description": (description or "").strip(), "tags": tag_list}
-    body = f"## User Intent\n\n{user_intent.strip()}\n\n## What Happened\n\n{session_narrative.strip()}"
-    post = fm_lib.Post(body, **fm_dict)
-    summary_path.write_text(fm_lib.dumps(post) + "\n", encoding="utf-8")
-
-    if ctx.artifact_paths and "summary" in ctx.artifact_paths:
-        artifact = ctx.artifact_paths["summary"]
-        artifact.parent.mkdir(parents=True, exist_ok=True)
-        artifact.write_text(json.dumps({"summary_path": str(summary_path)}, indent=2) + "\n", encoding="utf-8")
-
-    return json.dumps({"summary_path": str(summary_path), "bytes": len(summary_path.read_text(encoding="utf-8").encode("utf-8"))})
+# ── Helpers for edit (module-level, not tools) ──────────────────────
 
 
-def list_files(ctx: RuntimeContext, directory: str, pattern: str = "*.md") -> str:
-    """List file paths matching a glob pattern.
-
-    Args:
-        directory: Absolute path to search in.
-        pattern: Glob pattern. Default "*.md".
-    """
-    resolved = Path(directory).resolve()
-    roots = _allowed_roots(ctx)
-    if not any(_is_within(resolved, r) for r in roots):
-        return f"Error: directory {directory} is outside allowed roots"
-    if not resolved.exists():
-        return "[]"
-    if not resolved.is_dir():
-        return f"Error: not a directory: {directory}"
-    return json.dumps(sorted(str(f) for f in resolved.glob(pattern)))
+def _find_occurrences(content: str, search: str) -> list[int]:
+	"""Return start indices of all occurrences of search in content."""
+	indices = []
+	start = 0
+	while True:
+		idx = content.find(search, start)
+		if idx == -1:
+			break
+		indices.append(idx)
+		start = idx + 1
+	return indices
 
 
-# ---------------------------------------------------------------------------
-# Tool lists — partial-bind ctx, pass to dspy.ReAct
-# ---------------------------------------------------------------------------
+def _index_to_line(content: str, index: int) -> int:
+	"""Convert a character index to a 1-based line number."""
+	return content[:index].count("\n") + 1
 
 
-def _bind(fn, ctx):
-    """Bind ctx to a tool function. Preserves __name__ and __doc__ for DSPy."""
-    p = partial(fn, ctx)
-    p.__name__ = fn.__name__
-    p.__doc__ = fn.__doc__
-    return p
-
-
-def make_extract_tools(ctx: RuntimeContext) -> list:
-    """Tools for ExtractAgent."""
-    return [_bind(fn, ctx) for fn in [
-        read_file, read_trace, grep_trace, scan_memory_manifest,
-        write_memory, edit_memory,
-        update_memory_index, write_summary, list_files,
-    ]]
-
-
-def make_maintain_tools(ctx: RuntimeContext) -> list:
-    """Tools for MaintainAgent."""
-    return [_bind(fn, ctx) for fn in [
-        read_file, scan_memory_manifest, write_memory, edit_memory,
-        archive_memory, update_memory_index, list_files,
-    ]]
-
-
-def make_ask_tools(ctx: RuntimeContext) -> list:
-    """Tools for AskAgent."""
-    return [_bind(fn, ctx) for fn in [
-        read_file, scan_memory_manifest, list_files,
-    ]]
+def _normalize_whitespace(text: str) -> str:
+	"""Collapse each line's leading whitespace and strip trailing."""
+	lines = text.split("\n")
+	return "\n".join(
+		re.sub(r"^[ \t]+", lambda m: " " * len(m.group().replace("\t", "    ")), line).rstrip()
+		for line in lines
+	)
 
 
 if __name__ == "__main__":
-    import inspect
+	from pathlib import Path
 
-    def _sample(ctx: object, n: int) -> str:
-        """Toy tool: ctx first (like real tools), remaining args for the model."""
-        return f"ctx={ctx!r} n={n}"
+	# Test with .local/dspy_optimization_guide.md as a "trace" file
+	test_dir = Path(__file__).resolve().parents[3] / ".local"
+	tools = MemoryTools(
+		memory_root=test_dir,
+		trace_path=test_dir / "dspy_optimization_guide.md",
+	)
 
-    bound = _bind(_sample, ctx="demo-ctx")
-    print(inspect.signature(_sample))
-    print(inspect.signature(bound))
-    print(bound(n=7))
+	print("=== Full read (small slice via limit) ===")
+	print(tools.read("trace", limit=10))
+	print()
+
+	print("=== Paginated: offset=50, limit=5 ===")
+	print(tools.read("trace", offset=50, limit=5))
+	print()
+
+	print("=== Read by filename (same file, as if it were a memory) ===")
+	print(tools.read("dspy_optimization_guide.md", limit=5))
+	print()
+
+	print("=== Full read of small file (no limit) ===")
+	# read first 3 lines to keep output short — but shows no header
+	print(tools.read("dspy_optimization_guide.md", limit=3))
+	print()
+
+	print("=== Error: nonexistent file ===")
+	print(tools.read("nonexistent.md"))
+	print()
+
+	print("=== Error: trace not configured ===")
+	tools_no_trace = MemoryTools(memory_root=test_dir)
+	print(tools_no_trace.read("trace"))
+
+	print()
+	print("=" * 60)
+	print("GREP TESTS")
+	print("=" * 60)
+
+	print("\n=== Grep: find 'MIPROv2' in trace ===")
+	print(tools.grep("trace", "MIPROv2"))
+	print()
+
+	print("=== Grep: no matches ===")
+	print(tools.grep("trace", "xyznonexistent123"))
+	print()
+
+	print("=== Grep: by memory filename ===")
+	print(tools.grep("dspy_optimization_guide.md", "BootstrapFewShot"))
+
+	print()
+	print("=" * 60)
+	print("SCAN TESTS")
+	print("=" * 60)
+
+	# Use real lerim memory dir
+	lerim_mem = Path(__file__).resolve().parents[3] / ".lerim" / "memory"
+	if lerim_mem.is_dir():
+		tools_mem = MemoryTools(memory_root=lerim_mem)
+
+		print("\n=== Scan: memory root (rich manifest) ===")
+		print(tools_mem.scan())
+		print()
+
+		print("=== Scan: summaries subdir ===")
+		print(tools_mem.scan("summaries"))
+		print()
+
+		print("=== Scan: archived subdir ===")
+		print(tools_mem.scan("archived"))
+	else:
+		print(f"\n(skipped — {lerim_mem} not found)")
+
+	print()
+	print("=== Scan: nonexistent directory ===")
+	print(tools.scan("nonexistent_dir"))
+
+	print()
+	print("=" * 60)
+	print("WRITE + EDIT TESTS")
+	print("=" * 60)
+
+	# Use a temp dir so we don't pollute real memory
+	import tempfile, shutil, json
+	with tempfile.TemporaryDirectory() as tmp:
+		tmp_path = Path(tmp)
+		tw = MemoryTools(memory_root=tmp_path)
+
+		# --- Write: create new memory ---
+		print("\n=== Write: create new feedback memory ===")
+		result = tw.write(
+			type="feedback",
+			name="Use tabs not spaces",
+			description="User prefers tabs for indentation",
+			body="Always use tabs.\n\n**Why:** User preference.\n\n**How to apply:** All code files.",
+		)
+		print(result)
+
+		# Read it back
+		created_filename = json.loads(result)["filename"]
+		print(f"\n=== Read back: {created_filename} ===")
+		print(tw.read(created_filename))
+
+		# --- Write: file already exists → error ---
+		print("\n=== Write: same name again (should error) ===")
+		print(tw.write(
+			type="feedback",
+			name="Use tabs not spaces",
+			description="duplicate attempt",
+			body="This should fail.",
+		))
+
+		# --- Write: summary type → summaries/ subdir ---
+		print("\n=== Write: create summary ===")
+		result_sum = tw.write(
+			type="summary",
+			name="DSPy migration session",
+			description="Migrated from OAI SDK to DSPy ReAct",
+			body="## User Intent\n\nMigrate the agent runtime.\n\n## What Happened\n\nReplaced OAI with DSPy.",
+		)
+		print(result_sum)
+		sum_filename = json.loads(result_sum)["filename"]
+		print(f"\n=== Read back summary: {sum_filename} ===")
+		print(tw.read(sum_filename))
+
+		# --- Write: create index.md manually via edit flow ---
+		# First create it
+		index_path = tmp_path / "index.md"
+		index_body = (
+			"# Test Project Memory\n\n"
+			"## User Preferences\n"
+			f"- [Use tabs]({created_filename}) — tabs for indentation\n\n"
+			"## Project State\n"
+			"- (none yet)\n"
+		)
+		index_path.write_text(index_body, encoding="utf-8")
+		print("\n=== Read: index.md ===")
+		print(tw.read("index.md"))
+
+		# --- Edit: surgical update in index.md ---
+		print("\n=== Edit: update index.md entry ===")
+		print(tw.edit("index.md", "tabs for indentation", "tabs for all indentation"))
+		print(tw.read("index.md"))
+
+		# --- Write: validation errors ---
+		print("\n=== Write: invalid type ===")
+		print(tw.write(type="invalid", name="x", description="x", body="x"))
+		print("\n=== Write: empty name ===")
+		print(tw.write(type="user", name="", description="x", body="x"))
+
+		# --- Edit: exact match in memory ---
+		print("\n=== Edit: exact match in memory ===")
+		print(tw.edit(created_filename, "All code files.", "All code files, no exceptions."))
+		print(tw.read(created_filename))
+
+		# --- Edit: not found ---
+		print("\n=== Edit: old_string not found ===")
+		print(tw.edit(created_filename, "this text does not exist", "replacement"))
+
+		# --- Edit: multiple matches + near_line ---
+		dup_file = tmp_path / "feedback_dup_test.md"
+		dup_file.write_text("---\nname: dup\ndescription: test\ntype: feedback\n---\n\nFoo bar\nSome text\nFoo bar\nMore text\n")
+		print("\n=== Edit: multiple matches, no near_line ===")
+		print(tw.edit("feedback_dup_test.md", "Foo bar", "Replaced"))
+		print("\n=== Edit: multiple matches, near_line=9 ===")
+		dup_file.write_text("---\nname: dup\ndescription: test\ntype: feedback\n---\n\nFoo bar\nSome text\nFoo bar\nMore text\n")
+		print(tw.edit("feedback_dup_test.md", "Foo bar", "Replaced second", near_line=9))
+		print(tw.read("feedback_dup_test.md"))
+
+		print()
+		print("=" * 60)
+		print("ARCHIVE TESTS")
+		print("=" * 60)
+
+		print("\n=== Archive: move memory to archived/ ===")
+		print(tw.archive(created_filename))
+
+		print("\n=== Scan: memory root after archive ===")
+		print(tw.scan())
+
+		print("\n=== Scan: archived/ subdir ===")
+		print(tw.scan("archived"))
+
+		print("\n=== Archive: file not found ===")
+		print(tw.archive("nonexistent.md"))
+
+		print("\n=== Archive: cannot archive index.md ===")
+		print(tw.archive("index.md"))

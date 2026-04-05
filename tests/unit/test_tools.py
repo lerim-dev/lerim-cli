@@ -1,645 +1,445 @@
-"""Unit tests for DSPy ReAct tools (write_memory, read_file, list_files,
-archive_memory, edit_memory, scan_memory_manifest, update_memory_index,
-make_extract_tools, make_maintain_tools, make_ask_tools)."""
+"""Unit tests for MemoryTools (read, grep, scan, write, edit, archive)."""
 
 from __future__ import annotations
 
 import json
-from functools import partial
 from pathlib import Path
 
 import pytest
 
-from lerim.agents.context import RuntimeContext
-from lerim.agents.tools import (
-	archive_memory,
-	make_ask_tools,
-	make_maintain_tools,
-	make_extract_tools,
-	edit_memory,
-	list_files,
-	read_file,
-	scan_memory_manifest,
-	update_memory_index,
-	write_memory,
-)
-from tests.helpers import make_config
-
-
-def _make_ctx(tmp_path: Path, **overrides) -> RuntimeContext:
-	"""Build a RuntimeContext for testing."""
-	mem_root = tmp_path / "memories"
-	mem_root.mkdir(exist_ok=True)
-	run_folder = tmp_path / "runs" / "test-run"
-	run_folder.mkdir(parents=True, exist_ok=True)
-
-	defaults = dict(
-		repo_root=tmp_path,
-		memory_root=mem_root,
-		workspace_root=tmp_path / "workspace",
-		run_folder=run_folder,
-		extra_read_roots=(),
-		run_id="test-run-001",
-		config=make_config(tmp_path),
-		trace_path=None,
-		artifact_paths=None,
-	)
-	m = {**defaults, **overrides}
-
-	def _p(x: str | Path | None) -> Path | None:
-		if x is None:
-			return None
-		return Path(x).expanduser().resolve()
-
-	return RuntimeContext(
-		config=m["config"],
-		repo_root=Path(m["repo_root"]).expanduser().resolve(),
-		memory_root=_p(m.get("memory_root")),
-		workspace_root=_p(m.get("workspace_root")),
-		run_folder=_p(m.get("run_folder")),
-		extra_read_roots=tuple(
-			Path(p).expanduser().resolve() for p in (m.get("extra_read_roots") or ())
-		),
-		run_id=str(m.get("run_id") or ""),
-		trace_path=_p(m.get("trace_path")),
-		artifact_paths=m.get("artifact_paths"),
-	)
+from lerim.agents.tools import MEMORY_TYPES, MemoryTools
 
 
 # ---------------------------------------------------------------------------
-# write_memory: valid inputs
+# Fixtures
 # ---------------------------------------------------------------------------
 
 
-def test_write_memory_valid_project(tmp_path):
-	"""Valid project memory should write a file and return JSON with file_path."""
-	ctx = _make_ctx(tmp_path)
-	result = write_memory(
-		ctx,
-		type="project",
-		name="Use PostgreSQL",
-		description="All persistence should use PostgreSQL for reliability.",
-		body="All persistence should use PostgreSQL. **Why:** Battle-tested, excellent tooling.",
-	)
-	parsed = json.loads(result)
-	assert parsed["type"] == "project"
-	assert Path(parsed["file_path"]).exists()
-	content = Path(parsed["file_path"]).read_text()
-	assert "Use PostgreSQL" in content
-	assert "type: project" in content
-
-
-def test_write_memory_valid_feedback(tmp_path):
-	"""Valid feedback memory should write correctly."""
-	ctx = _make_ctx(tmp_path)
-	result = write_memory(
-		ctx,
-		type="feedback",
-		name="Queue heartbeat pattern",
-		description="Keep heartbeat updates deterministic for reliability.",
-		body="Keep heartbeat updates deterministic. **Why:** Non-deterministic heartbeats caused flaky tests.",
-	)
-	parsed = json.loads(result)
-	assert parsed["type"] == "feedback"
-	assert Path(parsed["file_path"]).exists()
-	content = Path(parsed["file_path"]).read_text()
-	assert "type: feedback" in content
-	assert "name: Queue heartbeat pattern" in content
-
-
-def test_write_memory_valid_user(tmp_path):
-	"""Valid user memory should write correctly."""
-	ctx = _make_ctx(tmp_path)
-	result = write_memory(
-		ctx,
-		type="user",
-		name="Prefers concise output",
-		description="User wants terse responses, no padding.",
-		body="User prefers concise, direct output. **Why:** Saves time and avoids noise.",
-	)
-	parsed = json.loads(result)
-	assert parsed["type"] == "user"
-	content = Path(parsed["file_path"]).read_text()
-	assert "type: user" in content
-
-
-def test_write_memory_valid_reference(tmp_path):
-	"""Valid reference memory should write correctly."""
-	ctx = _make_ctx(tmp_path)
-	result = write_memory(
-		ctx,
-		type="reference",
-		name="Logfire tracing dashboard",
-		description="Logfire dashboard URL for observability.",
-		body="Logfire tracing at https://logfire.pydantic.dev. Used for DSPy span analysis.",
-	)
-	parsed = json.loads(result)
-	assert parsed["type"] == "reference"
-	content = Path(parsed["file_path"]).read_text()
-	assert "type: reference" in content
-
-
-def test_write_memory_frontmatter_fields(tmp_path):
-	"""write_memory should persist name, description, type in frontmatter."""
-	ctx = _make_ctx(tmp_path)
-	result = write_memory(
-		ctx,
-		type="project",
-		name="Queue retries can fail safely",
-		description="Use bounded retries for flaky queue workers.",
-		body="Use bounded retries for flaky queue workers. **Why:** Unbounded retries caused cascading failures.",
-	)
-	parsed = json.loads(result)
-	content = Path(parsed["file_path"]).read_text()
-	assert "name: Queue retries can fail safely" in content
-	assert "description: Use bounded retries for flaky queue workers." in content
-	assert "type: project" in content
-	# Old fields must NOT be present
-	assert "confidence:" not in content
-	assert "primitive:" not in content
-	assert "kind:" not in content
-	assert "tags:" not in content
-
-
-def test_write_memory_flat_directory(tmp_path):
-	"""write_memory should write files directly in memory_root (no subdirs)."""
-	ctx = _make_ctx(tmp_path)
-	result = write_memory(
-		ctx,
-		type="feedback",
-		name="Flat dir test",
-		description="Memory should be in flat directory.",
-		body="Memories are stored flat under memory_root. No subdirectories by type.",
-	)
-	parsed = json.loads(result)
-	file_path = Path(parsed["file_path"])
-	# File should be directly in memory_root, not in a subdirectory
-	assert file_path.parent == ctx.memory_root
-
-
-# ---------------------------------------------------------------------------
-# write_memory: validation errors
-# ---------------------------------------------------------------------------
-
-
-def test_write_memory_invalid_type(tmp_path):
-	"""Invalid type should return an ERROR string."""
-	ctx = _make_ctx(tmp_path)
-	result = write_memory(
-		ctx,
-		type="fact",
-		name="Bad",
-		description="Bad description.",
-		body="Bad body content here.",
-	)
-	assert result.startswith("ERROR:")
-	assert "user" in result
-	assert "feedback" in result
-
-
-def test_write_memory_empty_name(tmp_path):
-	"""Empty name should return an ERROR string."""
-	ctx = _make_ctx(tmp_path)
-	result = write_memory(
-		ctx,
-		type="project",
-		name="",
-		description="Some description.",
-		body="No name provided.",
-	)
-	assert result.startswith("ERROR:")
-	assert "name" in result
-
-
-def test_write_memory_empty_description(tmp_path):
-	"""Empty description should return an ERROR string."""
-	ctx = _make_ctx(tmp_path)
-	result = write_memory(
-		ctx,
-		type="project",
-		name="No description test",
-		description="",
-		body="Missing description.",
-	)
-	assert result.startswith("ERROR:")
-	assert "description" in result
-
-
-def test_write_memory_empty_body(tmp_path):
-	"""Empty body should return an ERROR string."""
-	ctx = _make_ctx(tmp_path)
-	result = write_memory(
-		ctx,
-		type="project",
-		name="No body test",
-		description="This has no body.",
-		body="",
-	)
-	assert result.startswith("ERROR:")
-	assert "body" in result
-
-
-def test_write_memory_no_memory_root(tmp_path):
-	"""Missing memory_root in context should return an ERROR string."""
-	ctx = RuntimeContext(
-		config=make_config(tmp_path),
-		repo_root=tmp_path.resolve(),
-		memory_root=None,
-		workspace_root=None,
-		run_folder=None,
-		extra_read_roots=(),
-		run_id="",
-	)
-	result = write_memory(
-		ctx,
-		type="project",
-		name="No root",
-		description="Should fail without memory_root.",
-		body="Should fail because memory_root is not set.",
-	)
-	assert result.startswith("ERROR:")
-	assert "memory_root" in result
-
-
-# ---------------------------------------------------------------------------
-# read_file tests
-# ---------------------------------------------------------------------------
-
-
-def test_read_file_from_memory_root(tmp_path):
-	"""read_file should read files within memory_root."""
-	ctx = _make_ctx(tmp_path)
-	test_file = ctx.memory_root / "test-decision.md"
-	test_file.write_text("# Test Decision\nSome content.")
-	result = read_file(ctx, file_path=str(test_file))
-	assert "Test Decision" in result
-
-
-def test_read_file_from_run_folder(tmp_path):
-	"""read_file should read files within run_folder."""
-	ctx = _make_ctx(tmp_path)
-	test_file = ctx.run_folder / "test_data.json"
-	test_file.write_text('{"candidates": []}')
-	result = read_file(ctx, file_path=str(test_file))
-	assert "candidates" in result
-
-
-def test_read_file_outside_roots(tmp_path):
-	"""read_file should reject paths outside allowed roots."""
-	ctx = _make_ctx(tmp_path)
-	result = read_file(ctx, file_path="/etc/passwd")
-	assert "Error" in result
-	assert "outside" in result
-
-
-def test_read_file_not_found(tmp_path):
-	"""read_file should return error for missing files."""
-	ctx = _make_ctx(tmp_path)
-	result = read_file(ctx, file_path=str(ctx.memory_root / "nonexistent.md"))
-	assert "Error" in result
-	assert "not found" in result
-
-
-# ---------------------------------------------------------------------------
-# list_files tests
-# ---------------------------------------------------------------------------
-
-
-def test_list_files_in_memory_root(tmp_path):
-	"""list_files should list files in memory directories."""
-	ctx = _make_ctx(tmp_path)
-	(ctx.memory_root / "a.md").write_text("# A")
-	(ctx.memory_root / "b.md").write_text("# B")
-	result = list_files(ctx, directory=str(ctx.memory_root))
-	files = json.loads(result)
-	assert len(files) == 2
-
-
-def test_list_files_empty_dir(tmp_path):
-	"""list_files should return empty list for empty directory."""
-	ctx = _make_ctx(tmp_path)
-	result = list_files(ctx, directory=str(ctx.memory_root))
-	files = json.loads(result)
-	assert files == []
-
-
-def test_list_files_missing_dir(tmp_path):
-	"""list_files should return empty list for missing directory."""
-	ctx = _make_ctx(tmp_path)
-	result = list_files(ctx, directory=str(ctx.memory_root / "nonexistent"))
-	assert result == "[]"
-
-
-def test_list_files_outside_roots(tmp_path):
-	"""list_files should reject paths outside allowed roots."""
-	ctx = _make_ctx(tmp_path)
-	result = list_files(ctx, directory="/tmp")
-	assert "Error" in result
-	assert "outside" in result
-
-
-def test_list_files_with_pattern(tmp_path):
-	"""list_files should filter by glob pattern."""
-	ctx = _make_ctx(tmp_path)
-	(ctx.memory_root / "a.md").write_text("# A")
-	(ctx.memory_root / "b.json").write_text("{}")
-	result = list_files(
-		ctx,
-		directory=str(ctx.memory_root),
-		pattern="*.json",
-	)
-	files = json.loads(result)
-	assert len(files) == 1
-	assert files[0].endswith(".json")
-
-
-# ---------------------------------------------------------------------------
-# archive_memory tests
-# ---------------------------------------------------------------------------
-
-
-def test_archive_memory_flat(tmp_path):
-	"""archive_memory should move a flat memory file to archived/."""
-	ctx = _make_ctx(tmp_path)
-	src = ctx.memory_root / "20260327-test-decision.md"
-	src.write_text("---\nname: Test\ntype: project\n---\nBody")
-	result = archive_memory(ctx, file_path=str(src))
-	parsed = json.loads(result)
-	assert parsed["archived"] is True
-	assert not src.exists()
-	target = Path(parsed["target"])
-	assert target.exists()
-	assert "archived/20260327-test-decision.md" in str(target)
-
-
-def test_archive_memory_outside_memory_root(tmp_path):
-	"""archive_memory should reject paths outside memory_root."""
-	ctx = _make_ctx(tmp_path)
-	result = archive_memory(ctx, file_path="/tmp/evil.md")
-	assert result.startswith("ERROR:")
-	assert "outside" in result
-
-
-def test_archive_memory_not_found(tmp_path):
-	"""archive_memory should error on missing files."""
-	ctx = _make_ctx(tmp_path)
-	result = archive_memory(
-		ctx,
-		file_path=str(ctx.memory_root / "gone.md"),
-	)
-	assert result.startswith("ERROR:")
-	assert "not found" in result
-
-
-def test_archive_memory_no_memory_root(tmp_path):
-	"""archive_memory should error when memory_root is not set."""
-	ctx = RuntimeContext(
-		config=make_config(tmp_path),
-		repo_root=tmp_path.resolve(),
-		memory_root=None,
-		workspace_root=None,
-		run_folder=None,
-		extra_read_roots=(),
-		run_id="",
-	)
-	result = archive_memory(ctx, file_path="/some/path.md")
-	assert result.startswith("ERROR:")
-	assert "memory_root" in result
-
-
-# ---------------------------------------------------------------------------
-# edit_memory tests
-# ---------------------------------------------------------------------------
-
-
-def test_edit_memory_updates_content(tmp_path):
-	"""edit_memory should replace file content."""
-	ctx = _make_ctx(tmp_path)
-	target = ctx.memory_root / "edit-test.md"
-	target.write_text("---\nname: Old\ntype: project\n---\nOld body")
-	new_content = "---\nname: Old\ntype: project\ndescription: Updated\n---\nNew body"
-	result = edit_memory(ctx, file_path=str(target), new_content=new_content)
-	parsed = json.loads(result)
-	assert parsed["edited"] is True
-	assert target.read_text() == new_content
-
-
-def test_edit_memory_rejects_no_frontmatter(tmp_path):
-	"""edit_memory should reject content without YAML frontmatter."""
-	ctx = _make_ctx(tmp_path)
-	target = ctx.memory_root / "edit-test.md"
-	target.write_text("---\nname: Old\n---\nBody")
-	result = edit_memory(
-		ctx,
-		file_path=str(target),
-		new_content="No frontmatter here",
-	)
-	assert result.startswith("ERROR:")
-	assert "frontmatter" in result
-
-
-def test_edit_memory_outside_memory_root(tmp_path):
-	"""edit_memory should reject paths outside memory_root."""
-	ctx = _make_ctx(tmp_path)
-	result = edit_memory(
-		ctx,
-		file_path="/tmp/evil.md",
-		new_content="---\n---",
-	)
-	assert result.startswith("ERROR:")
-	assert "outside" in result
-
-
-def test_edit_memory_not_found(tmp_path):
-	"""edit_memory should error on missing files."""
-	ctx = _make_ctx(tmp_path)
-	result = edit_memory(
-		ctx,
-		file_path=str(ctx.memory_root / "gone.md"),
-		new_content="---\nname: Gone\n---\nBody",
-	)
-	assert result.startswith("ERROR:")
-	assert "not found" in result
-
-
-def test_edit_memory_no_memory_root(tmp_path):
-	"""edit_memory should error when memory_root is not set."""
-	ctx = RuntimeContext(
-		config=make_config(tmp_path),
-		repo_root=tmp_path.resolve(),
-		memory_root=None,
-		workspace_root=None,
-		run_folder=None,
-		extra_read_roots=(),
-		run_id="",
-	)
-	result = edit_memory(
-		ctx,
-		file_path="/some/path.md",
-		new_content="---\n---",
-	)
-	assert result.startswith("ERROR:")
-	assert "memory_root" in result
-
-
-# ---------------------------------------------------------------------------
-# scan_memory_manifest tests
-# ---------------------------------------------------------------------------
-
-
-def _write_test_memory(
-	memory_root, memory_id, name, body, mem_type="project",
-):
-	"""Write a minimal memory markdown file for testing (flat directory)."""
-	content = f"""---
-id: {memory_id}
-name: {name}
-description: {name}
-type: {mem_type}
-created: '2026-03-27T00:00:00+00:00'
-updated: '2026-03-27T00:00:00+00:00'
-source: test-run
----
-
-{body}
-"""
-	path = memory_root / f"20260327-{memory_id}.md"
-	path.parent.mkdir(parents=True, exist_ok=True)
+@pytest.fixture
+def mem_root(tmp_path):
+	"""Create a memory root with sample files."""
+	root = tmp_path / "memory"
+	root.mkdir()
+	return root
+
+
+@pytest.fixture
+def trace_file(tmp_path):
+	"""Create a sample trace file (100 lines)."""
+	trace = tmp_path / "trace.jsonl"
+	lines = [f'{{"turn": {i}, "role": "user", "content": "message {i}"}}' for i in range(100)]
+	trace.write_text("\n".join(lines), encoding="utf-8")
+	return trace
+
+
+@pytest.fixture
+def tools(mem_root, trace_file):
+	"""MemoryTools instance with memory root and trace."""
+	return MemoryTools(memory_root=mem_root, trace_path=trace_file)
+
+
+@pytest.fixture
+def tools_no_trace(mem_root):
+	"""MemoryTools instance without a trace path."""
+	return MemoryTools(memory_root=mem_root)
+
+
+def _write_memory_file(mem_root, filename, name, description, mem_type="feedback"):
+	"""Write a minimal memory file for testing."""
+	content = f"---\nname: {name}\ndescription: {description}\ntype: {mem_type}\n---\n\nBody of {name}.\n"
+	path = mem_root / filename
 	path.write_text(content, encoding="utf-8")
 	return path
 
 
-def test_scan_memory_manifest_returns_all(tmp_path):
-	"""scan_memory_manifest returns metadata for all .md files except MEMORY.md."""
-	ctx = _make_ctx(tmp_path)
-	_write_test_memory(ctx.memory_root, "use-postgres", "Use PostgreSQL", "Chose PostgreSQL.")
-	_write_test_memory(ctx.memory_root, "pytest-tips", "Pytest tips", "Use fixtures.", mem_type="feedback")
-	# MEMORY.md should be excluded
-	(ctx.memory_root / "MEMORY.md").write_text("# Index\n")
-
-	result = scan_memory_manifest(ctx)
-	parsed = json.loads(result)
-	assert parsed["count"] == 2
-	names = {m["name"] for m in parsed["memories"]}
-	assert "Use PostgreSQL" in names
-	assert "Pytest tips" in names
-
-
-def test_scan_memory_manifest_empty(tmp_path):
-	"""scan_memory_manifest on empty memory_root returns count 0."""
-	ctx = _make_ctx(tmp_path)
-	result = scan_memory_manifest(ctx)
-	parsed = json.loads(result)
-	assert parsed["count"] == 0
-	assert parsed["memories"] == []
-
-
-def test_scan_memory_manifest_no_memory_root(tmp_path):
-	"""scan_memory_manifest without memory_root returns error."""
-	ctx = RuntimeContext(
-		config=make_config(tmp_path),
-		repo_root=tmp_path.resolve(),
-		memory_root=None,
-		workspace_root=None,
-		run_folder=None,
-		extra_read_roots=(),
-		run_id="",
-	)
-	result = scan_memory_manifest(ctx)
-	parsed = json.loads(result)
-	assert "error" in parsed
-
-
 # ---------------------------------------------------------------------------
-# update_memory_index tests
+# read
 # ---------------------------------------------------------------------------
 
 
-def test_update_memory_index_writes_file(tmp_path):
-	"""update_memory_index should write MEMORY.md."""
-	ctx = _make_ctx(tmp_path)
-	content = "- [Use PostgreSQL](use-postgres.md) -- Primary database choice"
-	result = update_memory_index(ctx, content)
-	parsed = json.loads(result)
-	assert parsed["lines"] >= 1
-	assert parsed["bytes"] > 0
-	index_path = Path(parsed["file_path"])
-	assert index_path.exists()
-	assert index_path.name == "MEMORY.md"
-	assert "Use PostgreSQL" in index_path.read_text()
+class TestRead:
+	def test_full_read_small_file(self, tools, mem_root):
+		"""Full read (limit=0) returns entire file with line numbers, no header."""
+		_write_memory_file(mem_root, "feedback_tabs.md", "Use tabs", "Tabs over spaces")
+		result = tools.read("feedback_tabs.md")
+		assert "1\t---" in result
+		assert "Body of Use tabs" in result
+		# No header for full reads
+		assert "[" not in result.split("\n")[0] or "lines" not in result.split("\n")[0]
 
+	def test_paginated_read_trace(self, tools):
+		"""Paginated read returns header + correct line range."""
+		result = tools.read("trace", offset=10, limit=5)
+		assert "[100 lines, showing 11-15]" in result
+		lines = result.strip().split("\n")
+		assert lines[1].startswith("11\t")
+		assert lines[5].startswith("15\t")
 
-def test_update_memory_index_truncates_long(tmp_path):
-	"""update_memory_index should truncate content beyond 200 lines."""
-	ctx = _make_ctx(tmp_path)
-	lines = [f"- [Memory {i}](mem-{i}.md) -- description {i}" for i in range(250)]
-	content = "\n".join(lines)
-	result = update_memory_index(ctx, content)
-	parsed = json.loads(result)
-	# 200 original + 1 warning line + trailing newline
-	assert parsed["lines"] <= 203
+	def test_full_trace_read(self, tools):
+		"""limit=0 on trace reads entire file."""
+		result = tools.read("trace")
+		assert "1\t" in result
+		assert "100\t" in result
 
+	def test_read_index_md(self, tools, mem_root):
+		"""Can read index.md by filename."""
+		(mem_root / "index.md").write_text("# Project Memory\n\n## Preferences\n- entry\n")
+		result = tools.read("index.md")
+		assert "Project Memory" in result
 
-def test_update_memory_index_no_memory_root(tmp_path):
-	"""update_memory_index without memory_root returns error."""
-	ctx = RuntimeContext(
-		config=make_config(tmp_path),
-		repo_root=tmp_path.resolve(),
-		memory_root=None,
-		workspace_root=None,
-		run_folder=None,
-		extra_read_roots=(),
-		run_id="",
-	)
-	result = update_memory_index(ctx, "# Index")
-	parsed = json.loads(result)
-	assert "error" in parsed
+	def test_read_nonexistent(self, tools):
+		"""Missing file returns error."""
+		result = tools.read("nonexistent.md")
+		assert "Error" in result
+		assert "not found" in result
+
+	def test_read_trace_not_configured(self, tools_no_trace):
+		"""Reading trace without trace_path returns error."""
+		result = tools_no_trace.read("trace")
+		assert "Error" in result
+		assert "no trace path" in result
+
+	def test_offset_beyond_file(self, tools):
+		"""Offset past end of file returns header but no content lines."""
+		result = tools.read("trace", offset=200, limit=10)
+		assert "[100 lines, showing 201-200]" in result
 
 
 # ---------------------------------------------------------------------------
-# Bind helper tests
+# grep
 # ---------------------------------------------------------------------------
 
 
-def test_closure_tools_have_function_names(tmp_path):
-	"""Closure-bound tools should have proper function names, not 'partial'."""
-	ctx = _make_ctx(tmp_path)
-	tools = make_extract_tools(ctx)
-	for tool in tools:
-		assert tool.__name__ != "partial"
-		assert tool.__name__ != "<lambda>"
+class TestGrep:
+	def test_grep_finds_matches(self, tools):
+		"""Grep returns matching lines from trace."""
+		result = tools.grep("trace", "message 42")
+		assert "42" in result
+		assert "message 42" in result
+
+	def test_grep_no_matches(self, tools):
+		"""Grep returns clear message when nothing matches."""
+		result = tools.grep("trace", "xyznonexistent")
+		assert "No matches" in result
+
+	def test_grep_memory_file(self, tools, mem_root):
+		"""Grep works on memory files too."""
+		_write_memory_file(mem_root, "feedback_tabs.md", "Use tabs", "Tabs pref")
+		result = tools.grep("feedback_tabs.md", "Body of")
+		assert "Body of Use tabs" in result
+
+	def test_grep_nonexistent_file(self, tools):
+		"""Grep on missing file returns error."""
+		result = tools.grep("nonexistent.md", "pattern")
+		assert "Error" in result
+		assert "not found" in result
+
+	def test_grep_trace_not_configured(self, tools_no_trace):
+		"""Grep on trace without trace_path returns error."""
+		result = tools_no_trace.grep("trace", "pattern")
+		assert "Error" in result
+		assert "no trace path" in result
 
 
-@pytest.mark.parametrize("bind_fn,expected_count", [
-	(make_extract_tools, 9),
-	(make_maintain_tools, 7),
-	(make_ask_tools, 3),
-])
-def test_bind_tools_callable(tmp_path, bind_fn, expected_count):
-	"""Bound tools should be callable with preserved names."""
-	ctx = _make_ctx(tmp_path)
-	tools = bind_fn(ctx)
-	assert len(tools) == expected_count
-	for tool in tools:
-		assert callable(tool)
-		assert hasattr(tool, "__name__")
-		assert tool.__name__ != "partial"
+# ---------------------------------------------------------------------------
+# scan
+# ---------------------------------------------------------------------------
 
 
-def test_bind_tools_dspy_introspection(tmp_path):
-	"""dspy.Tool should see correct names and args from bound tools."""
-	import dspy
-	ctx = _make_ctx(tmp_path)
-	tools = make_extract_tools(ctx)
-	expected_names = {
-		"read_file", "read_trace", "grep_trace",
-		"scan_memory_manifest", "write_memory", "edit_memory",
-		"update_memory_index", "write_summary", "list_files",
-	}
-	seen_names = set()
-	for tool in tools:
-		dt = dspy.Tool(tool)
-		seen_names.add(dt.name)
-		assert dt.name != "partial", f"dspy.Tool name should not be 'partial'"
-		assert "args" not in dt.args or len(dt.args) > 1, f"{dt.name}: args should not be generic"
-	assert seen_names == expected_names
+class TestScan:
+	def test_scan_empty_root(self, tools):
+		"""Scan on empty memory root returns count 0."""
+		result = json.loads(tools.scan())
+		assert result["count"] == 0
+		assert result["memories"] == []
+
+	def test_scan_with_memories(self, tools, mem_root):
+		"""Scan returns rich manifest for memory files."""
+		_write_memory_file(mem_root, "feedback_tabs.md", "Use tabs", "Tabs pref", "feedback")
+		_write_memory_file(mem_root, "project_arch.md", "Architecture", "DSPy arch", "project")
+		result = json.loads(tools.scan())
+		assert result["count"] == 2
+		names = {m["name"] for m in result["memories"]}
+		assert "Use tabs" in names
+		assert "Architecture" in names
+		types = {m["type"] for m in result["memories"]}
+		assert "feedback" in types
+		assert "project" in types
+
+	def test_scan_excludes_index(self, tools, mem_root):
+		"""Scan excludes index.md from the manifest."""
+		_write_memory_file(mem_root, "feedback_tabs.md", "Use tabs", "Tabs pref")
+		(mem_root / "index.md").write_text("# Index\n")
+		result = json.loads(tools.scan())
+		assert result["count"] == 1
+		filenames = {m["filename"] for m in result["memories"]}
+		assert "index.md" not in filenames
+
+	def test_scan_subdirectory(self, tools, mem_root):
+		"""Scan subdirectory returns simple file listing."""
+		archived = mem_root / "archived"
+		archived.mkdir()
+		(archived / "old.md").write_text("old content")
+		result = json.loads(tools.scan("archived"))
+		assert result["count"] == 1
+		assert "old.md" in result["files"]
+
+	def test_scan_nonexistent_dir(self, tools):
+		"""Scan nonexistent directory returns empty result."""
+		result = json.loads(tools.scan("nonexistent"))
+		assert result["count"] == 0
+
+	def test_scan_summaries(self, tools, mem_root):
+		"""Scan summaries subdirectory works."""
+		summaries = mem_root / "summaries"
+		summaries.mkdir()
+		(summaries / "summary_test.md").write_text("summary content")
+		result = json.loads(tools.scan("summaries"))
+		assert result["count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# write
+# ---------------------------------------------------------------------------
+
+
+class TestWrite:
+	def test_create_feedback(self, tools, mem_root):
+		"""Write creates a new feedback memory file."""
+		result = json.loads(tools.write(
+			type="feedback", name="Use tabs",
+			description="Tabs over spaces", body="Always use tabs.",
+		))
+		assert result["type"] == "feedback"
+		assert result["filename"] == "feedback_use_tabs.md"
+		path = mem_root / result["filename"]
+		assert path.exists()
+		content = path.read_text()
+		assert "name: Use tabs" in content
+		assert "type: feedback" in content
+		assert "Always use tabs." in content
+
+	def test_create_project(self, tools, mem_root):
+		"""Write creates a project memory."""
+		result = json.loads(tools.write(
+			type="project", name="DSPy migration",
+			description="Migrated to DSPy ReAct",
+			body="Migration completed.\n\n**Why:** Optimizable.\n\n**How to apply:** Use LerimRuntime.",
+		))
+		assert result["type"] == "project"
+		assert (mem_root / result["filename"]).exists()
+
+	def test_create_summary(self, tools, mem_root):
+		"""Write with type=summary creates file in summaries/ subdir."""
+		result = json.loads(tools.write(
+			type="summary", name="Migration session",
+			description="Migrated to DSPy",
+			body="## User Intent\n\nMigrate runtime.\n\n## What Happened\n\nDone.",
+		))
+		assert result["type"] == "summary"
+		assert (mem_root / "summaries" / result["filename"]).exists()
+
+	def test_no_timestamps_in_frontmatter(self, tools, mem_root):
+		"""Frontmatter should only have name, description, type — no timestamps."""
+		result = json.loads(tools.write(
+			type="user", name="Isaac",
+			description="Founder context", body="ML/AI PhD.",
+		))
+		content = (mem_root / result["filename"]).read_text()
+		assert "created:" not in content
+		assert "updated:" not in content
+		assert "name: Isaac" in content
+		assert "description: Founder context" in content
+		assert "type: user" in content
+
+	def test_file_exists_returns_error(self, tools, mem_root):
+		"""Write same name twice returns error pointing to read + edit."""
+		tools.write(type="feedback", name="Use tabs",
+		            description="Tabs pref", body="Body.")
+		result = tools.write(type="feedback", name="Use tabs",
+		                     description="Dup attempt", body="Body.")
+		assert "Error" in result
+		assert "already exists" in result
+		assert "read(" in result
+		assert "edit(" in result
+
+	def test_invalid_type(self, tools):
+		"""Invalid type returns error listing valid types."""
+		result = tools.write(type="invalid", name="x", description="x", body="x")
+		assert "Error" in result
+		assert "user" in result
+
+	def test_empty_name(self, tools):
+		"""Empty name returns error."""
+		result = tools.write(type="feedback", name="", description="x", body="x")
+		assert "Error" in result
+		assert "name" in result
+
+	def test_empty_description(self, tools):
+		"""Empty description returns error."""
+		result = tools.write(type="feedback", name="x", description="", body="x")
+		assert "Error" in result
+		assert "description" in result
+
+	def test_empty_body(self, tools):
+		"""Empty body returns error."""
+		result = tools.write(type="feedback", name="x", description="x", body="")
+		assert "Error" in result
+		assert "body" in result
+
+	def test_all_memory_types(self, tools, mem_root):
+		"""All MEMORY_TYPES can be created."""
+		for t in MEMORY_TYPES:
+			result = json.loads(tools.write(
+				type=t, name=f"Test {t}",
+				description=f"Desc for {t}", body=f"Body for {t}.",
+			))
+			assert result["type"] == t
+
+
+# ---------------------------------------------------------------------------
+# edit
+# ---------------------------------------------------------------------------
+
+
+class TestEdit:
+	def test_exact_match(self, tools, mem_root):
+		"""Edit replaces exact match in a memory file."""
+		_write_memory_file(mem_root, "feedback_tabs.md", "Use tabs", "Tabs pref")
+		result = tools.edit("feedback_tabs.md", "Body of Use tabs.", "Updated body.")
+		assert "Edited" in result
+		content = (mem_root / "feedback_tabs.md").read_text()
+		assert "Updated body." in content
+		assert "Body of Use tabs" not in content
+
+	def test_edit_index(self, tools, mem_root):
+		"""Edit works on index.md for surgical updates."""
+		(mem_root / "index.md").write_text(
+			"# Memory\n\n## Preferences\n- [Tabs](feedback_tabs.md) — tabs pref\n"
+		)
+		result = tools.edit("index.md", "tabs pref", "tabs for all indentation")
+		assert "Edited" in result
+		content = (mem_root / "index.md").read_text()
+		assert "tabs for all indentation" in content
+
+	def test_not_found_string(self, tools, mem_root):
+		"""Edit returns error when old_string not found."""
+		_write_memory_file(mem_root, "feedback_tabs.md", "Use tabs", "Tabs pref")
+		result = tools.edit("feedback_tabs.md", "nonexistent text", "replacement")
+		assert "Error" in result
+		assert "not found" in result
+
+	def test_not_found_file(self, tools):
+		"""Edit returns error when file doesn't exist."""
+		result = tools.edit("nonexistent.md", "old", "new")
+		assert "Error" in result
+		assert "not found" in result
+
+	def test_multiple_matches_no_hint(self, tools, mem_root):
+		"""Edit with multiple matches and no near_line asks for disambiguation."""
+		(mem_root / "test.md").write_text("AAA\nBBB\nAAA\nCCC\n")
+		result = tools.edit("test.md", "AAA", "ZZZ")
+		assert "Error" in result
+		assert "matches 2 locations" in result
+		assert "near_line" in result
+
+	def test_multiple_matches_with_near_line(self, tools, mem_root):
+		"""Edit with near_line picks the closest match."""
+		(mem_root / "test.md").write_text("AAA\nBBB\nAAA\nCCC\n")
+		result = tools.edit("test.md", "AAA", "ZZZ", near_line=3)
+		assert "Edited" in result
+		content = (mem_root / "test.md").read_text()
+		lines = content.strip().split("\n")
+		assert lines[0] == "AAA"  # First occurrence untouched
+		assert lines[2] == "ZZZ"  # Second occurrence (line 3) replaced
+
+	def test_fuzzy_whitespace_match(self, tools, mem_root):
+		"""Edit falls back to fuzzy whitespace matching."""
+		(mem_root / "test.md").write_text("    indented line\n")
+		# Search with tabs instead of spaces
+		result = tools.edit("test.md", "\tindented line", "fixed line")
+		assert "Edited" in result
+
+
+# ---------------------------------------------------------------------------
+# archive
+# ---------------------------------------------------------------------------
+
+
+class TestArchive:
+	def test_archive_moves_file(self, tools, mem_root):
+		"""Archive moves file to archived/ subdirectory."""
+		_write_memory_file(mem_root, "feedback_old.md", "Old", "Old pref")
+		result = json.loads(tools.archive("feedback_old.md"))
+		assert result["archived"] == "feedback_old.md"
+		assert not (mem_root / "feedback_old.md").exists()
+		assert (mem_root / "archived" / "feedback_old.md").exists()
+
+	def test_archive_then_scan(self, tools, mem_root):
+		"""After archiving, file disappears from scan and appears in archived."""
+		_write_memory_file(mem_root, "feedback_old.md", "Old", "Old pref")
+		_write_memory_file(mem_root, "feedback_keep.md", "Keep", "Keep pref")
+		tools.archive("feedback_old.md")
+
+		manifest = json.loads(tools.scan())
+		assert manifest["count"] == 1
+		assert manifest["memories"][0]["filename"] == "feedback_keep.md"
+
+		archived = json.loads(tools.scan("archived"))
+		assert archived["count"] == 1
+		assert "feedback_old.md" in archived["files"]
+
+	def test_archive_nonexistent(self, tools):
+		"""Archive nonexistent file returns error."""
+		result = tools.archive("nonexistent.md")
+		assert "Error" in result
+		assert "not found" in result
+
+	def test_archive_index_protected(self, tools, mem_root):
+		"""Cannot archive index.md."""
+		(mem_root / "index.md").write_text("# Index\n")
+		result = tools.archive("index.md")
+		assert "Error" in result
+		assert "cannot archive" in result
+
+
+# ---------------------------------------------------------------------------
+# DSPy tool introspection
+# ---------------------------------------------------------------------------
+
+
+class TestDspyIntrospection:
+	def test_tools_are_callable_methods(self, tools):
+		"""All tool methods are callable bound methods."""
+		for method in [tools.read, tools.grep, tools.scan, tools.write, tools.edit, tools.archive]:
+			assert callable(method)
+
+	def test_tool_selection_per_agent(self, tools):
+		"""Each agent gets the correct subset of tools."""
+		extract = [tools.read, tools.grep, tools.scan, tools.write, tools.edit]
+		maintain = [tools.read, tools.scan, tools.write, tools.edit, tools.archive]
+		ask = [tools.read, tools.scan]
+
+		assert len(extract) == 5
+		assert len(maintain) == 5
+		assert len(ask) == 2
+
+	def test_dspy_tool_wrapping(self, tools):
+		"""dspy.Tool should correctly wrap each method."""
+		import dspy
+		methods = [tools.read, tools.grep, tools.scan, tools.write, tools.edit, tools.archive]
+		expected_names = {"read", "grep", "scan", "write", "edit", "archive"}
+		seen = set()
+		for method in methods:
+			dt = dspy.Tool(method)
+			seen.add(dt.name)
+			assert dt.name != "partial"
+		assert seen == expected_names
+
+	def test_memory_types_constant(self):
+		"""MEMORY_TYPES includes all expected types."""
+		assert "user" in MEMORY_TYPES
+		assert "feedback" in MEMORY_TYPES
+		assert "project" in MEMORY_TYPES
+		assert "reference" in MEMORY_TYPES
+		assert "summary" in MEMORY_TYPES
