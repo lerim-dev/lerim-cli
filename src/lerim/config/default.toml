@@ -33,18 +33,6 @@ openrouter_provider_order = []
 thinking = true
 max_tokens = 32000
 
-[roles.extract]
-provider = "opencode_go"
-model = "minimax-m2.5"                 # DSPy extraction model
-api_base = ""
-fallback_models = []
-timeout_seconds = 300
-max_window_tokens = 100000
-window_overlap_tokens = 5000
-openrouter_provider_order = []
-thinking = true
-max_tokens = 32000
-
 [providers]
 # Default API base URLs per provider.
 # Override here to point all roles using that provider at a different endpoint.

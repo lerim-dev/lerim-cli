@@ -131,3 +131,85 @@ class ExtractAgent(dspy.Module):
 
 	def forward(self) -> dspy.Prediction:
 		return self.react()
+
+
+if __name__ == "__main__":
+	"""Self-test: run ExtractAgent on a fixture trace and inspect results."""
+	import json
+	import sys
+
+	from lerim.config.settings import get_config
+	from lerim.config.providers import build_dspy_lm
+
+	config = get_config()
+	lm = build_dspy_lm("lead", config=config)
+
+	# Use fixture trace or first CLI arg
+	trace_path = Path(sys.argv[1]) if len(sys.argv) > 1 else (
+		Path(__file__).parents[3] / "tests" / "fixtures" / "traces" / "claude_short.jsonl"
+	)
+	if not trace_path.exists():
+		print(f"Error: trace not found: {trace_path}")
+		sys.exit(1)
+
+	# Temp memory dir
+	import tempfile
+	with tempfile.TemporaryDirectory() as tmp:
+		memory_root = Path(tmp) / "memory"
+		memory_root.mkdir()
+		(memory_root / "index.md").write_text("# Memory Index\n")
+		(memory_root / "summaries").mkdir()
+
+		print(f"Trace: {trace_path}")
+		print(f"Memory root: {memory_root}")
+		print(f"LM: {config.lead_role.provider}/{config.lead_role.model}")
+		print(f"Max iters: {config.lead_role.max_iters_sync}")
+		print()
+
+		agent = ExtractAgent(
+			memory_root=memory_root,
+			trace_path=trace_path,
+			max_iters=config.lead_role.max_iters_sync,
+		)
+
+		with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+			prediction = agent()
+
+		# Results
+		print("=" * 60)
+		print("RESULTS")
+		print("=" * 60)
+		print(f"Summary: {prediction.completion_summary}")
+		print()
+
+		# Memories written
+		memories = [f for f in memory_root.glob("*.md") if f.name != "index.md"]
+		print(f"Memories written: {len(memories)}")
+		for m in memories:
+			print(f"  {m.name}")
+		print()
+
+		# Summaries
+		summaries = list((memory_root / "summaries").glob("*.md"))
+		print(f"Summaries written: {len(summaries)}")
+		for s in summaries:
+			print(f"  {s.name}")
+		print()
+
+		# Index
+		index = memory_root / "index.md"
+		print(f"Index content:\n{index.read_text()}")
+
+		# Trajectory
+		trajectory = getattr(prediction, "trajectory", {}) or {}
+		print(f"\nTrajectory ({len(trajectory)} entries):")
+		for key in sorted(trajectory.keys()):
+			val = str(trajectory[key])[:200]
+			print(f"  {key}: {val}")
+
+		# LM history (last few calls)
+		history = getattr(lm, "history", []) or []
+		print(f"\nLM calls: {len(history)}")
+		if history:
+			last = history[-1]
+			print(f"  Last call response (truncated): {str(last.get('response', ''))[:300]}")

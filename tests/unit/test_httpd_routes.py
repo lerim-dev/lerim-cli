@@ -1054,7 +1054,6 @@ def test_serialize_full_config(tmp_path):
 	assert "tracing" in result
 	assert result["server"]["port"] == 8765
 	assert "lead" in result["roles"]
-	assert "extract" in result["roles"]
 
 
 def test_load_messages_for_run_empty_path():

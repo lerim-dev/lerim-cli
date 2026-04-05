@@ -10,25 +10,33 @@ tests/run_tests.sh e2e           # Real LLM, ~10min
 tests/run_tests.sh all           # All of the above + lint + quality
 ```
 
-Override the test LLM: `LERIM_TEST_PROVIDER=minimax LERIM_TEST_MODEL=MiniMax-M2.5 tests/run_tests.sh integration`
+Override the test LLM: `LERIM_TEST_PROVIDER=openrouter LERIM_TEST_MODEL=openai/gpt-5-nano tests/run_tests.sh smoke`
 
 ## Test Tiers
 
-### Unit (`tests/unit/`, ~455 tests)
+### Unit (`tests/unit/`, ~1189 tests)
 
-Fast, deterministic, no LLM, no network. Covers session adapters (Claude, Codex, Cursor, OpenCode), memory schemas and storage, config loading and merging, CLI parsing, `dashboard.py` API helpers, runtime tool boundaries, provider construction, cost tracking, job queue, decay logic, and regression contracts for public API surfaces.
+Fast, deterministic, no LLM, no network. Covers session adapters (Claude, Codex, Cursor, OpenCode), memory layout and storage, config loading and merging, CLI parsing, dashboard API helpers, MemoryTools boundary checks, provider construction, cost tracking, job queue, transcript parsing, and regression contracts for public API surfaces.
 
-### Smoke (`tests/smoke/`, ~5 tests)
+### Smoke (`tests/smoke/test_agent_smoke.py`, 8 tests)
 
-Quick LLM sanity checks. Verifies the agent responds, extraction and summarization pipelines produce output, and DSPy LM configures correctly for each role. Gate: `LERIM_SMOKE=1`.
+Quick LLM sanity checks. Verifies ExtractAgent produces memory files with valid frontmatter and updates index.md, MaintainAgent runs on seeded and empty stores without crashing, and AskAgent answers questions or reports no memories. Gate: `LERIM_SMOKE=1`.
 
-### Integration (`tests/integration/`, ~61 tests)
+### Integration (`tests/integration/`, 11 tests)
 
-Real LLM calls testing pipeline quality and multi-component flows. Covers extraction output quality (schema conformance, primitive classification, minimum recall), summarization quality (field presence, word limits, tag relevance, agent detection), DSPy adapter parametrized tests (Chat/JSON/XML × Predict/ChainOfThought), eval runners, judge output parsing, provider fallback, and agent memory-write flows. Gate: `LERIM_INTEGRATION=1`. The 2 Claude CLI judge tests additionally require `LERIM_JUDGE=1`.
+Real LLM calls testing pipeline quality across multiple components. Files: `test_extraction_quality.py`, `test_maintain_quality.py`, `test_ask_quality.py`. Covers extraction output quality (schema conformance, type classification, minimum recall), maintain quality (dedup detection, staleness handling, index consistency), and ask quality (answer relevance, memory citation). Gate: `LERIM_INTEGRATION=1`.
 
-### E2E (`tests/e2e/`, ~8 tests)
+### E2E (`tests/e2e/`, ~7 tests)
 
-Full agent flows as a user would invoke them. Covers sync (trace → extract + summarize + memory write), sync idempotency (second run doesn't duplicate), maintain on seeded memory, full reset → sync → ask cycle, and ask end-to-end. Gate: `LERIM_E2E=1`.
+Full agent flows as a user would invoke them. Files: `test_sync_flow.py`, `test_maintain_flow.py`, `test_full_cycle.py`, `test_context_layers.py`. Covers sync (trace -> extract + memory write + summary + index update), maintain on seeded memory, full reset -> sync -> ask cycle, and ask context forwarding. Gate: `LERIM_E2E=1`.
+
+## Architecture Under Test
+
+- **Agents**: `ExtractAgent`, `MaintainAgent`, `AskAgent` -- all DSPy ReAct modules taking `Path` args directly (no RuntimeContext).
+- **Tools**: `MemoryTools` class with 7 methods: `read`, `grep`, `scan`, `write`, `edit`, `archive`, `verify_index`.
+- **Config**: single `[roles.lead]` role (no separate extract_role).
+- **Memory**: 3-field frontmatter (`name`, `description`, `type`), `index.md`, `summaries/` with date-prefixed files.
+- **No** explorer subagent, no windowing pipeline.
 
 ## CI/CD
 
@@ -38,19 +46,30 @@ Only **unit tests + lint** run in GitHub Actions (`.github/workflows/ci.yml`). N
 
 | Variable | Purpose |
 |----------|---------|
-| `LERIM_TEST_PROVIDER` | Override LLM provider for all test roles |
-| `LERIM_TEST_MODEL` | Override LLM model for all test roles |
 | `LERIM_SMOKE=1` | Enable smoke tests |
 | `LERIM_INTEGRATION=1` | Enable integration tests |
 | `LERIM_E2E=1` | Enable e2e tests |
-| `LERIM_JUDGE=1` | Enable Claude CLI judge integration tests |
+| `LERIM_TEST_PROVIDER` | Override LLM provider for all test roles |
+| `LERIM_TEST_MODEL` | Override LLM model for all test roles |
 
 ## Adding New Tests
 
-- Unit tests go in `tests/unit/test_<name>.py` — no marker needed, always run.
-- Smoke/integration/e2e go in the appropriate directory — the conftest skip gate handles gating.
+- Unit tests go in `tests/unit/test_<name>.py` -- no marker needed, always run.
+- Smoke/integration/e2e go in the appropriate directory -- the conftest skip gate handles gating.
 - Each test file needs a docstring explaining what it tests.
+- Integration tests can use `retry_on_llm_flake` from `tests/integration/conftest.py` for non-deterministic LLM output.
 
-## DSPy Thread Safety
+## Fixtures
 
-Pipelines use `dspy.context(lm=lm)` (thread-local) instead of `dspy.configure()` (global). See `call_with_fallback` in `memory/utils.py`.
+Defined in `tests/conftest.py`:
+
+| Fixture | Description |
+|---------|-------------|
+| `tmp_lerim_root` | Temporary Lerim data root with `memory/`, `workspace/`, `index/` subdirs |
+| `tmp_config` | Config object pointing at `tmp_lerim_root` |
+| `seeded_memory` | `tmp_lerim_root` with fixture memory files copied into `memory/` |
+
+Fixture data in `tests/fixtures/`:
+
+- `traces/` -- JSONL session traces for all adapters (Claude, Codex, Cursor, OpenCode) plus edge cases
+- `memories/` -- sample memory files (decisions, learnings, duplicates, stale entries)

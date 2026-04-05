@@ -50,7 +50,7 @@ def _build_test_config_toml(tmp_dir: Path) -> Path:
     with TEST_CONFIG_PATH.open("rb") as f:
         base = tomllib.load(f)
     roles = base.get("roles", {})
-    for role_name in ("lead", "explorer", "extract"):
+    for role_name in ("lead", "extract"):
         role = roles.get(role_name, {})
         if provider:
             role["provider"] = provider

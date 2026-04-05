@@ -39,7 +39,6 @@ def test_build_dspy_lm_ollama(tmp_path):
     import dspy
 
     cfg = make_config(tmp_path)
-    # Override extract role to use ollama
     from dataclasses import replace
     from lerim.config.settings import RoleConfig as _RC
 
@@ -50,8 +49,8 @@ def test_build_dspy_lm_ollama(tmp_path):
         max_window_tokens=300000,
         window_overlap_tokens=5000,
     )
-    cfg = replace(cfg, extract_role=ollama_role)
-    lm = build_dspy_lm("extract", config=cfg)
+    cfg = replace(cfg, lead_role=ollama_role)
+    lm = build_dspy_lm("lead", config=cfg)
     assert isinstance(lm, dspy.LM)
 
 
@@ -71,8 +70,8 @@ def test_build_dspy_lm_openrouter(tmp_path):
         window_overlap_tokens=5000,
         openrouter_provider_order=("nebius",),
     )
-    cfg = replace(cfg, extract_role=or_role)
-    lm = build_dspy_lm("extract", config=cfg)
+    cfg = replace(cfg, lead_role=or_role)
+    lm = build_dspy_lm("lead", config=cfg)
     assert isinstance(lm, dspy.LM)
 
 
@@ -90,8 +89,8 @@ def test_build_dspy_lm_zai(tmp_path):
         max_window_tokens=300000,
         window_overlap_tokens=5000,
     )
-    cfg = replace(cfg, extract_role=zai_role, zai_api_key="test-key")
-    lm = build_dspy_lm("extract", config=cfg)
+    cfg = replace(cfg, lead_role=zai_role, zai_api_key="test-key")
+    lm = build_dspy_lm("lead", config=cfg)
     assert isinstance(lm, dspy.LM)
 
 
@@ -109,8 +108,8 @@ def test_build_dspy_lm_mlx(tmp_path):
         max_window_tokens=300000,
         window_overlap_tokens=5000,
     )
-    cfg = replace(cfg, extract_role=mlx_role)
-    lm = build_dspy_lm("extract", config=cfg)
+    cfg = replace(cfg, lead_role=mlx_role)
+    lm = build_dspy_lm("lead", config=cfg)
     assert isinstance(lm, dspy.LM)
 
 
@@ -147,9 +146,9 @@ def test_missing_api_key_raises(tmp_path):
         max_window_tokens=300000,
         window_overlap_tokens=5000,
     )
-    cfg = replace(cfg, extract_role=or_role)
+    cfg = replace(cfg, lead_role=or_role)
     with pytest.raises(RuntimeError, match="missing_api_key"):
-        build_dspy_lm("extract", config=cfg)
+        build_dspy_lm("lead", config=cfg)
 
 
 def test_build_dspy_lm_lead(tmp_path):

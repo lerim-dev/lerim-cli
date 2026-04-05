@@ -31,13 +31,6 @@ def make_config(base: Path) -> Config:
             model="x-ai/grok-4.1-fast",
             timeout_seconds=300,
         ),
-        extract_role=RoleConfig(
-            provider="openrouter",
-            model="openai/gpt-5-nano",
-            timeout_seconds=180,
-            max_window_tokens=300000,
-            window_overlap_tokens=5000,
-        ),
         sync_window_days=7,
         sync_max_sessions=50,
         parallel_pipelines=True,
@@ -87,20 +80,6 @@ def write_test_config(tmp_path: Path, **sections: dict[str, Any]) -> Path:
             lead["model"] = legacy_agent["model"]
         if "timeout" in legacy_agent:
             lead["timeout_seconds"] = legacy_agent["timeout"]
-
-    legacy_dspy = sections.pop("dspy", None)
-    if isinstance(legacy_dspy, dict):
-        extract = all_sections.setdefault("roles.extract", {})
-        for key, value in legacy_dspy.items():
-            mapped = {
-                "provider": "provider",
-                "model": "model",
-                "api_base": "api_base",
-                "max_window_tokens": "max_window_tokens",
-                "window_overlap_tokens": "window_overlap_tokens",
-            }.get(key)
-            if mapped:
-                extract[mapped] = value
 
     for name, payload in sections.items():
         if isinstance(payload, dict):

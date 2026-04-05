@@ -13,7 +13,7 @@ import dspy
 
 from lerim.config.settings import Config, RoleConfig, get_config
 
-DSPyRoleName = Literal["extract", "lead"]
+DSPyRoleName = Literal["lead"]
 
 
 # ---------------------------------------------------------------------------
@@ -22,30 +22,30 @@ DSPyRoleName = Literal["extract", "lead"]
 
 PROVIDER_CAPABILITIES: dict[str, dict] = {
 	"minimax": {
-		"roles": ["lead", "extract"],
+		"roles": ["lead"],
 		"api_key_env": "MINIMAX_API_KEY",
 		"models": ["MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-M2"],
 	},
 	"opencode_go": {
-		"roles": ["lead", "extract"],
+		"roles": ["lead"],
 		"api_key_env": "OPENCODE_API_KEY",
 		"models": ["minimax-m2.7", "minimax-m2.5", "kimi-k2.5", "glm-5"],
 	},
 	"zai": {
-		"roles": ["lead", "extract"],
+		"roles": ["lead"],
 		"api_key_env": "ZAI_API_KEY",
 		"models": ["glm-4.7", "glm-4.5-air", "glm-4.5"],
 	},
 	"openai": {
-		"roles": ["lead", "extract"],
+		"roles": ["lead"],
 		"api_key_env": "OPENAI_API_KEY",
 	},
 	"openrouter": {
-		"roles": ["lead", "extract"],
+		"roles": ["lead"],
 		"api_key_env": "OPENROUTER_API_KEY",
 	},
 	"ollama": {
-		"roles": ["lead", "extract"],
+		"roles": ["lead"],
 		"api_key_env": None,
 	},
 	"mlx": {
@@ -97,9 +97,7 @@ class FallbackSpec:
 
 def _dspy_role_config(config: Config, role: DSPyRoleName) -> RoleConfig:
 	"""Return role config for DSPy LM construction."""
-	if role == "lead":
-		return config.lead_role
-	return config.extract_role
+	return config.lead_role
 
 
 def _default_api_base(provider: str, config: Config | None = None) -> str:
@@ -304,11 +302,11 @@ if __name__ == "__main__":
 	assert isinstance(list_provider_models("ollama"), list)
 
 	# -- DSPy builder test --
-	dspy_model = build_dspy_lm("extract", config=cfg)
+	dspy_model = build_dspy_lm("lead", config=cfg)
 	assert isinstance(dspy_model, dspy.LM)
 
 	print(
 		f"""\
 providers: \
-extract={cfg.extract_role.provider}/{cfg.extract_role.model}"""
+lead={cfg.lead_role.provider}/{cfg.lead_role.model}"""
 	)

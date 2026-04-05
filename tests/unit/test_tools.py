@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -103,6 +104,24 @@ class TestRead:
 		result = tools.read("trace", offset=200, limit=10)
 		assert "[100 lines, showing 201-200]" in result
 
+	def test_read_empty_file(self, tools, mem_root):
+		"""Read a 0-byte .md file returns empty string (no crash)."""
+		empty = mem_root / "feedback_empty.md"
+		empty.write_text("", encoding="utf-8")
+		result = tools.read("feedback_empty.md")
+		assert isinstance(result, str)
+		# Empty file has no lines, so full read produces empty output
+		assert result == ""
+
+	def test_read_negative_limit(self, tools):
+		"""limit=-1 treated as full read (limit <= 0 means no limit)."""
+		result = tools.read("trace", limit=-1)
+		# Should behave like limit=0: full file, no header
+		assert "1\t" in result
+		assert "100\t" in result
+		# No pagination header
+		assert "[100 lines" not in result
+
 
 # ---------------------------------------------------------------------------
 # grep
@@ -195,6 +214,44 @@ class TestScan:
 		(summaries / "summary_test.md").write_text("summary content")
 		result = json.loads(tools.scan("summaries"))
 		assert result["count"] == 1
+
+	def test_scan_write_roundtrip(self, tools, mem_root):
+		"""write() then immediately scan() -> new file appears in manifest."""
+		# Start empty
+		before = json.loads(tools.scan())
+		assert before["count"] == 0
+
+		# Write a memory
+		tools.write(
+			type="feedback", name="Roundtrip test",
+			description="Testing scan after write", body="Body content.",
+		)
+		after = json.loads(tools.scan())
+		assert after["count"] == 1
+		assert after["memories"][0]["filename"] == "feedback_roundtrip_test.md"
+		assert after["memories"][0]["description"] == "Testing scan after write"
+
+	def test_scan_archive_roundtrip(self, tools, mem_root):
+		"""write() then archive() then scan() -> file gone from manifest, appears in archived."""
+		tools.write(
+			type="feedback", name="Archive roundtrip",
+			description="Will be archived", body="Body content.",
+		)
+		# Verify it exists in main scan
+		before = json.loads(tools.scan())
+		assert before["count"] == 1
+
+		# Archive it
+		tools.archive("feedback_archive_roundtrip.md")
+
+		# Gone from main manifest
+		after = json.loads(tools.scan())
+		assert after["count"] == 0
+
+		# Present in archived subdirectory
+		archived = json.loads(tools.scan("archived"))
+		assert archived["count"] == 1
+		assert archived["files"][0]["filename"] == "feedback_archive_roundtrip.md"
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +352,75 @@ class TestWrite:
 			))
 			assert result["type"] == t
 
+	def test_write_slug_sanitization(self, tools, mem_root):
+		"""Name with special chars -> filename contains only alphanumeric + underscores."""
+		result = json.loads(tools.write(
+			type="feedback", name="Use (tabs) & spaces!!",
+			description="Sanitization test", body="Body.",
+		))
+		filename = result["filename"]
+		# Strip the "feedback_" prefix and ".md" suffix to get the slug
+		slug = filename[len("feedback_"):-len(".md")]
+		# Slug should only contain lowercase alphanumeric and underscores
+		assert re.fullmatch(r"[a-z0-9_]+", slug), f"Slug contains invalid chars: {slug}"
+		# Parentheses, ampersand, exclamation marks should all be gone
+		assert "(" not in slug
+		assert "&" not in slug
+		assert "!" not in slug
+		assert (mem_root / filename).exists()
+
+	def test_write_duplicate_name_different_type(self, tools, mem_root):
+		"""Write feedback 'Auth' then project 'Auth' -> both files created (different type prefix)."""
+		r1 = json.loads(tools.write(
+			type="feedback", name="Auth",
+			description="Auth feedback", body="Feedback body.",
+		))
+		r2 = json.loads(tools.write(
+			type="project", name="Auth",
+			description="Auth project", body="Project body.",
+		))
+		assert r1["filename"] == "feedback_auth.md"
+		assert r2["filename"] == "project_auth.md"
+		assert r1["filename"] != r2["filename"]
+		assert (mem_root / r1["filename"]).exists()
+		assert (mem_root / r2["filename"]).exists()
+
+	def test_write_body_with_frontmatter_delimiter(self, tools, mem_root):
+		"""Body containing '---' on its own line -> file is still valid, frontmatter intact."""
+		body_with_delimiters = "Some text.\n\n---\n\nMore text after horizontal rule."
+		result = json.loads(tools.write(
+			type="feedback", name="Delimiter test",
+			description="Body has triple dashes", body=body_with_delimiters,
+		))
+		filename = result["filename"]
+		path = mem_root / filename
+		assert path.exists()
+
+		# Verify the file can be re-read and frontmatter parses correctly
+		import frontmatter as fm_lib
+		post = fm_lib.load(str(path))
+		assert post.get("name") == "Delimiter test"
+		assert post.get("description") == "Body has triple dashes"
+		assert post.get("type") == "feedback"
+		# Body content should contain the --- separator
+		assert "---" in post.content
+
+	def test_write_very_long_name(self, tools, mem_root):
+		"""Name with 200+ chars -> slug truncated to 128 chars, file created."""
+		long_name = "a" * 210
+		result = json.loads(tools.write(
+			type="feedback", name=long_name,
+			description="Long name test", body="Body.",
+		))
+		filename = result["filename"]
+		slug = filename[len("feedback_"):-len(".md")]
+		assert len(slug) <= 128
+		# The full filename is type_ + slug + .md
+		assert (mem_root / filename).exists()
+		# Read it back to confirm it works
+		content = tools.read(filename)
+		assert "Body." in content
+
 
 # ---------------------------------------------------------------------------
 # edit
@@ -359,6 +485,41 @@ class TestEdit:
 		result = tools.edit("test.md", "\tindented line", "fixed line")
 		assert "Edited" in result
 
+	def test_edit_preserves_frontmatter(self, tools, mem_root):
+		"""Edit only body content, verify YAML frontmatter unchanged."""
+		_write_memory_file(mem_root, "feedback_preserve.md", "Preserve FM", "Keep frontmatter intact")
+		# Edit only the body
+		result = tools.edit("feedback_preserve.md", "Body of Preserve FM.", "New body content.")
+		assert "Edited" in result
+		content = (mem_root / "feedback_preserve.md").read_text(encoding="utf-8")
+		# Frontmatter should be untouched
+		assert "name: Preserve FM" in content
+		assert "description: Keep frontmatter intact" in content
+		assert "type: feedback" in content
+		# Body should be updated
+		assert "New body content." in content
+		assert "Body of Preserve FM" not in content
+
+	def test_edit_with_regex_special_chars(self, tools, mem_root):
+		"""old_string 'foo[bar]' (regex special) -> found as literal match, not regex."""
+		(mem_root / "test_regex.md").write_text("Some foo[bar] text here.\n")
+		result = tools.edit("test_regex.md", "foo[bar]", "replaced")
+		assert "Edited" in result
+		content = (mem_root / "test_regex.md").read_text(encoding="utf-8")
+		assert "replaced" in content
+		assert "foo[bar]" not in content
+
+	def test_edit_empty_old_string(self, tools, mem_root):
+		"""old_string='' -> matches at every position, returns disambiguation error."""
+		(mem_root / "test_empty.md").write_text("Some content here.\n")
+		result = tools.edit("test_empty.md", "", "replacement")
+		# Empty string matches at every character position -> multiple matches error
+		assert "Error" in result
+		assert "matches" in result
+		# File should be unchanged
+		content = (mem_root / "test_empty.md").read_text(encoding="utf-8")
+		assert content == "Some content here.\n"
+
 
 # ---------------------------------------------------------------------------
 # archive
@@ -400,6 +561,29 @@ class TestArchive:
 		result = tools.archive("index.md")
 		assert "Error" in result
 		assert "cannot archive" in result
+
+	def test_archive_creates_archived_dir(self, tools, mem_root):
+		"""Archive when archived/ doesn't exist -> dir created, file moved."""
+		archived_dir = mem_root / "archived"
+		assert not archived_dir.exists()
+
+		_write_memory_file(mem_root, "feedback_autodir.md", "Autodir", "Test dir creation")
+		result = json.loads(tools.archive("feedback_autodir.md"))
+
+		assert result["archived"] == "feedback_autodir.md"
+		assert archived_dir.exists()
+		assert archived_dir.is_dir()
+		assert (archived_dir / "feedback_autodir.md").exists()
+		assert not (mem_root / "feedback_autodir.md").exists()
+
+	def test_archive_non_md_file(self, tools, mem_root):
+		"""Try to archive 'data.json' -> error message about .md only."""
+		json_file = mem_root / "data.json"
+		json_file.write_text('{"key": "value"}', encoding="utf-8")
+
+		result = tools.archive("data.json")
+		assert "Error" in result
+		assert ".md" in result
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +644,41 @@ class TestVerifyIndex:
 		(mem_root / "index.md").write_text("# Memory\n")
 		result = tools.verify_index()
 		assert "Prefer tabs over spaces" in result
+
+	def test_verify_index_with_extra_sections(self, tools, mem_root):
+		"""Index with multiple ## sections, some empty -> still validates correctly."""
+		_write_memory_file(mem_root, "feedback_tabs.md", "Use tabs", "Tabs pref")
+		_write_memory_file(mem_root, "project_arch.md", "Architecture", "DSPy arch")
+		(mem_root / "index.md").write_text(
+			"# Memory\n\n"
+			"## User Preferences\n"
+			"- [Tabs](feedback_tabs.md) — pref\n\n"
+			"## Project State\n"
+			"- [Arch](project_arch.md) — arch\n\n"
+			"## References\n\n"
+			"## Empty Section\n\n"
+		)
+		result = tools.verify_index()
+		assert result.startswith("OK")
+		assert "2 files" in result
+
+	def test_verify_index_ignores_non_link_lines(self, tools, mem_root):
+		"""Index with plain text lines (no markdown links) -> only link entries checked."""
+		_write_memory_file(mem_root, "feedback_tabs.md", "Use tabs", "Tabs pref")
+		(mem_root / "index.md").write_text(
+			"# Memory\n\n"
+			"This is a plain text description of the memory index.\n"
+			"Some notes about the project go here.\n\n"
+			"## User Preferences\n"
+			"These are user preferences collected over time.\n"
+			"- [Tabs](feedback_tabs.md) — pref\n\n"
+			"## Notes\n"
+			"Remember to update this regularly.\n"
+		)
+		result = tools.verify_index()
+		# Only the markdown link entry counts, plain text lines are ignored
+		assert result.startswith("OK")
+		assert "1 files" in result or "1 entries" in result
 
 
 # ---------------------------------------------------------------------------

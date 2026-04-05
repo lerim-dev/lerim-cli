@@ -31,10 +31,9 @@ _LAST_CONFIG_SOURCES: list[dict[str, str]] = []
 
 @dataclass(frozen=True)
 class RoleConfig:
-	"""Configuration for any LLM role (lead, extract).
+	"""Configuration for the lead LLM role.
 
-	All fields have defaults so the same class works for lead (uses max_iters_*),
-	extract (uses max_window_tokens), or any future role.
+	All fields have defaults so the same class works for any future role.
 	"""
 
 	provider: str
@@ -145,10 +144,6 @@ def ensure_user_config_exists() -> Path:
 # [roles.lead]
 # provider = "openrouter"
 # model = "qwen/qwen3-coder-30b-a3b-instruct"
-
-# [roles.extract]
-# provider = "ollama"
-# model = "qwen3:8b"
 """,
         encoding="utf-8",
     )
@@ -207,7 +202,6 @@ class Config:
     parallel_pipelines: bool
 
     lead_role: RoleConfig
-    extract_role: RoleConfig
 
     tracing_enabled: bool
     tracing_include_httpx: bool
@@ -253,17 +247,6 @@ class Config:
                 "max_iterations": self.lead_role.max_iterations,
                 "openrouter_provider_order": list(
                     self.lead_role.openrouter_provider_order
-                ),
-            },
-            "extract_role": {
-                "provider": self.extract_role.provider,
-                "model": self.extract_role.model,
-                "api_base": self.extract_role.api_base,
-                "timeout_seconds": self.extract_role.timeout_seconds,
-                "max_window_tokens": self.extract_role.max_window_tokens,
-                "window_overlap_tokens": self.extract_role.window_overlap_tokens,
-                "openrouter_provider_order": list(
-                    self.extract_role.openrouter_provider_order
                 ),
             },
             "parallel_pipelines": self.parallel_pipelines,
@@ -316,19 +299,13 @@ def _build_role(
 	)
 
 
-def _build_all_roles(roles: dict[str, Any]) -> tuple[RoleConfig, RoleConfig]:
-	"""Build lead and extract role configs from TOML roles section."""
-	lead = _build_role(
+def _build_lead_role(roles: dict[str, Any]) -> RoleConfig:
+	"""Build lead role config from TOML roles section."""
+	return _build_role(
 		_ensure_dict(roles, "lead"),
 		default_provider="openrouter",
 		default_model="qwen/qwen3-coder-30b-a3b-instruct",
 	)
-	extract = _build_role(
-		_ensure_dict(roles, "extract"),
-		default_provider="ollama",
-		default_model="qwen3:8b",
-	)
-	return lead, extract
 
 
 def _parse_string_table(raw: dict[str, Any]) -> dict[str, str]:
@@ -409,7 +386,7 @@ def load_config() -> Config:
     for data_root in scope.ordered_data_dirs:
         ensure_memory_paths(build_memory_paths(data_root))
 
-    lead_role, extract_role = _build_all_roles(roles)
+    lead_role = _build_lead_role(roles)
 
     port = _require_int(server, "port", minimum=1)
     if port > 65535:
@@ -455,7 +432,6 @@ def load_config() -> Config:
         sync_max_sessions=_require_int(server, "sync_max_sessions", minimum=1),
         parallel_pipelines=bool(server.get("parallel_pipelines", True)),
         lead_role=lead_role,
-        extract_role=extract_role,
         tracing_enabled=bool(tracing.get("enabled", False))
         or os.getenv("LERIM_TRACING", "").strip().lower() in ("1", "true", "yes", "on"),
         tracing_include_httpx=bool(tracing.get("include_httpx", False)),
@@ -560,9 +536,6 @@ if __name__ == "__main__":
     assert cfg.lead_role.provider
     assert cfg.lead_role.model
     assert isinstance(cfg.lead_role.fallback_models, tuple)
-    assert cfg.extract_role.provider
-    assert cfg.extract_role.max_window_tokens >= 1000
-    assert cfg.extract_role.window_overlap_tokens >= 0
     assert isinstance(cfg.tracing_enabled, bool)
     assert isinstance(cfg.tracing_include_httpx, bool)
     assert isinstance(cfg.tracing_include_content, bool)
@@ -570,7 +543,6 @@ if __name__ == "__main__":
     assert isinstance(cfg.projects, dict)
     payload = cfg.public_dict()
     assert "lead_role" in payload
-    assert "extract_role" in payload
     assert "agents" in payload
     assert "projects" in payload
     print(
@@ -578,7 +550,6 @@ if __name__ == "__main__":
 Config loaded: \
 data_dir={cfg.data_dir}, \
 lead={cfg.lead_role.provider}/{cfg.lead_role.model}, \
-extract={cfg.extract_role.provider}/{cfg.extract_role.model}, \
 agents={list(cfg.agents.keys())}, \
 projects={list(cfg.projects.keys())}"""
     )

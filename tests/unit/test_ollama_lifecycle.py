@@ -25,11 +25,9 @@ def _make_ollama_config(
     *,
     lead_provider: str = "ollama",
     lead_model: str = "qwen3.5:4b-q8_0",
-    extract_provider: str = "ollama",
-    extract_model: str = "qwen3.5:4b-q8_0",
     auto_unload: bool = True,
 ) -> Config:
-    """Build a Config with Ollama roles for testing."""
+    """Build a Config with Ollama lead role for testing."""
     base = make_config(tmp_path)
     return Config(
         data_dir=base.data_dir,
@@ -48,13 +46,6 @@ def _make_ollama_config(
             provider=lead_provider,
             model=lead_model,
             timeout_seconds=300,
-        ),
-        extract_role=RoleConfig(
-            provider=extract_provider,
-            model=extract_model,
-            timeout_seconds=180,
-            max_window_tokens=300000,
-            window_overlap_tokens=5000,
         ),
         sync_window_days=7,
         sync_max_sessions=50,
@@ -94,28 +85,25 @@ class TestOllamaModels:
         assert len(models) == 1
         assert models[0] == ("http://127.0.0.1:11434", "qwen3.5:4b-q8_0")
 
-    def test_different_models(self, tmp_path: Path) -> None:
-        """Different models across roles produce multiple entries."""
+    def test_single_lead_model(self, tmp_path: Path) -> None:
+        """Lead ollama model appears once."""
         config = _make_ollama_config(
             tmp_path,
             lead_model="qwen3.5:9b-q8_0",
-            extract_model="qwen3.5:4b-q8_0",
         )
         models = _ollama_models(config)
-        assert len(models) == 2
+        assert len(models) == 1
+        assert models[0] == ("http://127.0.0.1:11434", "qwen3.5:9b-q8_0")
 
-    def test_mixed_providers(self, tmp_path: Path) -> None:
-        """Only ollama roles are collected, cloud roles ignored."""
+    def test_non_ollama_lead_returns_empty(self, tmp_path: Path) -> None:
+        """Non-ollama lead role produces no ollama models."""
         config = _make_ollama_config(
             tmp_path,
             lead_provider="minimax",
             lead_model="MiniMax-M2.5",
-            extract_provider="ollama",
-            extract_model="qwen3.5:4b-q8_0",
         )
         models = _ollama_models(config)
-        assert len(models) == 1
-        assert models[0][1] == "qwen3.5:4b-q8_0"
+        assert len(models) == 0
 
 
 class TestOllamaLifecycle:
@@ -200,19 +188,18 @@ class TestOllamaLifecycle:
     @patch("lerim.server.api._unload_model")
     @patch("lerim.server.api._load_model")
     @patch("lerim.server.api._is_ollama_reachable", return_value=True)
-    def test_multiple_models(
+    def test_single_lead_model_lifecycle(
         self,
         mock_reachable: MagicMock,
         mock_load: MagicMock,
         mock_unload: MagicMock,
         tmp_path: Path,
     ) -> None:
-        """Multiple distinct models are each loaded and unloaded."""
+        """Lead ollama model is loaded and unloaded exactly once."""
         config = _make_ollama_config(
             tmp_path,
             lead_model="qwen3.5:9b-q8_0",
-            extract_model="qwen3.5:4b-q8_0",
         )
         with ollama_lifecycle(config):
-            assert mock_load.call_count == 2
-        assert mock_unload.call_count == 2
+            assert mock_load.call_count == 1
+        assert mock_unload.call_count == 1

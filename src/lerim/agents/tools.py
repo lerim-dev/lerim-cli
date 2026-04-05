@@ -235,7 +235,7 @@ class MemoryTools:
 
 	# ── Verify Index ────────────────────────────────────────────────────
 
-	def verify_index(self) -> str:
+	def verify_index(self, filename: str = "index.md") -> str:
 		"""Check if index.md is consistent with actual memory files.
 
 		Compares memory files on disk against entries in index.md.
@@ -243,6 +243,9 @@ class MemoryTools:
 		can fix them with edit("index.md", ...).
 
 		After fixing, call read("index.md") for a final format check.
+
+		Args:
+			filename: Index file to verify. Default "index.md".
 		"""
 		import frontmatter as fm_lib
 
