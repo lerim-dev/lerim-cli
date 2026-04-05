@@ -148,12 +148,17 @@ class MemoryTools:
 	# ── Scan ────────────────────────────────────────────────────────────
 
 	def scan(self, directory: str = "", pattern: str = "*.md") -> str:
-		"""List memory files with metadata, or list files in a subdirectory.
+		"""List memory files or files in a subdirectory.
 
-		For the memory root (directory=""), returns a rich manifest with
-		name, description, type, and age for each memory file.
-		For subdirectories like "summaries" or "archived", returns a
-		simple file listing.
+		For the memory root (directory=""), returns filename, description,
+		and last modified time for each memory file. Filenames encode
+		type and topic (e.g. feedback_use_tabs.md, project_migration.md).
+		For subdirectories like "summaries" or "archived", returns
+		filename and modified time.
+
+		Returns JSON:
+		  Memory root: {count, memories: [{filename, description, modified}]}
+		  Subdirectory: {count, files: [{filename, modified}]}
 
 		Args:
 			directory: Subdirectory under memory root to scan.
@@ -180,35 +185,30 @@ class MemoryTools:
 					continue
 				try:
 					post = fm_lib.load(str(f))
-					created = post.get("created", "")
-					if created:
-						try:
-							dt = datetime.fromisoformat(str(created))
-							delta = datetime.now(timezone.utc) - dt.replace(tzinfo=timezone.utc)
-							age = f"{delta.days}d ago" if delta.days > 0 else "today"
-						except (ValueError, TypeError):
-							age = ""
-					else:
-						age = ""
+					mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
 					memories.append({
-						"name": post.get("name", f.stem),
-						"description": post.get("description", ""),
-						"type": post.get("type", "unknown"),
 						"filename": f.name,
-						"age": age,
+						"description": post.get("description", ""),
+						"modified": mtime.strftime("%Y-%m-%d %H:%M"),
 					})
 				except Exception:
+					mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
 					memories.append({
-						"name": f.stem,
-						"description": "",
-						"type": "unknown",
 						"filename": f.name,
-						"age": "",
+						"description": "",
+						"modified": mtime.strftime("%Y-%m-%d %H:%M"),
 					})
 			return json.dumps({"count": len(memories), "memories": memories}, indent=2)
 
-		# Simple listing for subdirectories
-		file_list = [f.name for f in files if f.is_file()]
+		# Subdirectory listing with modified time
+		file_list = []
+		for f in files:
+			if f.is_file():
+				mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
+				file_list.append({
+					"filename": f.name,
+					"modified": mtime.strftime("%Y-%m-%d %H:%M"),
+				})
 		return json.dumps({"count": len(file_list), "files": file_list}, indent=2)
 
 
@@ -246,12 +246,15 @@ class MemoryTools:
 			return "Error: body cannot be empty"
 
 		# --- Generate filename and target path ---
+		from datetime import datetime, timezone
 		slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
-		filename = f"{type}_{slug}.md"
 
 		if type == "summary":
+			timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+			filename = f"{timestamp}_{slug}.md"
 			target_dir = self.memory_root / "summaries"
 		else:
+			filename = f"{type}_{slug}.md"
 			target_dir = self.memory_root
 
 		target = target_dir / filename

@@ -154,17 +154,16 @@ class TestScan:
 		assert result["memories"] == []
 
 	def test_scan_with_memories(self, tools, mem_root):
-		"""Scan returns rich manifest for memory files."""
+		"""Scan returns manifest with filename, description, modified."""
 		_write_memory_file(mem_root, "feedback_tabs.md", "Use tabs", "Tabs pref", "feedback")
 		_write_memory_file(mem_root, "project_arch.md", "Architecture", "DSPy arch", "project")
 		result = json.loads(tools.scan())
 		assert result["count"] == 2
-		names = {m["name"] for m in result["memories"]}
-		assert "Use tabs" in names
-		assert "Architecture" in names
-		types = {m["type"] for m in result["memories"]}
-		assert "feedback" in types
-		assert "project" in types
+		filenames = {m["filename"] for m in result["memories"]}
+		assert "feedback_tabs.md" in filenames
+		assert "project_arch.md" in filenames
+		assert "description" in result["memories"][0]
+		assert "modified" in result["memories"][0]
 
 	def test_scan_excludes_index(self, tools, mem_root):
 		"""Scan excludes index.md from the manifest."""
@@ -176,13 +175,14 @@ class TestScan:
 		assert "index.md" not in filenames
 
 	def test_scan_subdirectory(self, tools, mem_root):
-		"""Scan subdirectory returns simple file listing."""
+		"""Scan subdirectory returns file listing with modified time."""
 		archived = mem_root / "archived"
 		archived.mkdir()
 		(archived / "old.md").write_text("old content")
 		result = json.loads(tools.scan("archived"))
 		assert result["count"] == 1
-		assert "old.md" in result["files"]
+		assert result["files"][0]["filename"] == "old.md"
+		assert "modified" in result["files"][0]
 
 	def test_scan_nonexistent_dir(self, tools):
 		"""Scan nonexistent directory returns empty result."""
@@ -387,7 +387,7 @@ class TestArchive:
 
 		archived = json.loads(tools.scan("archived"))
 		assert archived["count"] == 1
-		assert "feedback_old.md" in archived["files"]
+		assert archived["files"][0]["filename"] == "feedback_old.md"
 
 	def test_archive_nonexistent(self, tools):
 		"""Archive nonexistent file returns error."""
