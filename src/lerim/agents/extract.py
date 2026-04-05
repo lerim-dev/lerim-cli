@@ -130,7 +130,8 @@ class ExtractAgent(dspy.Module):
 		)
 
 	def forward(self) -> dspy.Prediction:
-		return self.react()
+		with dspy.context(adapter=dspy.XMLAdapter()):
+			return self.react()
 
 
 if __name__ == "__main__":
@@ -171,7 +172,7 @@ if __name__ == "__main__":
 			max_iters=config.agent_role.max_iters_sync,
 		)
 
-		with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+		with dspy.context(lm=lm):
 			prediction = agent()
 
 		# Results

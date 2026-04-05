@@ -105,7 +105,8 @@ class AskAgent(dspy.Module):
 		question: str,
 		hints: str,
 	) -> dspy.Prediction:
-		return self.react(
-			question=question,
-			hints=hints,
-		)
+		with dspy.context(adapter=dspy.XMLAdapter()):
+			return self.react(
+				question=question,
+				hints=hints,
+			)

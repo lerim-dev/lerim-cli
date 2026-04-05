@@ -66,7 +66,7 @@ def test_extract_runs_and_produces_memory(memory_root, lead_lm):
 		trace_path=TRACE_PATH,
 		max_iters=10,
 	)
-	with dspy.context(lm=lead_lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lead_lm):
 		prediction = agent.forward()
 
 	assert prediction.completion_summary
@@ -83,7 +83,7 @@ def test_extract_produces_valid_frontmatter(memory_root, lead_lm):
 		trace_path=TRACE_PATH,
 		max_iters=10,
 	)
-	with dspy.context(lm=lead_lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lead_lm):
 		agent.forward()
 
 	files = _memory_files(memory_root)
@@ -108,7 +108,7 @@ def test_extract_writes_summary(memory_root, lead_lm):
 		trace_path=TRACE_PATH,
 		max_iters=10,
 	)
-	with dspy.context(lm=lead_lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lead_lm):
 		agent.forward()
 
 	summaries_dir = memory_root / "summaries"
@@ -125,7 +125,7 @@ def test_extract_updates_index(memory_root, lead_lm):
 		trace_path=TRACE_PATH,
 		max_iters=10,
 	)
-	with dspy.context(lm=lead_lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lead_lm):
 		agent.forward()
 
 	index_path = memory_root / "index.md"
@@ -147,7 +147,7 @@ def test_maintain_runs_on_seeded_store(seeded_memory_root, lead_lm):
 		memory_root=seeded_memory_root,
 		max_iters=10,
 	)
-	with dspy.context(lm=lead_lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lead_lm):
 		prediction = agent.forward()
 
 	assert prediction.completion_summary
@@ -162,7 +162,7 @@ def test_maintain_does_not_crash_on_empty(memory_root, lead_lm):
 		memory_root=memory_root,
 		max_iters=10,
 	)
-	with dspy.context(lm=lead_lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lead_lm):
 		prediction = agent.forward()
 
 	assert prediction.completion_summary
@@ -180,7 +180,7 @@ def test_ask_answers_question(seeded_memory_root, lead_lm):
 		memory_root=seeded_memory_root,
 		max_iters=10,
 	)
-	with dspy.context(lm=lead_lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lead_lm):
 		prediction = agent.forward(
 			question="What authentication pattern does the project use?",
 			hints="",
@@ -201,7 +201,7 @@ def test_ask_no_memories_says_so(memory_root, lead_lm):
 		memory_root=memory_root,
 		max_iters=10,
 	)
-	with dspy.context(lm=lead_lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lead_lm):
 		prediction = agent.forward(
 			question="What is the auth pattern?",
 			hints="",

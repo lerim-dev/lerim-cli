@@ -68,7 +68,7 @@ def test_maintain_merges_near_duplicates(tmp_lerim_root):
 	assert count_before == 2
 
 	agent = MaintainAgent(memory_root=memory_root, max_iters=30)
-	with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lm):
 		agent.forward()
 
 	count_after = len(_memory_files(memory_root))
@@ -91,7 +91,7 @@ def test_maintain_archives_stale(tmp_lerim_root):
 	_seed_files(memory_root, ["learning_stale.md"])
 
 	agent = MaintainAgent(memory_root=memory_root, max_iters=30)
-	with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lm):
 		agent.forward()
 
 	stale_path = memory_root / "learning_stale.md"
@@ -148,7 +148,7 @@ def test_maintain_fixes_index(tmp_lerim_root):
 	)
 
 	agent = MaintainAgent(memory_root=memory_root, max_iters=30)
-	with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lm):
 		agent.forward()
 
 	tools_after = MemoryTools(memory_root=memory_root)
@@ -194,7 +194,7 @@ def test_maintain_preserves_summaries(tmp_lerim_root):
 	summary_path.write_text(summary_content, encoding="utf-8")
 
 	agent = MaintainAgent(memory_root=memory_root, max_iters=30)
-	with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lm):
 		agent.forward()
 
 	# Summary file must still exist with identical content

@@ -277,7 +277,7 @@ class LerimRuntime:
 						f"[{flow}] ReAct attempt {attempt}/{max_attempts} "
 						f"(model={model_label})"
 					)
-					with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+					with dspy.context(lm=lm):
 						return module(**input_args)
 				except Exception as exc:
 					last_error = exc

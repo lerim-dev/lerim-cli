@@ -47,7 +47,7 @@ def test_extract_body_has_why_and_how(tmp_lerim_root):
 	trace = TRACES_DIR / "claude_short.jsonl"
 
 	agent = ExtractAgent(memory_root=memory_root, trace_path=trace, max_iters=15)
-	with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lm):
 		agent.forward()
 
 	checked = 0
@@ -80,7 +80,7 @@ def test_extract_dedup_does_not_duplicate(tmp_lerim_root):
 
 	# First extraction
 	agent1 = ExtractAgent(memory_root=memory_root, trace_path=trace, max_iters=15)
-	with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lm):
 		agent1.forward()
 
 	count_after_first = len(_memory_files(memory_root))
@@ -88,7 +88,7 @@ def test_extract_dedup_does_not_duplicate(tmp_lerim_root):
 
 	# Second extraction on same trace, same memory_root
 	agent2 = ExtractAgent(memory_root=memory_root, trace_path=trace, max_iters=15)
-	with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lm):
 		agent2.forward()
 
 	count_after_second = len(_memory_files(memory_root))
@@ -109,7 +109,7 @@ def test_extract_respects_do_not_extract(tmp_lerim_root):
 	trace = TRACES_DIR / "edge_short.jsonl"
 
 	agent = ExtractAgent(memory_root=memory_root, trace_path=trace, max_iters=15)
-	with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lm):
 		agent.forward()
 
 	memories = _memory_files(memory_root)
@@ -130,7 +130,7 @@ def test_extract_summary_has_sections(tmp_lerim_root):
 	trace = TRACES_DIR / "claude_short.jsonl"
 
 	agent = ExtractAgent(memory_root=memory_root, trace_path=trace, max_iters=15)
-	with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lm):
 		agent.forward()
 
 	summaries = _summary_files(memory_root)
@@ -157,7 +157,7 @@ def test_extract_index_has_all_files(tmp_lerim_root):
 	trace = TRACES_DIR / "claude_short.jsonl"
 
 	agent = ExtractAgent(memory_root=memory_root, trace_path=trace, max_iters=15)
-	with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lm):
 		agent.forward()
 
 	tools = MemoryTools(memory_root=memory_root)

@@ -22,9 +22,10 @@ def configure_tracing(config: Config) -> None:
 	if not config.mlflow_enabled:
 		return
 
+	mlflow.set_tracking_uri(str(config.global_data_dir / "mlruns"))
 	mlflow.set_experiment("lerim")
 	mlflow.dspy.autolog()
-	logger.info("MLflow tracing enabled (DSPy autolog)")
+	logger.info("MLflow tracing enabled (DSPy autolog) → {}", config.global_data_dir / "mlruns")
 
 
 if __name__ == "__main__":

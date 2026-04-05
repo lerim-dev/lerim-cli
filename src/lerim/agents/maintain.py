@@ -102,4 +102,5 @@ class MaintainAgent(dspy.Module):
 		)
 
 	def forward(self) -> dspy.Prediction:
-		return self.react()
+		with dspy.context(adapter=dspy.XMLAdapter()):
+			return self.react()

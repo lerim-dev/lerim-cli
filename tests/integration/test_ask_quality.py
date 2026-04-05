@@ -52,7 +52,7 @@ def test_ask_cites_specific_files(tmp_lerim_root):
 	filenames = _seed_all_memories(memory_root)
 
 	agent = AskAgent(memory_root=memory_root, max_iters=30)
-	with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lm):
 		prediction = agent.forward(
 			question="What authentication pattern does this project use?",
 			hints="",
@@ -86,7 +86,7 @@ def test_ask_relevant_to_question(tmp_lerim_root):
 	_seed_all_memories(memory_root)
 
 	agent = AskAgent(memory_root=memory_root, max_iters=30)
-	with dspy.context(lm=lm, adapter=dspy.XMLAdapter()):
+	with dspy.context(lm=lm):
 		prediction = agent.forward(
 			question="What do we know about queue processing and race conditions?",
 			hints="",
