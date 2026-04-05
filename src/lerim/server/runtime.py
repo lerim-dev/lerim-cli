@@ -21,11 +21,9 @@ import logfire
 
 from lerim.config.settings import Config, get_config
 from lerim.agents.ask import AskAgent
-from lerim.agents.context import RuntimeContext
 from lerim.agents.contracts import (
 	MaintainResultContract,
 	SyncResultContract,
-	is_within,
 )
 from lerim.agents.ask import format_ask_hints
 from lerim.agents.maintain import MaintainAgent
@@ -39,11 +37,6 @@ logger = logging.getLogger("lerim.runtime")
 # Path helpers (inlined from helpers.py)
 # ---------------------------------------------------------------------------
 
-# is_within is imported from contracts.py (leaf module) to break the
-# runtime.py -> ask_agent.py -> tools.py -> runtime.py circular import.
-# Re-exported here so callers can import from runtime.py.
-
-
 def _default_run_folder_name(prefix: str = "sync") -> str:
 	"""Build deterministic per-run workspace folder name with given prefix."""
 	stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -53,7 +46,6 @@ def _default_run_folder_name(prefix: str = "sync") -> str:
 def build_maintain_artifact_paths(run_folder: Path) -> dict[str, Path]:
 	"""Return canonical workspace artifact paths for a maintain run folder."""
 	return {
-		"maintain_actions": run_folder / "maintain_actions.json",
 		"agent_log": run_folder / "agent.log",
 		"subagents_log": run_folder / "subagents.log",
 	}
@@ -62,8 +54,6 @@ def build_maintain_artifact_paths(run_folder: Path) -> dict[str, Path]:
 def _build_artifact_paths(run_folder: Path) -> dict[str, Path]:
 	"""Return canonical workspace artifact paths for a sync run folder."""
 	return {
-		"summary": run_folder / "summary.json",
-		"memory_actions": run_folder / "memory_actions.json",
 		"agent_log": run_folder / "agent.log",
 		"subagents_log": run_folder / "subagents.log",
 		"session_log": run_folder / "session.log",
@@ -97,34 +87,6 @@ def _write_json_artifact(path: Path, payload: dict[str, Any]) -> None:
 	path.write_text(
 		json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8"
 	)
-
-
-def _load_json_dict_artifact(path: Path) -> dict[str, Any]:
-	"""Read a JSON artifact and enforce top-level object type."""
-	try:
-		data = json.loads(path.read_text(encoding="utf-8"))
-	except json.JSONDecodeError as exc:
-		raise RuntimeError(f"invalid_json_artifact:{path}") from exc
-	if not isinstance(data, dict):
-		raise RuntimeError(f"invalid_report_shape:{path}")
-	return data
-
-
-def _extract_counts(
-	counts_raw: dict[str, Any],
-	fields: dict[str, tuple[str, ...]],
-) -> dict[str, int]:
-	"""Extract integer counters from a raw report map using aliases."""
-	counts: dict[str, int] = {}
-	for output_key, aliases in fields.items():
-		value = 0
-		for alias in aliases:
-			candidate = counts_raw.get(alias)
-			if candidate is not None:
-				value = int(candidate or 0)
-				break
-		counts[output_key] = value
-	return counts
 
 
 def _write_text_with_newline(path: Path, content: str) -> None:
@@ -424,30 +386,18 @@ class LerimRuntime:
 		_write_json_artifact(artifact_paths["session_log"], metadata)
 		artifact_paths["subagents_log"].write_text("", encoding="utf-8")
 
-		# Summary artifact will be written by the extract agent via write_summary tool.
-		# Initialize empty so downstream code can handle the "not written" case.
-		artifact_paths["summary"].parent.mkdir(parents=True, exist_ok=True)
-		artifact_paths["summary"].write_text(
-			json.dumps({"summary_path": ""}), encoding="utf-8"
-		)
-
-		memory_index_path = resolved_memory_root / "MEMORY.md"
-
-		# RuntimeContext for tool functions.
-		ctx = RuntimeContext(
-			config=self.config,
-			repo_root=repo_root,
-			memory_root=resolved_memory_root,
-			workspace_root=resolved_workspace_root,
-			run_folder=run_folder,
-			extra_read_roots=(trace_file.parent.resolve(),),
-			run_id=run_folder.name,
-			trace_path=trace_file,
-			artifact_paths=artifact_paths,
-		)
+		# Ensure index.md exists before agent runs.
+		index_path = resolved_memory_root / "index.md"
+		if not index_path.exists():
+			index_path.write_text("# Memory Index\n", encoding="utf-8")
 
 		# Create the ExtractAgent module and run with retry + fallback.
-		agent = ExtractAgent(ctx)
+		agent = ExtractAgent(
+			memory_root=resolved_memory_root,
+			trace_path=trace_file,
+			run_folder=run_folder,
+			max_iters=self.config.lead_role.max_iters_sync,
+		)
 		history_start = len(getattr(self._lead_lm, "history", []) or [])
 		start_cost_tracking()
 		try:
@@ -455,14 +405,7 @@ class LerimRuntime:
 				prediction = self._run_with_fallback(
 					flow="sync",
 					module=agent,
-					input_args={
-						"trace_path": str(trace_file),
-						"memory_root": str(resolved_memory_root),
-						"run_folder": str(run_folder),
-						"memory_actions_path": str(artifact_paths["memory_actions"]),
-						"memory_index_path": str(memory_index_path),
-						"run_id": metadata.get("run_id", ""),
-					},
+					input_args={},
 				)
 
 			capture_dspy_cost(self._lead_lm, history_start)
@@ -494,95 +437,6 @@ class LerimRuntime:
 			)
 			agent_trace_path.write_text("[]", encoding="utf-8")
 
-		# Validate required artifacts exist.
-		# summary is written in pre-processing (always present, may be empty).
-		# memory_actions.json is optional (no dedicated report tool) -- soft failure.
-		if not artifact_paths["memory_actions"].exists():
-			logger.warning(
-				"[sync] memory_actions.json missing -- using defaults "
-				"(write_memory may still have created memories)."
-			)
-			artifact_paths["memory_actions"].write_text(
-				json.dumps({
-					"counts": {"add": 0, "update": 0, "no_op": 0},
-					"written_memory_paths": [],
-					"note": "report_not_written",
-				}),
-				encoding="utf-8",
-			)
-
-		# Extract summary path from summary artifact (soft -- may be empty).
-		summary_path_resolved = None
-		try:
-			summary_artifact = json.loads(
-				artifact_paths["summary"].read_text(encoding="utf-8")
-			)
-			raw_summary = str(
-				(
-					summary_artifact
-					if isinstance(summary_artifact, dict)
-					else {}
-				).get("summary_path", "")
-			).strip()
-			if raw_summary:
-				summary_path_resolved = Path(raw_summary).resolve()
-				if not is_within(
-					summary_path_resolved, resolved_memory_root
-				):
-					logger.warning(
-						"[sync] summary_path outside memory_root: {}",
-						summary_path_resolved,
-					)
-					summary_path_resolved = None
-				elif not summary_path_resolved.exists():
-					logger.warning(
-						"[sync] summary_path not found: {}",
-						summary_path_resolved,
-					)
-					summary_path_resolved = None
-		except (json.JSONDecodeError, Exception) as exc:
-			logger.warning("[sync] Failed to parse summary artifact: {}", exc)
-			summary_path_resolved = None
-
-		# Parse memory_actions report for counts and paths.
-		# Agent may write invalid JSON or text error messages instead.
-		try:
-			report = _load_json_dict_artifact(
-				artifact_paths["memory_actions"]
-			)
-		except RuntimeError:
-			logger.warning(
-				"[sync] memory_actions.json is invalid -- using empty defaults"
-			)
-			report = {
-				"counts": {"add": 0, "update": 0, "no_op": 0},
-				"written_memory_paths": [],
-			}
-		counts_field = report.get("counts")
-		counts_raw = counts_field if isinstance(counts_field, dict) else {}
-		counts = _extract_counts(
-			counts_raw,
-			{
-				"add": ("add",),
-				"update": ("update",),
-				"no_op": ("no_op", "no-op"),
-			},
-		)
-
-		written_memory_paths: list[str] = []
-		for item in report.get("written_memory_paths") or []:
-			if not isinstance(item, str) or not item:
-				continue
-			resolved = Path(item).resolve()
-			if not (
-				is_within(resolved, resolved_memory_root)
-				or is_within(resolved, run_folder)
-			):
-				raise RuntimeError(
-					f"report_path_outside_allowed_roots:{resolved}"
-				)
-			written_memory_paths.append(str(resolved))
-
 		payload = {
 			"trace_path": str(trace_file),
 			"memory_root": str(resolved_memory_root),
@@ -591,11 +445,6 @@ class LerimRuntime:
 			"artifacts": {
 				key: str(path) for key, path in artifact_paths.items()
 			},
-			"counts": counts,
-			"written_memory_paths": written_memory_paths,
-			"summary_path": (
-				str(summary_path_resolved) if summary_path_resolved else ""
-			),
 			"cost_usd": cost_usd,
 		}
 		return SyncResultContract.model_validate(payload).model_dump(
@@ -645,22 +494,16 @@ class LerimRuntime:
 		run_folder.mkdir(parents=True, exist_ok=True)
 		artifact_paths = build_maintain_artifact_paths(run_folder)
 
-		memory_index_path = resolved_memory_root / "MEMORY.md"
-
-		# RuntimeContext for tool functions.
-		ctx = RuntimeContext(
-			config=self.config,
-			repo_root=repo_root,
-			memory_root=resolved_memory_root,
-			workspace_root=resolved_workspace_root,
-			run_folder=run_folder,
-			extra_read_roots=(),
-			run_id=run_folder.name,
-			artifact_paths=artifact_paths,
-		)
+		# Ensure index.md exists before agent runs.
+		index_path = resolved_memory_root / "index.md"
+		if not index_path.exists():
+			index_path.write_text("# Memory Index\n", encoding="utf-8")
 
 		# Create the MaintainAgent module and run with retry + fallback.
-		agent = MaintainAgent(ctx)
+		agent = MaintainAgent(
+			memory_root=resolved_memory_root,
+			max_iters=self.config.lead_role.max_iters_maintain,
+		)
 		history_start = len(getattr(self._lead_lm, "history", []) or [])
 		start_cost_tracking()
 		try:
@@ -668,12 +511,7 @@ class LerimRuntime:
 				prediction = self._run_with_fallback(
 					flow="maintain",
 					module=agent,
-					input_args={
-						"memory_root": str(resolved_memory_root),
-						"run_folder": str(run_folder),
-						"maintain_actions_path": str(artifact_paths["maintain_actions"]),
-						"memory_index_path": str(memory_index_path),
-					},
+					input_args={},
 				)
 
 			capture_dspy_cost(self._lead_lm, history_start)
@@ -705,91 +543,9 @@ class LerimRuntime:
 			)
 			agent_trace_path.write_text("[]", encoding="utf-8")
 
-		# Validate maintain_actions artifact exists (optional JSON; runtime defaults if absent).
-		# The agent may still have used write_memory / edit_memory without a report file.
-		actions_path = artifact_paths["maintain_actions"]
-		if not actions_path.exists():
-			logger.warning(
-				"[maintain] maintain_actions.json missing -- using empty defaults"
-			)
-			actions_path.write_text(
-				json.dumps({
-					"counts": {
-						"merged": 0,
-						"archived": 0,
-						"consolidated": 0,
-						"unchanged": 0,
-					},
-					"note": "report_not_written",
-				}),
-				encoding="utf-8",
-			)
-
-		# Parse maintain_actions report for counts.
-		try:
-			report = _load_json_dict_artifact(actions_path)
-		except RuntimeError:
-			logger.warning(
-				"[maintain] maintain_actions.json is invalid -- using empty defaults"
-			)
-			report = {
-				"counts": {
-					"merged": 0,
-					"archived": 0,
-					"consolidated": 0,
-					"unchanged": 0,
-				},
-			}
-		counts_field = report.get("counts")
-		counts_raw = counts_field if isinstance(counts_field, dict) else {}
-		counts = _extract_counts(
-			counts_raw,
-			{
-				"merged": ("merged",),
-				"archived": ("archived",),
-				"consolidated": ("consolidated",),
-				"unchanged": ("unchanged",),
-			},
-		)
-
-		# Validate action paths are within allowed roots.
-		# Allowed: memory_root, run_folder, and memory_root.parent.
-		lerim_root = resolved_memory_root.parent
-		for action in report.get("actions") or []:
-			if not isinstance(action, dict):
-				continue
-			for path_key in ("source_path", "target_path"):
-				val = action.get(path_key)
-				paths_raw: list[str] = (
-					[str(v) for v in val]
-					if isinstance(val, list)
-					else [str(val or "").strip()]
-				)
-				for raw in paths_raw:
-					raw = raw.strip()
-					if not raw:
-						continue
-					resolved = Path(raw).resolve()
-					if not (
-						is_within(resolved, resolved_memory_root)
-						or is_within(resolved, run_folder)
-						or is_within(resolved, lerim_root)
-					):
-						logger.warning(
-							"[maintain] action path outside allowed roots: "
-							"{}={} -- skipping validation for this action",
-							path_key, resolved,
-						)
-
 		# Log memory index path for observability.
-		if memory_index_path.exists():
-			logger.info(
-				"[maintain] Memory index written to {}", memory_index_path
-			)
-		else:
-			logger.info(
-				"[maintain] Memory index not written (agent may have skipped)"
-			)
+		if index_path.exists():
+			logger.info(f"[maintain] Memory index at {index_path}")
 
 		payload = {
 			"memory_root": str(resolved_memory_root),
@@ -798,7 +554,6 @@ class LerimRuntime:
 			"artifacts": {
 				key: str(path) for key, path in artifact_paths.items()
 			},
-			"counts": counts,
 			"cost_usd": cost_usd,
 		}
 		return MaintainResultContract.model_validate(payload).model_dump(
@@ -818,8 +573,8 @@ class LerimRuntime:
 	) -> tuple[str, str, float]:
 		"""Run one ask prompt via ReAct agent. Returns (response, session_id, cost_usd).
 
-		The ask agent uses scan_memory_manifest and read_file tools in read-only
-		mode to browse and read memory files. It cannot modify any files.
+		The ask agent uses scan and read tools in read-only mode to browse
+		and read memory files. It cannot modify any files.
 
 		Args:
 			prompt: The user's question.
@@ -840,22 +595,14 @@ class LerimRuntime:
 		)
 		resolved_session_id = session_id or self.generate_session_id()
 
-		# RuntimeContext for ask flow (minimal: no run_folder or artifact_paths).
-		ctx = RuntimeContext(
-			config=self.config,
-			repo_root=runtime_cwd,
-			memory_root=resolved_memory_root,
-			workspace_root=None,
-			run_folder=None,
-			extra_read_roots=(),
-			run_id=resolved_session_id,
-		)
-
 		# Format hints from pre-fetched search results.
 		hints = format_ask_hints(hits=[], context_docs=[])
 
 		# Create the AskAgent module and run with retry + fallback.
-		agent = AskAgent(ctx)
+		agent = AskAgent(
+			memory_root=resolved_memory_root,
+			max_iters=self.config.lead_role.max_iters_ask,
+		)
 		history_start = len(getattr(self._lead_lm, "history", []) or [])
 		start_cost_tracking()
 		try:
@@ -864,7 +611,6 @@ class LerimRuntime:
 				module=agent,
 				input_args={
 					"question": prompt,
-					"memory_root": str(resolved_memory_root),
 					"hints": hints,
 				},
 			)

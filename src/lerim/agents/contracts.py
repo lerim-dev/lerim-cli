@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 
 # ---------------------------------------------------------------------------
-# Path guard (used by tools.py and runtime.py)
+# Path guard (available for path-safety checks)
 # ---------------------------------------------------------------------------
 
 def is_within(path: Path, root: Path) -> bool:
@@ -20,23 +20,6 @@ def is_within(path: Path, root: Path) -> bool:
 	resolved = path.resolve()
 	root_resolved = root.resolve()
 	return resolved == root_resolved or root_resolved in resolved.parents
-
-
-class SyncCounts(BaseModel):
-	"""Stable sync count payload contract."""
-
-	add: int = 0
-	update: int = 0
-	no_op: int = 0
-
-
-class MaintainCounts(BaseModel):
-	"""Stable maintain count payload contract."""
-
-	merged: int = 0
-	archived: int = 0
-	consolidated: int = 0
-	unchanged: int = 0
 
 
 class SyncResultContract(BaseModel):
@@ -47,9 +30,6 @@ class SyncResultContract(BaseModel):
 	workspace_root: str
 	run_folder: str
 	artifacts: dict[str, str]
-	counts: SyncCounts
-	written_memory_paths: list[str]
-	summary_path: str
 	cost_usd: float = 0.0
 
 
@@ -60,16 +40,26 @@ class MaintainResultContract(BaseModel):
 	workspace_root: str
 	run_folder: str
 	artifacts: dict[str, str]
-	counts: MaintainCounts
 	cost_usd: float = 0.0
 
 
 if __name__ == "__main__":
 	"""Run contract model smoke checks."""
-	sync = SyncCounts(add=1, update=2, no_op=3)
-	assert sync.model_dump() == {"add": 1, "update": 2, "no_op": 3}
+	sync = SyncResultContract(
+		trace_path="/tmp/trace.jsonl",
+		memory_root="/tmp/memory",
+		workspace_root="/tmp/workspace",
+		run_folder="/tmp/workspace/sync-run",
+		artifacts={"agent_log": "/tmp/workspace/sync-run/agent.log"},
+	)
+	assert sync.cost_usd == 0.0
 
-	maintain = MaintainCounts(merged=1, archived=2, consolidated=3)
-	assert maintain.unchanged == 0
+	maintain = MaintainResultContract(
+		memory_root="/tmp/memory",
+		workspace_root="/tmp/workspace",
+		run_folder="/tmp/workspace/maintain-run",
+		artifacts={"agent_log": "/tmp/workspace/maintain-run/agent.log"},
+	)
+	assert maintain.cost_usd == 0.0
 
 	print("runtime contracts: self-test passed")

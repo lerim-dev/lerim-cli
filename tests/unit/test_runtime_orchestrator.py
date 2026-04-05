@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import dspy
 import pytest
@@ -79,17 +79,17 @@ class TestTrajectoryToTraceList:
 		from lerim.server.runtime import _trajectory_to_trace_list
 
 		traj = {
-			"thought_0": "I should read the file.",
-			"tool_name_0": "read_file",
-			"tool_args_0": {"path": "/tmp/a.py"},
+			"thought_0": "I should read the trace.",
+			"tool_name_0": "read",
+			"tool_args_0": {"target": "trace"},
 			"observation_0": "file contents here",
 		}
 		result = _trajectory_to_trace_list(traj)
 		assert len(result) == 3
-		assert result[0] == {"role": "assistant", "content": "I should read the file."}
+		assert result[0] == {"role": "assistant", "content": "I should read the trace."}
 		assert result[1]["role"] == "assistant"
-		assert result[1]["tool_call"]["name"] == "read_file"
-		assert result[1]["tool_call"]["arguments"] == {"path": "/tmp/a.py"}
+		assert result[1]["tool_call"]["name"] == "read"
+		assert result[1]["tool_call"]["arguments"] == {"target": "trace"}
 		assert result[2]["role"] == "tool"
 		assert result[2]["content"] == "file contents here"
 
@@ -235,32 +235,6 @@ class TestArtifactIO:
 		assert text.endswith("\n")
 		assert json.loads(text) == {"key": "value"}
 
-	def test_load_json_dict_artifact(self, tmp_path):
-		"""_load_json_dict_artifact reads valid dict JSON."""
-		from lerim.server.runtime import _load_json_dict_artifact
-
-		p = tmp_path / "data.json"
-		p.write_text('{"a": 1}', encoding="utf-8")
-		assert _load_json_dict_artifact(p) == {"a": 1}
-
-	def test_load_json_dict_artifact_invalid_json(self, tmp_path):
-		"""_load_json_dict_artifact raises on invalid JSON."""
-		from lerim.server.runtime import _load_json_dict_artifact
-
-		p = tmp_path / "bad.json"
-		p.write_text("not json", encoding="utf-8")
-		with pytest.raises(RuntimeError, match="invalid_json_artifact"):
-			_load_json_dict_artifact(p)
-
-	def test_load_json_dict_artifact_non_dict(self, tmp_path):
-		"""_load_json_dict_artifact raises on non-dict JSON."""
-		from lerim.server.runtime import _load_json_dict_artifact
-
-		p = tmp_path / "list.json"
-		p.write_text("[1, 2, 3]", encoding="utf-8")
-		with pytest.raises(RuntimeError, match="invalid_report_shape"):
-			_load_json_dict_artifact(p)
-
 	def test_write_text_with_newline(self, tmp_path):
 		"""_write_text_with_newline ensures trailing newline."""
 		from lerim.server.runtime import _write_text_with_newline
@@ -271,42 +245,6 @@ class TestArtifactIO:
 
 		_write_text_with_newline(p, "world\n")
 		assert p.read_text(encoding="utf-8") == "world\n"
-
-
-# ---------------------------------------------------------------------------
-# extract_counts
-# ---------------------------------------------------------------------------
-
-
-class TestExtractCounts:
-	"""Tests for _extract_counts alias resolution."""
-
-	def test_exact_key(self):
-		"""Direct key match returns integer value."""
-		from lerim.server.runtime import _extract_counts
-
-		result = _extract_counts(
-			{"add": 3, "update": 1},
-			{"add": ("add",), "update": ("update",)},
-		)
-		assert result == {"add": 3, "update": 1}
-
-	def test_alias_fallback(self):
-		"""Alias key is used when primary key is missing."""
-		from lerim.server.runtime import _extract_counts
-
-		result = _extract_counts(
-			{"no-op": 5},
-			{"no_op": ("no_op", "no-op")},
-		)
-		assert result == {"no_op": 5}
-
-	def test_missing_defaults_to_zero(self):
-		"""Missing keys default to zero."""
-		from lerim.server.runtime import _extract_counts
-
-		result = _extract_counts({}, {"add": ("add",)})
-		assert result == {"add": 0}
 
 
 # ---------------------------------------------------------------------------
@@ -372,17 +310,20 @@ class TestPathHelpers:
 		from lerim.server.runtime import _build_artifact_paths
 
 		paths = _build_artifact_paths(tmp_path / "run")
-		assert "summary" in paths
-		assert "memory_actions" in paths
 		assert "agent_log" in paths
+		assert "subagents_log" in paths
+		assert "session_log" in paths
+		assert "summary" not in paths
+		assert "memory_actions" not in paths
 
 	def test_build_maintain_artifact_paths(self, tmp_path):
 		"""build_maintain_artifact_paths returns expected keys."""
 		from lerim.server.runtime import build_maintain_artifact_paths
 
 		paths = build_maintain_artifact_paths(tmp_path / "run")
-		assert "maintain_actions" in paths
 		assert "agent_log" in paths
+		assert "subagents_log" in paths
+		assert "maintain_actions" not in paths
 
 	def test_resolve_runtime_roots_defaults(self, tmp_path):
 		"""_resolve_runtime_roots uses config defaults when overrides are None."""
@@ -518,6 +459,7 @@ class TestSyncFlow:
 	def test_sync_happy_path(self, tmp_path, monkeypatch):
 		"""sync() returns validated SyncResultContract payload on success."""
 		rt, mock_lm = _build_runtime(tmp_path, monkeypatch)
+		(tmp_path / "memory").mkdir(exist_ok=True)
 
 		# Create trace file
 		trace_file = tmp_path / "trace.jsonl"
@@ -528,18 +470,15 @@ class TestSyncFlow:
 			completion_summary="Extracted 2 memories.",
 			trajectory={
 				"thought_0": "Analyzing trace",
-				"tool_name_0": "write_memory",
+				"tool_name_0": "write",
 				"tool_args_0": {},
 				"observation_0": "done",
 			},
 		)
 
 		monkeypatch.setattr(
-			"lerim.server.runtime.ExtractAgent", lambda ctx: MagicMock(return_value=pred)
-		)
-		monkeypatch.setattr(
-			"lerim.server.runtime.RuntimeContext",
-			lambda **kw: MagicMock(),
+			"lerim.server.runtime.ExtractAgent",
+			lambda **kw: MagicMock(return_value=pred),
 		)
 
 		# Patch logfire.span to be a no-op context manager
@@ -555,14 +494,13 @@ class TestSyncFlow:
 		)
 
 		assert "trace_path" in result
-		assert "counts" in result
 		assert "cost_usd" in result
-		assert result["counts"]["add"] == 0  # No report written by mock
 		assert isinstance(result["run_folder"], str)
 
 	def test_sync_writes_artifacts(self, tmp_path, monkeypatch):
 		"""sync() writes agent_log and agent_trace.json to run folder."""
 		rt, _ = _build_runtime(tmp_path, monkeypatch)
+		(tmp_path / "memory").mkdir(exist_ok=True)
 
 		trace_file = tmp_path / "trace.jsonl"
 		trace_file.write_text('{"type": "test"}\n', encoding="utf-8")
@@ -571,16 +509,14 @@ class TestSyncFlow:
 			completion_summary="Done.",
 			trajectory={
 				"thought_0": "Read file",
-				"tool_name_0": "read_file",
-				"tool_args_0": {"path": "/tmp/f.py"},
+				"tool_name_0": "read",
+				"tool_args_0": {"target": "trace"},
 				"observation_0": "contents",
 			},
 		)
 		monkeypatch.setattr(
-			"lerim.server.runtime.ExtractAgent", lambda ctx: MagicMock(return_value=pred)
-		)
-		monkeypatch.setattr(
-			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
+			"lerim.server.runtime.ExtractAgent",
+			lambda **kw: MagicMock(return_value=pred),
 		)
 		mock_span = MagicMock()
 		mock_span.__enter__ = MagicMock(return_value=mock_span)
@@ -604,35 +540,6 @@ class TestSyncFlow:
 		assert len(trace_data) == 3
 		assert trace_data[0]["content"] == "Read file"
 
-	def test_sync_handles_missing_report(self, tmp_path, monkeypatch):
-		"""sync() creates default memory_actions when the artifact file is absent."""
-		rt, _ = _build_runtime(tmp_path, monkeypatch)
-
-		trace_file = tmp_path / "trace.jsonl"
-		trace_file.write_text('{"type": "test"}\n', encoding="utf-8")
-
-		pred = _make_prediction()
-		monkeypatch.setattr(
-			"lerim.server.runtime.ExtractAgent", lambda ctx: MagicMock(return_value=pred)
-		)
-		monkeypatch.setattr(
-			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
-		)
-		mock_span = MagicMock()
-		mock_span.__enter__ = MagicMock(return_value=mock_span)
-		mock_span.__exit__ = MagicMock(return_value=False)
-		monkeypatch.setattr("lerim.server.runtime.logfire.span", lambda *a, **kw: mock_span)
-
-		result = rt.sync(
-			trace_path=trace_file,
-			memory_root=str(tmp_path / "memory"),
-			workspace_root=str(tmp_path / "workspace"),
-		)
-
-		# Default counts when report not written
-		assert result["counts"]["add"] == 0
-		assert result["counts"]["update"] == 0
-
 
 # ---------------------------------------------------------------------------
 # Maintain flow
@@ -645,16 +552,15 @@ class TestMaintainFlow:
 	def test_maintain_happy_path(self, tmp_path, monkeypatch):
 		"""maintain() returns validated MaintainResultContract on success."""
 		rt, _ = _build_runtime(tmp_path, monkeypatch)
+		(tmp_path / "memory").mkdir(exist_ok=True)
 
 		pred = _make_prediction(
 			completion_summary="Maintenance complete: merged 1, archived 2.",
 			trajectory={},
 		)
 		monkeypatch.setattr(
-			"lerim.server.runtime.MaintainAgent", lambda ctx: MagicMock(return_value=pred)
-		)
-		monkeypatch.setattr(
-			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
+			"lerim.server.runtime.MaintainAgent",
+			lambda **kw: MagicMock(return_value=pred),
 		)
 		mock_span = MagicMock()
 		mock_span.__enter__ = MagicMock(return_value=mock_span)
@@ -666,29 +572,26 @@ class TestMaintainFlow:
 			workspace_root=str(tmp_path / "workspace"),
 		)
 
-		assert "counts" in result
 		assert "cost_usd" in result
 		assert isinstance(result["run_folder"], str)
-		assert result["counts"]["merged"] == 0  # No report written by mock
 
 	def test_maintain_writes_artifacts(self, tmp_path, monkeypatch):
 		"""maintain() writes agent_log and agent_trace.json."""
 		rt, _ = _build_runtime(tmp_path, monkeypatch)
+		(tmp_path / "memory").mkdir(exist_ok=True)
 
 		pred = _make_prediction(
 			completion_summary="Maintenance done.",
 			trajectory={
 				"thought_0": "Scanning memories",
-				"tool_name_0": "scan_memory_manifest",
+				"tool_name_0": "scan",
 				"tool_args_0": {},
 				"observation_0": "3 memories found",
 			},
 		)
 		monkeypatch.setattr(
-			"lerim.server.runtime.MaintainAgent", lambda ctx: MagicMock(return_value=pred)
-		)
-		monkeypatch.setattr(
-			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
+			"lerim.server.runtime.MaintainAgent",
+			lambda **kw: MagicMock(return_value=pred),
 		)
 		mock_span = MagicMock()
 		mock_span.__enter__ = MagicMock(return_value=mock_span)
@@ -708,13 +611,11 @@ class TestMaintainFlow:
 		"""maintain() propagates agent exceptions after cleaning up cost tracking."""
 		monkeypatch.setattr(time, "sleep", lambda _: None)
 		rt, _ = _build_runtime(tmp_path, monkeypatch)
+		(tmp_path / "memory").mkdir(exist_ok=True)
 
 		monkeypatch.setattr(
 			"lerim.server.runtime.MaintainAgent",
-			lambda ctx: MagicMock(side_effect=RuntimeError("LLM failed")),
-		)
-		monkeypatch.setattr(
-			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
+			lambda **kw: MagicMock(side_effect=RuntimeError("LLM failed")),
 		)
 		mock_span = MagicMock()
 		mock_span.__enter__ = MagicMock(return_value=mock_span)
@@ -742,10 +643,8 @@ class TestAskFlow:
 
 		pred = _make_prediction(answer="The auth pattern uses JWT tokens.")
 		monkeypatch.setattr(
-			"lerim.server.runtime.AskAgent", lambda ctx: MagicMock(return_value=pred)
-		)
-		monkeypatch.setattr(
-			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
+			"lerim.server.runtime.AskAgent",
+			lambda **kw: MagicMock(return_value=pred),
 		)
 		monkeypatch.setattr(
 			"lerim.server.runtime.format_ask_hints", lambda **kw: ""
@@ -762,10 +661,8 @@ class TestAskFlow:
 
 		pred = _make_prediction(answer="Yes.")
 		monkeypatch.setattr(
-			"lerim.server.runtime.AskAgent", lambda ctx: MagicMock(return_value=pred)
-		)
-		monkeypatch.setattr(
-			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
+			"lerim.server.runtime.AskAgent",
+			lambda **kw: MagicMock(return_value=pred),
 		)
 		monkeypatch.setattr(
 			"lerim.server.runtime.format_ask_hints", lambda **kw: ""
@@ -780,10 +677,8 @@ class TestAskFlow:
 
 		pred = _make_prediction(answer="")
 		monkeypatch.setattr(
-			"lerim.server.runtime.AskAgent", lambda ctx: MagicMock(return_value=pred)
-		)
-		monkeypatch.setattr(
-			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
+			"lerim.server.runtime.AskAgent",
+			lambda **kw: MagicMock(return_value=pred),
 		)
 		monkeypatch.setattr(
 			"lerim.server.runtime.format_ask_hints", lambda **kw: ""
@@ -799,10 +694,7 @@ class TestAskFlow:
 
 		monkeypatch.setattr(
 			"lerim.server.runtime.AskAgent",
-			lambda ctx: MagicMock(side_effect=RuntimeError("model down")),
-		)
-		monkeypatch.setattr(
-			"lerim.server.runtime.RuntimeContext", lambda **kw: MagicMock()
+			lambda **kw: MagicMock(side_effect=RuntimeError("model down")),
 		)
 		monkeypatch.setattr(
 			"lerim.server.runtime.format_ask_hints", lambda **kw: ""

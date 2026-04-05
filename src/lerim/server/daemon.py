@@ -61,9 +61,6 @@ class OperationResult:
 	extracted_sessions: int = 0
 	skipped_sessions: int = 0
 	failed_sessions: int = 0
-	learnings_new: int = 0
-	learnings_updated: int = 0
-	memory_actions: list[dict[str, str]] = field(default_factory=list)
 	run_ids: list[str] = field(default_factory=list)
 	window_start: str | None = None
 	window_end: str | None = None
@@ -105,8 +102,6 @@ class OperationResult:
 			attrs["indexed_sessions"] = self.indexed_sessions
 			attrs["extracted_sessions"] = self.extracted_sessions
 			attrs["failed_sessions"] = self.failed_sessions
-			attrs["learnings_new"] = self.learnings_new
-			attrs["learnings_updated"] = self.learnings_updated
 		elif self.operation == "maintain":
 			attrs["projects_count"] = len(self.projects)
 		if self.cost_usd:
@@ -156,8 +151,6 @@ def _empty_sync_summary() -> SyncSummary:
         extracted_sessions=0,
         skipped_sessions=0,
         failed_sessions=0,
-        learnings_new=0,
-        learnings_updated=0,
         run_ids=[],
     )
 
@@ -305,8 +298,6 @@ class SyncSummary:
     extracted_sessions: int
     skipped_sessions: int
     failed_sessions: int
-    learnings_new: int
-    learnings_updated: int
     run_ids: list[str]
     cost_usd: float = 0.0
 
@@ -395,73 +386,38 @@ def _process_one_job(job: dict[str, Any]) -> dict[str, Any]:
             retry_backoff_seconds=_retry_backoff_seconds(attempts),
         )
         return {"status": "failed"}
-    counts = result.get("counts") or {}
-    # Extract memory actions with full metadata for activity feed
-    memory_actions: list[dict] = []
-    for path in result.get("written_memory_paths") or []:
-        p = Path(path)
-        fname = p.stem if path else ""
-        title = fname[9:].replace("-", " ") if len(fname) > 9 and fname[8] == "-" else fname.replace("-", " ")
-        memory_type = "project"  # default
-        ma: dict = {
-            "action": "add",
-            "title": title,
-            "type": memory_type,
-            "session_run_id": rid,
-        }
-        # Read frontmatter for type and metadata
-        if p.exists():
-            try:
-                import frontmatter
-                post = frontmatter.load(str(p))
-                ma["title"] = post.metadata.get("name", title)
-                ma["body"] = post.content.strip()
-                ma["type"] = post.metadata.get("type", memory_type)
-                ma["description"] = post.metadata.get("description", "")
-            except Exception:
-                pass
-        memory_actions.append(ma)
     complete_session_job(rid)
     return {
         "status": "extracted",
-        "learnings_new": int(counts.get("add") or 0),
-        "learnings_updated": int(counts.get("update") or 0),
-        "memory_actions": memory_actions,
         "cost_usd": float(result.get("cost_usd") or 0),
     }
 
 
 def _process_claimed_jobs(
     claimed: list[dict[str, Any]],
-) -> tuple[int, int, int, int, int, list[dict[str, str]], float]:
+) -> tuple[int, int, int, float]:
     """Process claimed jobs sequentially in chronological order.
 
     Jobs are already sorted oldest-first by ``claim_session_jobs``.
     Sequential processing ensures that later sessions can correctly
     update or supersede memories created by earlier ones.
 
-    Returns (extracted, failed, skipped, new, updated, memory_actions, cost_usd).
+    Returns (extracted, failed, skipped, cost_usd).
     """
     extracted = 0
     failed = 0
     skipped = 0
-    learnings_new = 0
-    learnings_updated = 0
-    memory_actions: list[dict[str, str]] = []
     cost_usd = 0.0
     for job in claimed:
         result = _process_one_job(job)
         if result["status"] == "extracted":
             extracted += 1
-            learnings_new += result.get("learnings_new", 0)
-            learnings_updated += result.get("learnings_updated", 0)
-            memory_actions.extend(result.get("memory_actions", []))
             cost_usd += result.get("cost_usd", 0.0)
         elif result["status"] == "failed":
             failed += 1
         elif result["status"] == "skipped":
             skipped += 1
-    return extracted, failed, skipped, learnings_new, learnings_updated, memory_actions, cost_usd
+    return extracted, failed, skipped, cost_usd
 
 
 def run_sync_once(
@@ -577,9 +533,6 @@ def run_sync_once(
         extracted = 0
         skipped = 0
         failed = 0
-        learnings_new = 0
-        learnings_updated = 0
-        all_memory_actions: list[dict[str, str]] = []
         cost_usd = 0.0
         projects: set[str] = set()
         claim_limit = max(max_sessions, 1)
@@ -609,17 +562,11 @@ def run_sync_once(
                     batch_extracted,
                     batch_failed,
                     batch_skipped,
-                    batch_new,
-                    batch_updated,
-                    batch_actions,
                     batch_cost,
                 ) = _process_claimed_jobs(claimed)
                 extracted += batch_extracted
                 failed += batch_failed
                 skipped += batch_skipped
-                learnings_new += batch_new
-                learnings_updated += batch_updated
-                all_memory_actions.extend(batch_actions)
                 cost_usd += batch_cost
                 total_processed += len(claimed)
 
@@ -628,8 +575,6 @@ def run_sync_once(
             extracted_sessions=extracted,
             skipped_sessions=skipped,
             failed_sessions=failed,
-            learnings_new=learnings_new,
-            learnings_updated=learnings_updated,
             run_ids=target_run_ids,
             cost_usd=cost_usd,
         )
@@ -653,9 +598,6 @@ def run_sync_once(
             extracted_sessions=extracted,
             skipped_sessions=skipped,
             failed_sessions=failed,
-            learnings_new=learnings_new,
-            learnings_updated=learnings_updated,
-            memory_actions=all_memory_actions,
             run_ids=target_run_ids,
             window_start=window_start.isoformat() if window_start else None,
             window_end=window_end.isoformat() if window_end else None,
@@ -671,17 +613,11 @@ def run_sync_once(
             details=op_result.to_details_json(),
         )
         _sync_span.set_attributes(op_result.to_span_attrs())
-        if not dry_run and (extracted or learnings_new or learnings_updated):
-            parts = []
-            if learnings_new:
-                parts.append(f"{learnings_new} new")
-            if learnings_updated:
-                parts.append(f"{learnings_updated} updated")
-            parts.append(f"{extracted} sessions")
+        if not dry_run and extracted:
             log_activity(
                 "sync",
                 ", ".join(sorted(projects)) or "global",
-                ", ".join(parts),
+                f"{extracted} sessions",
                 time.monotonic() - t0,
                 cost_usd=cost_usd,
             )
@@ -778,39 +714,16 @@ def run_maintain_once(
                     agent = LerimRuntime(default_cwd=str(project_path))
                     result = agent.maintain(memory_root=project_memory)
                     results[project_name] = result
-                    # Include intelligence data from maintain_actions if available
-                    if isinstance(result, dict) and result.get("artifacts"):
-                        actions_path = result["artifacts"].get("maintain_actions")
-                        if actions_path and Path(actions_path).exists():
-                            try:
-                                actions_report = json.loads(
-                                    Path(actions_path).read_text(encoding="utf-8")
-                                )
-                                if isinstance(actions_report, dict):
-                                    csa = actions_report.get("cross_session_analysis")
-                                    if csa:
-                                        result["cross_session_analysis"] = csa
-                            except (json.JSONDecodeError, OSError):
-                                pass
                     # Check for memory index
-                    memory_index_path = Path(project_memory) / "MEMORY.md"
+                    memory_index_path = Path(project_memory) / "index.md"
                     if memory_index_path.exists():
                         result["memory_index_exists"] = True
-                    # Activity log per project.
-                    counts = (
-                        (result.get("counts") or {}) if isinstance(result, dict) else {}
-                    )
-                    parts = []
-                    for key in ("merged", "archived", "consolidated"):
-                        val = counts.get(key, 0)
-                        if val:
-                            parts.append(f"{val} {key}")
-                    if parts:
-                        maintain_cost = float(result.get("cost_usd") or 0)
+                    maintain_cost = float(result.get("cost_usd") or 0)
+                    if maintain_cost:
                         log_activity(
                             "maintain",
                             project_name,
-                            ", ".join(parts),
+                            "maintenance completed",
                             time.monotonic() - t0,
                             cost_usd=maintain_cost,
                         )

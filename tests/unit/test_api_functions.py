@@ -188,8 +188,6 @@ def test_api_sync_returns_code_and_summary(monkeypatch, tmp_path) -> None:
 		extracted_sessions=1,
 		skipped_sessions=0,
 		failed_sessions=0,
-		learnings_new=3,
-		learnings_updated=1,
 		run_ids=["r1"],
 		cost_usd=0.005,
 	)
@@ -200,7 +198,6 @@ def test_api_sync_returns_code_and_summary(monkeypatch, tmp_path) -> None:
 
 	assert result["code"] == 0
 	assert result["extracted_sessions"] == 1
-	assert result["learnings_new"] == 3
 
 
 def test_api_sync_dry_run(monkeypatch, tmp_path) -> None:
@@ -213,7 +210,7 @@ def test_api_sync_dry_run(monkeypatch, tmp_path) -> None:
 	def fake_sync(**kwargs):
 		"""Capture sync arguments."""
 		captured_kwargs.update(kwargs)
-		return (0, SyncSummary(0, 0, 0, 0, 0, 0, []))
+		return (0, SyncSummary(0, 0, 0, 0, []))
 
 	monkeypatch.setattr(api_mod, "run_sync_once", fake_sync)
 	monkeypatch.setattr(api_mod, "ollama_lifecycle", _noop_lifecycle)
@@ -233,7 +230,7 @@ def test_api_sync_force_flag(monkeypatch, tmp_path) -> None:
 	def fake_sync(**kwargs):
 		"""Capture sync arguments."""
 		captured_kwargs.update(kwargs)
-		return (0, SyncSummary(0, 0, 0, 0, 0, 0, []))
+		return (0, SyncSummary(0, 0, 0, 0, []))
 
 	monkeypatch.setattr(api_mod, "run_sync_once", fake_sync)
 	monkeypatch.setattr(api_mod, "ollama_lifecycle", _noop_lifecycle)

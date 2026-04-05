@@ -366,7 +366,6 @@ def test_operation_result_to_details_json_sync() -> None:
 		status="completed",
 		trigger="manual",
 		extracted_sessions=3,
-		learnings_new=2,
 		failed_sessions=0,
 		cost_usd=0.005,
 	)
@@ -379,12 +378,10 @@ def test_operation_result_to_details_json_sync() -> None:
 
 	# Stripped: zero/empty values
 	assert "failed_sessions" not in details
-	assert "memory_actions" not in details  # empty list
 	assert "run_ids" not in details  # empty list
 
 	# Present: non-zero values
 	assert details["extracted_sessions"] == 3
-	assert details["learnings_new"] == 2
 	assert details["cost_usd"] == 0.005
 
 
@@ -409,8 +406,6 @@ def test_operation_result_to_span_attrs_sync() -> None:
 		trigger="daemon",
 		extracted_sessions=5,
 		failed_sessions=1,
-		learnings_new=3,
-		learnings_updated=2,
 		cost_usd=0.01,
 		error=None,
 	)
@@ -418,7 +413,6 @@ def test_operation_result_to_span_attrs_sync() -> None:
 
 	assert attrs["operation"] == "sync"
 	assert attrs["extracted_sessions"] == 5
-	assert attrs["learnings_new"] == 3
 	assert attrs["cost_usd"] == 0.01
 	assert "error" not in attrs  # None -> excluded
 
@@ -463,8 +457,6 @@ def test_sync_summary_dataclass() -> None:
 		extracted_sessions=8,
 		skipped_sessions=1,
 		failed_sessions=1,
-		learnings_new=5,
-		learnings_updated=3,
 		run_ids=["r1", "r2"],
 		cost_usd=0.02,
 	)
@@ -480,8 +472,6 @@ def test_sync_summary_defaults() -> None:
 		extracted_sessions=0,
 		skipped_sessions=0,
 		failed_sessions=0,
-		learnings_new=0,
-		learnings_updated=0,
 		run_ids=[],
 	)
 	assert s.cost_usd == 0.0
@@ -753,7 +743,7 @@ def test_record_service_event_calls_fn() -> None:
 		status="completed",
 		started_at="2026-01-01T00:00:00+00:00",
 		trigger="manual",
-		details={"learnings_new": 3},
+		details={"extracted_sessions": 3},
 	)
 
 	assert len(captured) == 1
@@ -761,7 +751,7 @@ def test_record_service_event_calls_fn() -> None:
 	assert captured[0]["status"] == "completed"
 	assert captured[0]["trigger"] == "manual"
 	assert captured[0]["completed_at"]  # should be set by _now_iso
-	assert captured[0]["details"]["learnings_new"] == 3
+	assert captured[0]["details"]["extracted_sessions"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -825,9 +815,6 @@ def test_operation_result_with_all_fields() -> None:
 		extracted_sessions=6,
 		skipped_sessions=1,
 		failed_sessions=3,
-		learnings_new=4,
-		learnings_updated=2,
-		memory_actions=[{"action": "add", "title": "test"}],
 		run_ids=["r1", "r2"],
 		window_start="2026-01-01T00:00:00+00:00",
 		window_end="2026-01-15T00:00:00+00:00",
