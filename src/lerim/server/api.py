@@ -234,27 +234,32 @@ def api_ask(question: str, limit: int = 12) -> dict[str, Any]:
 def api_sync(
     agent: str | None = None,
     window: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
     max_sessions: int | None = None,
+    run_id: str | None = None,
+    no_extract: bool = False,
     force: bool = False,
     dry_run: bool = False,
+    ignore_lock: bool = False,
 ) -> dict[str, Any]:
     """Run one sync cycle and return summary dict."""
     config = get_config()
     window_start, window_end = resolve_window_bounds(
         window=window or f"{config.sync_window_days}d",
-        since_raw=None,
-        until_raw=None,
+        since_raw=since,
+        until_raw=until,
         parse_duration_to_seconds=parse_duration_to_seconds,
     )
     with ollama_lifecycle(config):
         code, summary = run_sync_once(
-            run_id=None,
+            run_id=run_id,
             agent_filter=parse_agent_filter(agent) if agent else None,
-            no_extract=False,
+            no_extract=no_extract,
             force=force,
             max_sessions=max_sessions or config.sync_max_sessions,
             dry_run=dry_run,
-            ignore_lock=False,
+            ignore_lock=ignore_lock,
             trigger="api",
             window_start=window_start,
             window_end=window_end,

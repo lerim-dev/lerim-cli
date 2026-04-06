@@ -178,7 +178,7 @@ lerim connect auto
 
 ### Sync sessions
 
-Lerim reads session transcripts and runs **ExtractAgent** (DSPy ReAct) with the **`[roles.lead]`** model. The agent calls methods on `MemoryTools` to read the trace, scan existing memories, write or edit markdown, and save a session summary:
+Lerim reads session transcripts and runs **ExtractAgent** (DSPy ReAct) with the **`[roles.agent]`** model. The agent calls methods on `MemoryTools` to read the trace, scan existing memories, write or edit markdown, and save a session summary:
 
 ```mermaid
 flowchart TB
@@ -186,7 +186,7 @@ flowchart TB
         RT[LerimRuntime · ExtractAgent]
     end
     subgraph lm["LM"]
-        L[roles.lead]
+        L[roles.agent]
     end
     subgraph syncTools["Sync tools (5)"]
         t1["read · grep · scan"]
@@ -203,7 +203,7 @@ flowchart TB
 
 ### Maintain knowledge
 
-Offline refinement merges duplicates, archives low-value entries, and consolidates related learnings. **MaintainAgent** uses the same **`[roles.lead]`** model with maintain-only tools:
+Offline refinement merges duplicates, archives low-value entries, and consolidates related learnings. **MaintainAgent** uses the same **`[roles.agent]`** model with maintain-only tools:
 
 ```mermaid
 flowchart TB

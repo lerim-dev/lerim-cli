@@ -17,7 +17,7 @@ The sync path turns raw agent session transcripts into structured memories:
 2. **Index** -- new sessions are cataloged in `sessions.sqlite3`
 3. **Match to project** -- sessions matching a registered project are enqueued; unmatched sessions are indexed but not extracted
 4. **Compact** -- traces are compacted (tool outputs stripped) and cached
-5. **ExtractAgent** -- the DSPy ReAct lead agent (`[roles.lead]`) reads the trace and calls `MemoryTools` methods to write or edit memories, update `index.md`, and save a session summary
+5. **ExtractAgent** -- the DSPy ReAct lead agent (`[roles.agent]`) reads the trace and calls `MemoryTools` methods to write or edit memories, update `index.md`, and save a session summary
 
 ### Time window
 

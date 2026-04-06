@@ -8,7 +8,7 @@ Before you begin, make sure you have:
 
 - **Python 3.10 or higher**
 - **Docker** installed ([get Docker](https://docs.docker.com/get-docker/)) — recommended for the always-on service
-- **An LLM API key** — you only need a key for the provider(s) in your `[roles.*]` config (e.g. `OPENCODE_API_KEY` for OpenCode Go defaults, or MiniMax / Z.AI / OpenRouter / OpenAI / Anthropic as configured)
+- **An LLM API key** — you only need a key for the provider(s) in your `[roles.*]` config (e.g. `OPENCODE_API_KEY` for OpenCode Go defaults, or MiniMax / Z.AI / OpenRouter / OpenAI as configured)
 
 !!! tip "Docker is optional"
     If you don't have Docker, you can run Lerim directly using `lerim serve` instead of `lerim up`. See [Running without Docker](#running-without-docker) below.
@@ -136,11 +136,7 @@ To use local models instead of cloud APIs:
 
 ```toml
 # ~/.lerim/config.toml
-[roles.lead]
-provider = "ollama"
-model = "qwen3.5:9b-q8_0"
-
-[roles.extract]
+[roles.agent]
 provider = "ollama"
 model = "qwen3.5:9b-q8_0"
 ```

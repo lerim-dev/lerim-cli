@@ -71,7 +71,7 @@ API keys are **never** stored in TOML files. They come from environment variable
     [Model Roles](model-roles.md) for details.
 
     ```toml
-    [roles.lead]
+    [roles.agent]
     provider = "minimax"
     model = "MiniMax-M2.5"
     ```
@@ -103,7 +103,7 @@ API keys are **never** stored in TOML files. They come from environment variable
 
     ---
 
-    Configure which models handle lead, extract, summarize, and optional codex (config surface) tasks.
+    Configure which model handles agent tasks (sync, maintain, ask).
 
     [:octicons-arrow-right-24: Model Roles](model-roles.md)
 
@@ -111,7 +111,7 @@ API keys are **never** stored in TOML files. They come from environment variable
 
     ---
 
-    OpenTelemetry setup with Logfire for agent observability.
+    OpenTelemetry setup with MLflow for agent observability.
 
     [:octicons-arrow-right-24: Tracing](tracing.md)
 

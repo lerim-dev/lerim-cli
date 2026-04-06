@@ -197,9 +197,14 @@ def _cmd_sync(args: argparse.Namespace) -> int:
     body: dict[str, Any] = {
         "agent": getattr(args, "agent", None),
         "window": getattr(args, "window", None),
+        "since": getattr(args, "since", None),
+        "until": getattr(args, "until", None),
         "max_sessions": getattr(args, "max_sessions", None),
+        "run_id": getattr(args, "run_id", None),
+        "no_extract": getattr(args, "no_extract", False),
         "force": getattr(args, "force", False),
         "dry_run": getattr(args, "dry_run", False),
+        "ignore_lock": getattr(args, "ignore_lock", False),
     }
     data = _api_post("/api/sync", body)
     if data is None:
@@ -1224,13 +1229,8 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard = sub.add_parser(
         "dashboard",
         formatter_class=_F,
-        help="Show local API URL and Lerim Cloud web UI",
-        description="Print local API URL and Lerim Cloud web UI link.",
-    )
-    dashboard.add_argument(
-        "--port",
-        type=int,
-        help="Port shown in the API URL (default: 8765 or config).",
+        help="Show Lerim Cloud web UI link",
+        description="Print Lerim Cloud web UI link and CLI alternatives.",
     )
     dashboard.set_defaults(func=_cmd_dashboard)
 

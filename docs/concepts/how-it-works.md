@@ -57,7 +57,7 @@ flowchart TD
 
 The sync path processes new agent sessions and turns them into memories.
 
-**Agent / tools view** -- `LerimRuntime` runs **ExtractAgent** (DSPy ReAct) with the **`[roles.lead]`** language model. The agent calls methods on `MemoryTools(memory_root, trace_path)` to read the trace, inspect existing memories, write or edit files, and save summaries:
+**Agent / tools view** -- `LerimRuntime` runs **ExtractAgent** (DSPy ReAct) with the **`[roles.agent]`** language model. The agent calls methods on `MemoryTools(memory_root, trace_path)` to read the trace, inspect existing memories, write or edit files, and save summaries:
 
 ```mermaid
 flowchart TB
@@ -65,7 +65,7 @@ flowchart TB
         RT[LerimRuntime · ExtractAgent]
     end
     subgraph lm["LM"]
-        L[roles.lead]
+        L[roles.agent]
     end
     subgraph syncTools["Sync tools (5)"]
         t1["read · grep · scan"]
@@ -91,7 +91,7 @@ flowchart TB
 
 The maintain path refines existing memories offline.
 
-**Agent / tools view** — same **`[roles.lead]`** model; **MaintainAgent** uses `MemoryTools(memory_root)` (no trace ingestion):
+**Agent / tools view** — same **`[roles.agent]`** model; **MaintainAgent** uses `MemoryTools(memory_root)` (no trace ingestion):
 
 ```mermaid
 flowchart TB

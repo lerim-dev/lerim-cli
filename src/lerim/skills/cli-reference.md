@@ -202,17 +202,12 @@ on `sync_interval_minutes` / `maintain_interval_minutes`) runs **inside**
 
 ### `lerim dashboard`
 
-Prints the **local API** base URL (`http://localhost:<port>/`) and reminds you
-that the browser UI is on **Lerim Cloud** (`https://lerim.dev`).
+Shows that the web UI has moved to **Lerim Cloud** (`https://lerim.dev`)
+and lists CLI alternatives for common tasks.
 
 ```bash
-lerim dashboard                  # print API URL + Cloud hint
-lerim dashboard --port 9000      # port shown in the API URL
+lerim dashboard
 ```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--port` | config `server.port` (`8765`) | Port shown in the printed API URL |
 
 ### `lerim memory`
 

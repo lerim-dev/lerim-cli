@@ -1363,9 +1363,14 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
                 api_sync(
                     agent=body.get("agent"),
                     window=body.get("window", "7d"),
+                    since=body.get("since"),
+                    until=body.get("until"),
                     max_sessions=body.get("max_sessions"),
+                    run_id=body.get("run_id"),
+                    no_extract=bool(body.get("no_extract")),
                     force=bool(body.get("force")),
                     dry_run=bool(body.get("dry_run")),
+                    ignore_lock=bool(body.get("ignore_lock")),
                 )
 
             threading.Thread(
