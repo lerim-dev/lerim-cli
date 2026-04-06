@@ -95,9 +95,33 @@ def _add_retry_fields(signature: type) -> type:
 		)
 		.append(
 			"error_message",
-			dspy.InputField(desc="Error message for the previous response."),
+			dspy.InputField(
+				desc=(
+					"Parsing error for the previous response. "
+					"Follow the XML tag instructions exactly to fix it."
+				),
+			),
 			type_=str,
 		)
+	)
+
+
+def _build_error_feedback(
+	error: AdapterParseError,
+	output_fields: set[str],
+) -> str:
+	"""Build an actionable error message listing the exact XML tags expected."""
+	tag_lines = "\n".join(f"<{f}>...</{f}>" for f in sorted(output_fields))
+	original = str(error)
+	# Truncate verbose errors to keep the prompt compact.
+	if len(original) > 300:
+		original = original[:300] + "..."
+	return (
+		"Your response could not be parsed. "
+		"You must produce these XML tags exactly:\n"
+		f"{tag_lines}\n"
+		"Do not use any other tag names. "
+		f"Previous error: {original}"
 	)
 
 
@@ -166,7 +190,9 @@ class RetryAdapter:
 		retry_signature = _add_retry_fields(signature)
 		retry_inputs = {**inputs}
 		retry_inputs["previous_response"] = last_error.lm_response or ""
-		retry_inputs["error_message"] = str(last_error)
+		retry_inputs["error_message"] = _build_error_feedback(
+			last_error, output_fields,
+		)
 
 		for attempt in range(1, self.max_retries + 1):
 			try:
@@ -201,7 +227,9 @@ class RetryAdapter:
 				)
 				last_error = exc
 				retry_inputs["previous_response"] = exc.lm_response or ""
-				retry_inputs["error_message"] = str(exc)
+				retry_inputs["error_message"] = _build_error_feedback(
+					exc, output_fields,
+				)
 
 		raise last_error
 

@@ -20,6 +20,7 @@ from typing import Any
 
 from lerim.config.logging import LOG_DIR, logger
 from lerim.config.settings import Config
+from lerim.sessions.catalog import _ensure_sessions_db_initialized
 
 # ── constants ────────────────────────────────────────────────────────────────
 
@@ -111,7 +112,7 @@ def _post_batch_sync(
         logger.warning("cloud POST {} failed: {} — {}", path, exc, body_text)
         return False
     except (urllib.error.URLError, OSError) as exc:
-        logger.warning("cloud POST {} failed: {}", path, exc)
+        logger.debug("cloud POST {} failed: {}", path, exc)
         return False
 
 
@@ -141,8 +142,11 @@ def _get_json_sync(
     try:
         with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_SECONDS) as resp:
             return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as exc:
+    except urllib.error.HTTPError as exc:
         logger.warning("cloud GET {} failed: {}", path, exc)
+        return None
+    except (urllib.error.URLError, OSError) as exc:
+        logger.debug("cloud GET {} failed: {}", path, exc)
         return None
 
 
@@ -352,6 +356,7 @@ def _query_new_sessions(
     """Query sessions with ``indexed_at`` after *since_iso* (synchronous)."""
     if not db_path.exists():
         return []
+    _ensure_sessions_db_initialized()
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = lambda cur, row: {
@@ -597,6 +602,7 @@ async def _ship_memories(
 
 def _query_service_runs(db_path: Path, since_iso: str, limit: int) -> list[dict[str, Any]]:
     """Query local service_runs table for new entries."""
+    _ensure_sessions_db_initialized()
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = lambda cur, row: {col[0]: row[idx] for idx, col in enumerate(cur.description)}
@@ -680,6 +686,7 @@ def _query_job_statuses(
 	"""Query session_jobs with ``updated_at`` after *since_iso*."""
 	if not db_path.exists():
 		return []
+	_ensure_sessions_db_initialized()
 	try:
 		conn = sqlite3.connect(db_path)
 		conn.row_factory = lambda cur, row: {

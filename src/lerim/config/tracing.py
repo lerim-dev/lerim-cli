@@ -22,10 +22,11 @@ def configure_tracing(config: Config) -> None:
 	if not config.mlflow_enabled:
 		return
 
-	mlflow.set_tracking_uri(str(config.global_data_dir / "mlruns"))
+	db_path = config.global_data_dir / "mlflow.db"
+	mlflow.set_tracking_uri(f"sqlite:///{db_path}")
 	mlflow.set_experiment("lerim")
 	mlflow.dspy.autolog()
-	logger.info("MLflow tracing enabled (DSPy autolog) → {}", config.global_data_dir / "mlruns")
+	logger.info("MLflow tracing enabled (DSPy autolog) → sqlite:///{}", db_path)
 
 
 if __name__ == "__main__":

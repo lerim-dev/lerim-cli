@@ -11,7 +11,6 @@ import json
 import logging
 import secrets
 import time
-from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -95,75 +94,6 @@ def _write_text_with_newline(path: Path, content: str) -> None:
 	"""Write text artifact ensuring exactly one trailing newline."""
 	text = content if content.endswith("\n") else f"{content}\n"
 	path.write_text(text, encoding="utf-8")
-
-
-# ---------------------------------------------------------------------------
-# Cost tracking (inlined from cost_tracker.py)
-# ---------------------------------------------------------------------------
-
-class _Acc:
-	"""Mutable cost accumulator shared by reference across context copies."""
-
-	__slots__ = ("total",)
-
-	def __init__(self) -> None:
-		"""Initialize accumulator with zero total."""
-		self.total = 0.0
-
-
-_run_cost: ContextVar[_Acc | None] = ContextVar("lerim_run_cost", default=None)
-
-
-def start_cost_tracking() -> None:
-	"""Begin accumulating LLM cost for the current run."""
-	_run_cost.set(_Acc())
-
-
-def stop_cost_tracking() -> float:
-	"""Stop tracking and return accumulated cost in USD."""
-	acc = _run_cost.get(None)
-	cost = acc.total if acc else 0.0
-	_run_cost.set(None)
-	return cost
-
-
-def add_cost(amount: float) -> None:
-	"""Add cost to the current run's accumulator (no-op when tracking inactive)."""
-	acc = _run_cost.get(None)
-	if acc is not None:
-		acc.total += amount
-
-
-def capture_dspy_cost(lm: object, history_start: int) -> None:
-	"""Add cost from DSPy LM history entries added since *history_start*.
-
-	DSPy stores cost at entry["cost"] (extracted from LiteLLM's
-	response._hidden_params["response_cost"]).  As a fallback, also check
-	response.usage for a cost attribute.
-	"""
-	history = getattr(lm, "history", None)
-	if not isinstance(history, list):
-		return
-	for entry in history[history_start:]:
-		if not isinstance(entry, dict):
-			continue
-		# Primary path: DSPy puts cost at the top level of the history entry.
-		cost = entry.get("cost")
-		if cost is not None:
-			add_cost(float(cost))
-			continue
-		# Fallback path: check response.usage.cost (older DSPy versions).
-		response = entry.get("response")
-		if response is None:
-			continue
-		usage = getattr(response, "usage", None)
-		if usage is None:
-			continue
-		cost = getattr(usage, "cost", None)
-		if cost is None and isinstance(usage, dict):
-			cost = usage.get("cost")
-		if cost is not None:
-			add_cost(float(cost))
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +188,7 @@ class LerimRuntime:
 		module: dspy.Module,
 		input_args: dict[str, Any],
 		max_attempts: int = 3,
-	) -> tuple[dspy.Prediction, dspy.LM, int]:
+	) -> dspy.Prediction:
 		"""Run a DSPy module with retry + fallback model support.
 
 		Tries the primary LM first with up to max_attempts retries.
@@ -272,7 +202,7 @@ class LerimRuntime:
 			max_attempts: Retry attempts per model.
 
 		Returns:
-			Tuple of (prediction, LM that produced it, history_start index).
+			The dspy.Prediction produced by the module.
 
 		Raises:
 			RuntimeError: If all models and attempts are exhausted.
@@ -286,8 +216,6 @@ class LerimRuntime:
 				if model_idx == 0
 				else f"fallback-{model_idx}"
 			)
-			# Snapshot history length before first attempt with this LM.
-			hist_start = len(getattr(lm, "history", []) or [])
 			for attempt in range(1, max_attempts + 1):
 				try:
 					logger.info(
@@ -295,7 +223,7 @@ class LerimRuntime:
 						f"(model={model_label})"
 					)
 					with dspy.context(lm=lm):
-						return module(**input_args), lm, hist_start
+						return module(**input_args)
 				except Exception as exc:
 					last_error = exc
 					error_msg = str(exc)
@@ -412,19 +340,11 @@ class LerimRuntime:
 			run_folder=run_folder,
 			max_iters=self.config.agent_role.max_iters_sync,
 		)
-		start_cost_tracking()
-		try:
-			prediction, used_lm, hist_start = self._run_with_fallback(
-				flow="sync",
-				module=agent,
-				input_args={},
-			)
-
-			capture_dspy_cost(used_lm, hist_start)
-			cost_usd = stop_cost_tracking()
-		except Exception:
-			stop_cost_tracking()  # clean up accumulator
-			raise
+		prediction = self._run_with_fallback(
+			flow="sync",
+			module=agent,
+			input_args={},
+		)
 
 		# Extract completion summary from prediction.
 		response_text = str(
@@ -457,7 +377,7 @@ class LerimRuntime:
 			"artifacts": {
 				key: str(path) for key, path in artifact_paths.items()
 			},
-			"cost_usd": cost_usd,
+			"cost_usd": 0.0,
 		}
 		return SyncResultContract.model_validate(payload).model_dump(
 			mode="json"
@@ -515,19 +435,11 @@ class LerimRuntime:
 			memory_root=resolved_memory_root,
 			max_iters=self.config.agent_role.max_iters_maintain,
 		)
-		start_cost_tracking()
-		try:
-			prediction, used_lm, hist_start = self._run_with_fallback(
-				flow="maintain",
-				module=agent,
-				input_args={},
-			)
-
-			capture_dspy_cost(used_lm, hist_start)
-			cost_usd = stop_cost_tracking()
-		except Exception:
-			stop_cost_tracking()  # clean up accumulator
-			raise
+		prediction = self._run_with_fallback(
+			flow="maintain",
+			module=agent,
+			input_args={},
+		)
 
 		# Extract completion summary from prediction.
 		response_text = str(
@@ -563,7 +475,7 @@ class LerimRuntime:
 			"artifacts": {
 				key: str(path) for key, path in artifact_paths.items()
 			},
-			"cost_usd": cost_usd,
+			"cost_usd": 0.0,
 		}
 		return MaintainResultContract.model_validate(payload).model_dump(
 			mode="json"
@@ -592,7 +504,8 @@ class LerimRuntime:
 			memory_root: Memory directory override.
 
 		Returns:
-			(response_text, session_id, cost_usd) tuple.
+			(response_text, session_id, cost_usd) tuple.  cost_usd is
+			always 0.0 (cost tracking removed; field kept for API compat).
 		"""
 		resolved_memory_root = (
 			Path(memory_root).expanduser().resolve()
@@ -609,24 +522,16 @@ class LerimRuntime:
 			memory_root=resolved_memory_root,
 			max_iters=self.config.agent_role.max_iters_ask,
 		)
-		start_cost_tracking()
-		try:
-			prediction, used_lm, hist_start = self._run_with_fallback(
-				flow="ask",
-				module=agent,
-				input_args={
-					"question": prompt,
-					"hints": hints,
-				},
-			)
-
-			capture_dspy_cost(used_lm, hist_start)
-			cost_usd = stop_cost_tracking()
-		except Exception:
-			stop_cost_tracking()  # clean up accumulator
-			raise
+		prediction = self._run_with_fallback(
+			flow="ask",
+			module=agent,
+			input_args={
+				"question": prompt,
+				"hints": hints,
+			},
+		)
 
 		response_text = str(
 			getattr(prediction, "answer", "") or ""
 		).strip() or "(no response)"
-		return response_text, resolved_session_id, cost_usd
+		return response_text, resolved_session_id, 0.0

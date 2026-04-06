@@ -154,6 +154,10 @@ def ollama_lifecycle(config: Config) -> Generator[None, None, None]:
 	Logs warnings on failure but never raises — the daemon must not crash
 	because of lifecycle issues.
 	"""
+	if config.agent_role.provider != "ollama":
+		yield
+		return
+
 	from lerim.config.logging import logger
 
 	models = _ollama_models(config)

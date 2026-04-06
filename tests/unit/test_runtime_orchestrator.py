@@ -1,8 +1,7 @@
 """Unit tests for LerimRuntime DSPy ReAct orchestrator.
 
 Tests sync, maintain, and ask flows with all LLM calls mocked.
-Covers retry/fallback logic, trajectory conversion, cost tracking,
-and artifact writing.
+Covers retry/fallback logic, trajectory conversion, and artifact writing.
 """
 
 from __future__ import annotations
@@ -121,100 +120,6 @@ class TestTrajectoryToTraceList:
 		assert len(result) == 3
 		assert result[1]["tool_call"]["arguments"] == {}
 		assert result[2]["content"] == ""
-
-
-# ---------------------------------------------------------------------------
-# Cost tracking
-# ---------------------------------------------------------------------------
-
-
-class TestCostTracking:
-	"""Tests for cost accumulation helpers."""
-
-	def test_start_stop_cost_tracking(self):
-		"""Start/stop returns zero when no cost added."""
-		from lerim.server.runtime import start_cost_tracking, stop_cost_tracking
-
-		start_cost_tracking()
-		assert stop_cost_tracking() == 0.0
-
-	def test_add_cost_accumulates(self):
-		"""Costs accumulate between start and stop."""
-		from lerim.server.runtime import (
-			add_cost,
-			start_cost_tracking,
-			stop_cost_tracking,
-		)
-
-		start_cost_tracking()
-		add_cost(0.01)
-		add_cost(0.02)
-		total = stop_cost_tracking()
-		assert abs(total - 0.03) < 1e-9
-
-	def test_add_cost_noop_when_not_tracking(self):
-		"""add_cost is a no-op when tracking is not started."""
-		from lerim.server.runtime import add_cost, stop_cost_tracking
-
-		# Ensure tracking is off
-		stop_cost_tracking()
-		add_cost(1.0)  # should not raise
-
-	def test_capture_dspy_cost_from_history(self):
-		"""capture_dspy_cost extracts cost from LM history entries."""
-		from lerim.server.runtime import (
-			capture_dspy_cost,
-			start_cost_tracking,
-			stop_cost_tracking,
-		)
-
-		mock_usage = MagicMock()
-		mock_usage.cost = 0.05
-		mock_response = MagicMock()
-		mock_response.usage = mock_usage
-
-		lm = MagicMock()
-		lm.history = [
-			{"response": mock_response},
-		]
-
-		start_cost_tracking()
-		capture_dspy_cost(lm, 0)
-		total = stop_cost_tracking()
-		assert abs(total - 0.05) < 1e-9
-
-	def test_capture_dspy_cost_no_history(self):
-		"""capture_dspy_cost handles LM with no history attribute."""
-		from lerim.server.runtime import (
-			capture_dspy_cost,
-			start_cost_tracking,
-			stop_cost_tracking,
-		)
-
-		lm = MagicMock(spec=[])  # no attributes
-		start_cost_tracking()
-		capture_dspy_cost(lm, 0)
-		total = stop_cost_tracking()
-		assert total == 0.0
-
-	def test_capture_dspy_cost_dict_usage(self):
-		"""capture_dspy_cost handles dict-style usage with cost key."""
-		from lerim.server.runtime import (
-			capture_dspy_cost,
-			start_cost_tracking,
-			stop_cost_tracking,
-		)
-
-		mock_response = MagicMock()
-		mock_response.usage = {"cost": 0.10}
-
-		lm = MagicMock()
-		lm.history = [{"response": mock_response}]
-
-		start_cost_tracking()
-		capture_dspy_cost(lm, 0)
-		total = stop_cost_tracking()
-		assert abs(total - 0.10) < 1e-9
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +271,7 @@ class TestRunWithFallback:
 		pred = _make_prediction()
 
 		mock_module = MagicMock(return_value=pred)
-		result, used_lm, hist_start = rt._run_with_fallback(
+		result = rt._run_with_fallback(
 			flow="test", module=mock_module, input_args={"x": 1}
 		)
 		assert result is pred
@@ -389,7 +294,7 @@ class TestRunWithFallback:
 			return pred
 
 		mock_module = MagicMock(side_effect=side_effect)
-		result, used_lm, hist_start = rt._run_with_fallback(
+		result = rt._run_with_fallback(
 			flow="test", module=mock_module, input_args={}, max_attempts=3
 		)
 		assert result is pred
@@ -423,7 +328,7 @@ class TestRunWithFallback:
 			return pred
 
 		mock_module = MagicMock(side_effect=side_effect)
-		result, used_lm, hist_start = rt._run_with_fallback(
+		result = rt._run_with_fallback(
 			flow="test", module=mock_module, input_args={}, max_attempts=2
 		)
 		assert result is pred
@@ -591,7 +496,7 @@ class TestMaintainFlow:
 		assert (run_folder / "agent_trace.json").exists()
 
 	def test_maintain_handles_agent_failure(self, tmp_path, monkeypatch):
-		"""maintain() propagates agent exceptions after cleaning up cost tracking."""
+		"""maintain() propagates agent exceptions after all retries exhausted."""
 		monkeypatch.setattr(time, "sleep", lambda _: None)
 		rt, _ = _build_runtime(tmp_path, monkeypatch)
 		(tmp_path / "memory").mkdir(exist_ok=True)
