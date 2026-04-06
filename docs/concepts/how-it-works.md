@@ -48,7 +48,7 @@ flowchart TD
     D --> E["Project memory\n(.lerim/memory/)"]
     E --> F["Maintain path\n(refine memories)"]
     F --> E
-    E --> G["Query\n(lerim ask / memory search)"]
+    E --> G["Query\n(lerim ask / index.md)"]
 ```
 
 ---

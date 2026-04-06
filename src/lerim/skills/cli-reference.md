@@ -68,7 +68,7 @@ lerim project remove my-app             # unregister a project
 
 Adding/removing a project restarts the Docker container if running.
 
-### `lerim up` / `lerim down` / `lerim logs` (host-only)
+### `lerim up` / `lerim down` (host-only)
 
 Docker container lifecycle.
 
@@ -76,13 +76,30 @@ Docker container lifecycle.
 lerim up                    # start Lerim (pull GHCR image)
 lerim up --build            # build from local Dockerfile instead
 lerim down                  # stop it
-lerim logs                  # view logs
-lerim logs --follow         # tail logs
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--build` | off | Build from local Dockerfile instead of pulling the GHCR image |
+
+### `lerim logs` (host-only)
+
+View local log entries from `~/.lerim/logs/lerim.jsonl` (last 50 by default).
+
+```bash
+lerim logs                      # show recent logs
+lerim logs --follow             # tail logs continuously
+lerim logs --level error        # filter by level
+lerim logs --since 2h           # entries from the last 2 hours
+lerim logs --json               # raw JSONL output
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--follow`, `-f` | off | Live tail: watch for new log lines |
+| `--level` | -- | Filter by log level (case-insensitive): error, warning, info |
+| `--since` | -- | Show entries from the last N hours/minutes/days (e.g. `1h`, `30m`, `2d`) |
+| `--json` | off | Output raw JSONL lines instead of formatted text |
 
 ### `lerim serve`
 

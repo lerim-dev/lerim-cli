@@ -4,10 +4,10 @@ Global flags, exit codes, and common patterns for Lerim CLI.
 
 The Lerim CLI is the primary interface for managing Lerim's continual learning layer. Commands fall into two categories:
 
-- **Host-only commands** run locally and do not call the HTTP API: `init`, `project`, `up`, `down`, `logs`, `connect`, `memory` (all subcommands: `search`, `list`, `add`, `reset`), `dashboard`, `queue`, `retry`, `skip`, `skill`, `auth`
+- **Host-only commands** run locally and do not call the HTTP API: `init`, `project`, `up`, `down`, `logs`, `connect`, `memory` (`list`, `reset`), `dashboard`, `queue`, `retry`, `skip`, `skill`, `auth`
 - **Service commands** forward to `lerim serve` via HTTP and require a running server (`lerim up` or `lerim serve`): `ask`, `sync`, `maintain`, `status`
 
-`memory search`, `memory list`, and `memory add` read or write the memory tree on disk directly (no server). The background sync/maintain loop runs **inside** `lerim serve` — there is no separate `lerim daemon` command (see [Background loop](daemon.md)).
+`memory list` and `memory reset` work on disk directly (no server). The background sync/maintain loop runs **inside** `lerim serve` — there is no separate `lerim daemon` command (see [Background loop](daemon.md)).
 
 ## Installation
 
@@ -84,9 +84,7 @@ Lerim commands return standard exit codes:
 
 ### Direct memory access
 
-- `lerim memory search` — Full-text search across memories
 - `lerim memory list` — List stored memory files
-- `lerim memory add` — Manually create a memory
 - `lerim memory reset` — Destructive wipe of memory data
 
 ### Skills

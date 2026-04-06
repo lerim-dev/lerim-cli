@@ -230,7 +230,7 @@ Ask Lerim about any past decision or learning. Your agents can do this too.
 
 ```bash
 lerim ask "Why did we choose Postgres over MongoDB?"
-lerim memory search "authentication"
+lerim memory list
 ```
 
 </div>

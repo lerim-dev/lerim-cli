@@ -118,11 +118,11 @@ lerim ask "What testing framework do we use?" --json
 
 <div class="grid cards" markdown>
 
--   :material-magnify: **lerim memory search**
+-   :material-format-list-bulleted: **lerim memory list**
 
     ---
 
-    Search memories by keyword
+    Browse stored memory files
 
     [:octicons-arrow-right-24: lerim memory](memory.md)
 

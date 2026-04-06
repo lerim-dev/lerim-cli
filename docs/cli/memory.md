@@ -1,40 +1,19 @@
 # lerim memory
 
-Manage the memory store directly — search, list, add, and reset memories.
+Manage the memory store directly — list and reset memories.
 
 ## Overview
 
-The `memory` command group provides direct access to the memory store. Memories are stored as markdown files in `.lerim/memory/` within each registered project. Use these subcommands to search, browse, manually create, or wipe memories.
+The `memory` command group provides direct access to the memory store. Memories are stored as markdown files in `.lerim/memory/` within each registered project. Use these subcommands to browse or wipe memories.
 
-!!! note
-    Subcommands that read memory (`search`, `list`) require a running server. Start it with `lerim up` (Docker) or `lerim serve` (direct).
-
----
-
-## memory search
-
-Full-text keyword search across memory titles, bodies, and tags.
-
-```bash
-lerim memory search <query> [--project NAME] [--limit N]
-```
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `query` | *(required)* | Search string to match against memories |
-| `--project` | *(auto)* | Target project name |
-| `--limit` | `20` | Maximum results to return |
-
-```bash
-lerim memory search 'database migration'
-lerim memory search pytest --limit 5
-```
+!!! tip "Direct file access"
+    You can also read `.lerim/memory/index.md` directly — it lists all memory files by category with one-line descriptions and links. No server or CLI needed.
 
 ---
 
 ## memory list
 
-List stored memories (decisions and learnings), ordered by recency.
+List stored memories, ordered by recency. No server required.
 
 ```bash
 lerim memory list [--project NAME] [--limit N] [--json]
@@ -49,41 +28,6 @@ lerim memory list [--project NAME] [--limit N] [--json]
 ```bash
 lerim memory list
 lerim memory list --limit 10 --json
-```
-
----
-
-## memory add
-
-Manually create a memory record. Useful for codifying decisions or learnings that didn't come from an agent session.
-
-```bash
-lerim memory add --title <TITLE> --body <BODY> [options]
-```
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--title` | *(required)* | Short descriptive title |
-| `--body` | *(required)* | Full body content |
-| `--primitive` | `learning` | Type: `decision` or `learning` |
-| `--kind` | `insight` | Kind: `insight`, `procedure`, `friction`, `pitfall`, `preference` |
-| `--confidence` | `0.7` | Confidence score (0.0 to 1.0) |
-| `--tags` | *(none)* | Comma-separated tags (e.g. `python,testing,ci`) |
-
-```bash
-# Add a simple learning
-lerim memory add --title "Use uv for deps" --body "uv is faster than pip"
-
-# Add a decision
-lerim memory add --title "API auth" --body "Use bearer tokens" --primitive decision
-
-# Full options
-lerim memory add \
-    --title "Slow integration tests" \
-    --body "Integration suite takes 5 min" \
-    --kind friction \
-    --confidence 0.9 \
-    --tags ci,testing
 ```
 
 ---

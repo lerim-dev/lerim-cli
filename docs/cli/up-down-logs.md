@@ -44,11 +44,14 @@ lerim down
 
 ### `lerim logs`
 
-View container logs:
+View local log entries from `~/.lerim/logs/lerim.jsonl` (last 50 by default).
 
 ```bash
-lerim logs                  # show recent logs
-lerim logs --follow         # tail logs continuously
+lerim logs                      # show recent logs
+lerim logs --follow             # tail logs continuously
+lerim logs --level error        # filter by level
+lerim logs --since 2h           # entries from the last 2 hours
+lerim logs --json               # raw JSONL output
 ```
 
 ## Parameters
@@ -64,11 +67,36 @@ lerim logs --follow         # tail logs continuously
 
 <div class="param-field">
   <div class="param-header">
-    <span class="param-name">--follow</span>
+    <span class="param-name">--follow, -f</span>
     <span class="param-type">boolean</span>
     <span class="param-badge default">default: off</span>
   </div>
-  <p class="param-desc">Continuously tail logs (for <code>lerim logs</code>).</p>
+  <p class="param-desc">Live tail: watch for new log lines and print as they appear.</p>
+</div>
+
+<div class="param-field">
+  <div class="param-header">
+    <span class="param-name">--level</span>
+    <span class="param-type">string</span>
+  </div>
+  <p class="param-desc">Filter by log level (case-insensitive). E.g. <code>error</code>, <code>warning</code>, <code>info</code>.</p>
+</div>
+
+<div class="param-field">
+  <div class="param-header">
+    <span class="param-name">--since</span>
+    <span class="param-type">string</span>
+  </div>
+  <p class="param-desc">Show entries from the last N hours/minutes/days. Format: <code>1h</code>, <code>30m</code>, <code>2d</code>.</p>
+</div>
+
+<div class="param-field">
+  <div class="param-header">
+    <span class="param-name">--json</span>
+    <span class="param-type">boolean</span>
+    <span class="param-badge default">default: off</span>
+  </div>
+  <p class="param-desc">Output raw JSONL lines instead of formatted text.</p>
 </div>
 
 ## Examples

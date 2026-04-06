@@ -3,6 +3,45 @@
 Lerim provides several ways to search and retrieve memories. All queries are
 read-only and project-scoped.
 
+## Reading memory files directly
+
+The fastest way to access memories is to read them as files — no server needed.
+
+### Start with the index
+
+Read `.lerim/memory/index.md` at the start of each session. It is a categorized
+table of contents listing every memory file with a one-line description and a
+link to the file. Example:
+
+```markdown
+# Memory Index
+
+## Feedback
+- [maintain-algo-misses-stale-decisions](feedback_maintain_algo_misses_stale_decisions.md) -- ...
+
+## Project
+- [auth-middleware-rewrite](project_auth_middleware_rewrite.md) -- ...
+```
+
+From there, read individual `.md` files for full context on any topic relevant
+to your current task. Each memory file has YAML frontmatter (`name`,
+`description`, `type`) and a markdown body.
+
+### Recommended CLAUDE.md / AGENTS.md snippet
+
+Add the following to your project's `CLAUDE.md` or `AGENTS.md` so your coding
+agent knows about Lerim from the start of every session:
+
+```markdown
+## Lerim Memory
+This project uses Lerim for persistent memory across coding sessions.
+At the start of each session, read `.lerim/memory/index.md` — it lists all
+stored memories by category with one-line descriptions and links. Read
+individual memory files for full context on past decisions and learnings.
+For LLM-synthesized answers, use `lerim ask "your question"` (requires server).
+For detailed usage, invoke the `/lerim` skill.
+```
+
 ## `lerim ask` -- LLM-powered Q&A
 
 The primary query interface. Sends your question to the lead agent with memory
@@ -44,30 +83,6 @@ lerim ask "How is the database configured?" --json
 ```
 
 Returns JSON with the answer, sources, and metadata.
-
-## `lerim memory search` -- keyword search
-
-Full-text keyword search across memory titles, bodies, and tags. Runs locally
-on the host -- no server required.
-
-```bash
-lerim memory search "database migration"
-```
-
-```bash
-lerim memory search pytest --limit 5
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `query` | required | Search string to match (case-insensitive) |
-| `--project` | -- | Filter to project (not yet implemented) |
-| `--limit` | `20` | Max results |
-
-!!! tip "When to use search vs ask"
-    Use `memory search` for quick keyword lookups when you know what you're
-    looking for. Use `ask` when you need the LLM to reason about your question
-    and synthesize an answer from multiple memories.
 
 ## `lerim memory list` -- browse all memories
 
@@ -111,19 +126,10 @@ lerim ask "What problems did we have with the original caching approach?"
 
 ### Check before implementing
 
-At the start of a coding session, ask your agent:
-
-> Check lerim for any relevant memories about [topic you're working on].
-
-Your agent will run `lerim ask` or `lerim memory search` to pull in past
-decisions and learnings before it starts working.
-
-### Combine search and ask
+At the start of a coding session, read `.lerim/memory/index.md` and drill into
+any memories relevant to the task at hand. If you need a synthesized answer
+across multiple memories, use `lerim ask`:
 
 ```bash
-# Quick lookup to see what exists
-lerim memory search "database"
-
-# Then ask a specific question
 lerim ask "What was the rationale for the database migration strategy?"
 ```

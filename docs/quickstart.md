@@ -169,12 +169,6 @@ Now you can query your agent memories. Try these commands:
     lerim ask "Why did we choose this architecture?"
     ```
 
-=== "Search memories"
-
-    ```bash
-    lerim memory search "database migration"
-    ```
-
 === "List all memories"
 
     ```bash
@@ -217,11 +211,16 @@ lerim skill install
 This copies `SKILL.md` and `cli-reference.md` into `~/.agents/skills/lerim/` and
 `~/.claude/skills/lerim/` (see `lerim skill install --help`).
 
-At the start of a coding session, tell your agent:
+At the start of a coding session, your agent should read `.lerim/memory/index.md` to
+see all stored memories by category. For synthesized answers across multiple memories,
+use `lerim ask`:
 
-> Check lerim for any relevant memories about [topic you're working on].
+```bash
+lerim ask "What auth pattern do we use?"
+```
 
-Your agent will run `lerim ask` or `lerim memory search` to pull in past decisions and learnings before it starts working.
+See [Querying Memories](guides/querying-memories.md) for a recommended CLAUDE.md/AGENTS.md
+snippet to add to your project so your agent knows about Lerim from the start.
 
 ## Force a sync
 
