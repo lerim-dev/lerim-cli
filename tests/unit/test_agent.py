@@ -448,7 +448,7 @@ def test_run_with_fallback_succeeds_on_primary(tmp_path, monkeypatch):
 			call_count += 1
 			return dspy.Prediction(completion_summary="success")
 
-	result = runtime._run_with_fallback(
+	result, used_lm, hist_start = runtime._run_with_fallback(
 		flow="test",
 		module=FakeModule(),
 		input_args={},
@@ -481,7 +481,7 @@ def test_run_with_fallback_switches_on_quota_error(tmp_path, monkeypatch):
 			models_tried.append("fallback")
 			return dspy.Prediction(completion_summary="fallback success")
 
-	result = runtime._run_with_fallback(
+	result, used_lm, hist_start = runtime._run_with_fallback(
 		flow="test",
 		module=FakeModule(),
 		input_args={},
@@ -530,7 +530,7 @@ def test_run_with_fallback_retries_same_model_on_non_quota_error(
 				raise RuntimeError("Server error 500")
 			return dspy.Prediction(completion_summary="recovered")
 
-	result = runtime._run_with_fallback(
+	result, used_lm, hist_start = runtime._run_with_fallback(
 		flow="test",
 		module=FakeModule(),
 		input_args={},

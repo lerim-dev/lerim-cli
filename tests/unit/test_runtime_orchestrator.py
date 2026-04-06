@@ -366,7 +366,7 @@ class TestRunWithFallback:
 		pred = _make_prediction()
 
 		mock_module = MagicMock(return_value=pred)
-		result = rt._run_with_fallback(
+		result, used_lm, hist_start = rt._run_with_fallback(
 			flow="test", module=mock_module, input_args={"x": 1}
 		)
 		assert result is pred
@@ -389,7 +389,7 @@ class TestRunWithFallback:
 			return pred
 
 		mock_module = MagicMock(side_effect=side_effect)
-		result = rt._run_with_fallback(
+		result, used_lm, hist_start = rt._run_with_fallback(
 			flow="test", module=mock_module, input_args={}, max_attempts=3
 		)
 		assert result is pred
@@ -423,7 +423,7 @@ class TestRunWithFallback:
 			return pred
 
 		mock_module = MagicMock(side_effect=side_effect)
-		result = rt._run_with_fallback(
+		result, used_lm, hist_start = rt._run_with_fallback(
 			flow="test", module=mock_module, input_args={}, max_attempts=2
 		)
 		assert result is pred

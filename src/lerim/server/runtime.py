@@ -135,13 +135,24 @@ def add_cost(amount: float) -> None:
 
 
 def capture_dspy_cost(lm: object, history_start: int) -> None:
-	"""Add cost from DSPy LM history entries added since *history_start*."""
+	"""Add cost from DSPy LM history entries added since *history_start*.
+
+	DSPy stores cost at entry["cost"] (extracted from LiteLLM's
+	response._hidden_params["response_cost"]).  As a fallback, also check
+	response.usage for a cost attribute.
+	"""
 	history = getattr(lm, "history", None)
 	if not isinstance(history, list):
 		return
 	for entry in history[history_start:]:
 		if not isinstance(entry, dict):
 			continue
+		# Primary path: DSPy puts cost at the top level of the history entry.
+		cost = entry.get("cost")
+		if cost is not None:
+			add_cost(float(cost))
+			continue
+		# Fallback path: check response.usage.cost (older DSPy versions).
 		response = entry.get("response")
 		if response is None:
 			continue
@@ -247,7 +258,7 @@ class LerimRuntime:
 		module: dspy.Module,
 		input_args: dict[str, Any],
 		max_attempts: int = 3,
-	) -> dspy.Prediction:
+	) -> tuple[dspy.Prediction, dspy.LM, int]:
 		"""Run a DSPy module with retry + fallback model support.
 
 		Tries the primary LM first with up to max_attempts retries.
@@ -261,7 +272,7 @@ class LerimRuntime:
 			max_attempts: Retry attempts per model.
 
 		Returns:
-			The dspy.Prediction result.
+			Tuple of (prediction, LM that produced it, history_start index).
 
 		Raises:
 			RuntimeError: If all models and attempts are exhausted.
@@ -275,6 +286,8 @@ class LerimRuntime:
 				if model_idx == 0
 				else f"fallback-{model_idx}"
 			)
+			# Snapshot history length before first attempt with this LM.
+			hist_start = len(getattr(lm, "history", []) or [])
 			for attempt in range(1, max_attempts + 1):
 				try:
 					logger.info(
@@ -282,7 +295,7 @@ class LerimRuntime:
 						f"(model={model_label})"
 					)
 					with dspy.context(lm=lm):
-						return module(**input_args)
+						return module(**input_args), lm, hist_start
 				except Exception as exc:
 					last_error = exc
 					error_msg = str(exc)
@@ -399,16 +412,15 @@ class LerimRuntime:
 			run_folder=run_folder,
 			max_iters=self.config.agent_role.max_iters_sync,
 		)
-		history_start = len(getattr(self._lead_lm, "history", []) or [])
 		start_cost_tracking()
 		try:
-			prediction = self._run_with_fallback(
+			prediction, used_lm, hist_start = self._run_with_fallback(
 				flow="sync",
 				module=agent,
 				input_args={},
 			)
 
-			capture_dspy_cost(self._lead_lm, history_start)
+			capture_dspy_cost(used_lm, hist_start)
 			cost_usd = stop_cost_tracking()
 		except Exception:
 			stop_cost_tracking()  # clean up accumulator
@@ -503,16 +515,15 @@ class LerimRuntime:
 			memory_root=resolved_memory_root,
 			max_iters=self.config.agent_role.max_iters_maintain,
 		)
-		history_start = len(getattr(self._lead_lm, "history", []) or [])
 		start_cost_tracking()
 		try:
-			prediction = self._run_with_fallback(
+			prediction, used_lm, hist_start = self._run_with_fallback(
 				flow="maintain",
 				module=agent,
 				input_args={},
 			)
 
-			capture_dspy_cost(self._lead_lm, history_start)
+			capture_dspy_cost(used_lm, hist_start)
 			cost_usd = stop_cost_tracking()
 		except Exception:
 			stop_cost_tracking()  # clean up accumulator
@@ -598,10 +609,9 @@ class LerimRuntime:
 			memory_root=resolved_memory_root,
 			max_iters=self.config.agent_role.max_iters_ask,
 		)
-		history_start = len(getattr(self._lead_lm, "history", []) or [])
 		start_cost_tracking()
 		try:
-			prediction = self._run_with_fallback(
+			prediction, used_lm, hist_start = self._run_with_fallback(
 				flow="ask",
 				module=agent,
 				input_args={
@@ -610,7 +620,7 @@ class LerimRuntime:
 				},
 			)
 
-			capture_dspy_cost(self._lead_lm, history_start)
+			capture_dspy_cost(used_lm, hist_start)
 			cost_usd = stop_cost_tracking()
 		except Exception:
 			stop_cost_tracking()  # clean up accumulator

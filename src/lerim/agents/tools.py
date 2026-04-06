@@ -264,7 +264,16 @@ class MemoryTools:
 		missing_from_index = memory_files - index_entries
 		stale_in_index = index_entries - memory_files
 
-		if not missing_from_index and not stale_in_index:
+		# Bug fix: verify that every linked file actually exists on disk.
+		# Resolve each index entry relative to memory_root (handles both
+		# flat files like "feedback_tabs.md" and paths like "summaries/file.md").
+		broken_links: set[str] = set()
+		for entry in index_entries:
+			resolved = (self.memory_root / entry).resolve()
+			if not resolved.is_file():
+				broken_links.add(entry)
+
+		if not missing_from_index and not stale_in_index and not broken_links:
 			return f"OK: index.md is consistent ({len(memory_files)} files, {len(index_entries)} entries)"
 
 		parts = ["NOT OK:"]
@@ -281,6 +290,9 @@ class MemoryTools:
 		if stale_in_index:
 			for fname in sorted(stale_in_index):
 				parts.append(f"  Stale in index (file not found): {fname}")
+		if broken_links:
+			for fname in sorted(broken_links):
+				parts.append(f"  Broken link (file missing on disk): {fname}")
 		return "\n".join(parts)
 
 	# ── Write ───────────────────────────────────────────────────────────
@@ -351,8 +363,11 @@ class MemoryTools:
 
 		target.parent.mkdir(parents=True, exist_ok=True)
 		target.write_text(content, encoding="utf-8")
+		# Bug fix: for summaries, return the relative path including the
+		# summaries/ prefix so index.md links resolve correctly.
+		index_filename = f"summaries/{filename}" if type == "summary" else filename
 		return json.dumps({
-			"filename": filename,
+			"filename": index_filename,
 			"bytes": len(content.encode("utf-8")),
 			"type": type,
 		})

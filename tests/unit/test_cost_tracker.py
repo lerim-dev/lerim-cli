@@ -132,6 +132,19 @@ class TestCaptureDspyCost:
 		capture_dspy_cost(FakeLM(), history_start=0)
 		assert stop_cost_tracking() == pytest.approx(0.007)
 
+	def test_captures_top_level_cost(self):
+		"""Reads cost from top-level entry['cost'] (DSPy >= 2.6 format)."""
+
+		class FakeLM:
+			history = [
+				{"cost": 0.012, "response": None},
+				{"cost": 0.008},
+			]
+
+		start_cost_tracking()
+		capture_dspy_cost(FakeLM(), history_start=0)
+		assert stop_cost_tracking() == pytest.approx(0.02)
+
 	def test_skips_entries_without_response(self):
 		"""Entries missing 'response' key are skipped."""
 

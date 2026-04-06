@@ -27,7 +27,20 @@ class ExtractSignature(dspy.Signature):
 	Memory files are named {type}_{topic}.md (e.g. feedback_use_tabs.md,
 	project_dspy_migration.md). The type is encoded in the filename.
 	Each file has YAML frontmatter (name, description, type) and a markdown body.
-	Body structure for feedback/project: rule/fact, then **Why:**, then **How to apply:**
+
+	Body format for feedback/project memories — use inline bold, NOT ## headings:
+	  State the rule or decision first (one line).
+	  **Why:** reason it matters.
+	  **How to apply:** concrete action for future sessions.
+	Example:
+	  Use tabs for indentation in all code files.
+	  **Why:** team convention; spaces were rejected in code review.
+	  **How to apply:** set indent_style=tab; flag spaces in PRs.
+	DO NOT use ## headings inside the body — headings are only for summaries.
+
+	Project memories must lead with the fact or decision, not narrate what happened.
+	Bad: "## What Happened\nWe decided to use Redis..." — this is summary style.
+	Good: "Redis chosen as cache layer (replaced Memcached).\n**Why:** ..."
 	</context>
 
 	<rules priority="critical">
@@ -48,7 +61,7 @@ class ExtractSignature(dspy.Signature):
 	<extract>feedback: corrections ("don't do X") AND confirmations ("yes, exactly")</extract>
 	<extract>project: decisions, context, constraints NOT in code or git</extract>
 	<extract>reference: pointers to external systems (dashboards, Linear projects, etc.)</extract>
-	<do_not_extract>Code patterns, architecture, file paths -- derivable from code</do_not_extract>
+	<do_not_extract>Code patterns, architecture, file paths, function names, module names -- these change constantly and become stale; derivable from code</do_not_extract>
 	<do_not_extract>Git history, recent changes -- git log is authoritative</do_not_extract>
 	<do_not_extract>Debugging solutions -- the fix is in the code</do_not_extract>
 	<do_not_extract>Anything in CLAUDE.md or README</do_not_extract>

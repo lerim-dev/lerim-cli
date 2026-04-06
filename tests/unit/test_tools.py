@@ -293,7 +293,9 @@ class TestWrite:
 			body="## User Intent\n\nMigrate runtime.\n\n## What Happened\n\nDone.",
 		))
 		assert result["type"] == "summary"
-		assert (mem_root / "summaries" / result["filename"]).exists()
+		# filename now includes summaries/ prefix for correct index.md links
+		assert result["filename"].startswith("summaries/")
+		assert (mem_root / result["filename"]).exists()
 
 	def test_no_timestamps_in_frontmatter(self, tools, mem_root):
 		"""Frontmatter should only have name, description, type — no timestamps."""
