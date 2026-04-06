@@ -22,12 +22,13 @@ from tests.helpers import make_config
 
 def test_extract_signature_contains_steps():
 	"""ExtractSignature docstring should contain major phases."""
-	assert "ORIENT" in ExtractSignature.__doc__
-	assert "ANALYZE" in ExtractSignature.__doc__
-	assert "DEDUP" in ExtractSignature.__doc__
-	assert "WRITE" in ExtractSignature.__doc__
-	assert "INDEX" in ExtractSignature.__doc__
-	assert "SUMMARIZE" in ExtractSignature.__doc__
+	doc = ExtractSignature.__doc__
+	assert 'name="orient"' in doc
+	assert 'name="analyze"' in doc
+	assert 'name="dedup"' in doc
+	assert 'name="write"' in doc
+	assert 'name="index"' in doc
+	assert 'name="summarize"' in doc
 
 
 def test_sync_signature_contains_tool_names():
@@ -43,10 +44,10 @@ def test_sync_signature_contains_tool_names():
 def test_maintain_signature_contains_steps():
 	"""MaintainSignature docstring should contain all major phases."""
 	doc = MaintainSignature.__doc__
-	assert "Phase 1" in doc
-	assert "Phase 2" in doc
-	assert "Phase 3" in doc
-	assert "Phase 4" in doc
+	assert 'name="orient"' in doc
+	assert 'name="gather_signal"' in doc
+	assert 'name="consolidate"' in doc
+	assert 'name="prune_and_index"' in doc
 
 
 def test_maintain_signature_contains_consolidation():

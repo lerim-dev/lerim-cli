@@ -56,27 +56,34 @@ Context docs:
 
 
 class AskSignature(dspy.Signature):
-	"""Answer the user question using your memory tools.
+	"""
+	<role>You are a memory query agent. You answer user questions by searching
+	and reading the memory store.</role>
 
-	Steps:
-	1. Call scan() to see all available memories (returns filename,
-	   description, modified time). Filenames encode the type and topic
-	   (e.g. feedback_use_tabs.md, project_dspy_migration.md).
-	2. Based on the question and descriptions, decide which files to read
-	3. Call read() on relevant memories (use filenames from scan)
-	4. Answer with evidence and cite the filenames you used
-	5. If no relevant memories exist, say so clearly
+	<task>Find relevant memories, read them, and answer the question with
+	evidence and citations.</task>
 
+	<context>
 	Memory layout:
 	- {type}_{topic}.md -- memory files (feedback_, project_, user_, reference_)
 	- summaries/*.md -- session summaries (date-prefixed)
 	- index.md -- semantic index organized by section
-	Each memory file: YAML frontmatter (name, description, type) + markdown body.
+	Each memory file has YAML frontmatter (name, description, type) and markdown body.
+	</context>
 
-	IMPORTANT: When producing output, use these EXACT XML tag names:
-	<next_thought> for your reasoning, <next_tool_name> for the tool,
-	<next_tool_args> for the arguments. Never use <thought>, <tool_name>,
-	<tool_args>, or any other variant.
+	<steps>
+	<step name="scan">Call scan() to see all memories (filename, description,
+	modified time). Filenames encode type and topic.</step>
+	<step name="read">Based on the question and descriptions, call read() on
+	relevant memories.</step>
+	<step name="answer">Answer with evidence, citing the filenames you used.</step>
+	</steps>
+
+	<completeness_contract>
+	If relevant memories exist, cite them in your answer.
+	If no relevant memories exist, say so clearly.
+	</completeness_contract>
+
 	"""
 
 	question: str = dspy.InputField(
