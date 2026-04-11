@@ -361,9 +361,12 @@ def _patch_pydantic_sync(monkeypatch, *, finalize: FinalizeResult):
 	`run_extraction_three_pass(...)`. For unit tests we swap both so nothing
 	touches a real provider.
 	"""
+	# Signature mirrors the real lerim.config.providers.build_pydantic_model
+	# which takes (role, *, config=None). Runtime.sync calls it as
+	# build_pydantic_model("agent", config=self.config).
 	monkeypatch.setattr(
 		"lerim.server.runtime.build_pydantic_model",
-		lambda provider_name, model_name: f"fake-model-{provider_name}",
+		lambda role, *, config=None: f"fake-model-{role}",
 	)
 
 	def fake_three_pass(
@@ -371,10 +374,19 @@ def _patch_pydantic_sync(monkeypatch, *, finalize: FinalizeResult):
 		memory_root,
 		trace_path,
 		model,
+		reflect_limit,
+		extract_limit,
+		finalize_limit,
 		run_folder=None,
 		return_messages=False,
 	):
-		"""Stub runner that returns a deterministic FinalizeResult."""
+		"""Stub runner that returns a deterministic FinalizeResult.
+
+		Signature mirrors the real run_extraction_three_pass, which requires
+		per-pass usage-limit kwargs sourced from Config.agent_role.usage_limit_*.
+		The mock accepts them (to prove they flow through runtime) but
+		doesn't enforce anything on the values.
+		"""
 		if return_messages:
 			return finalize, []
 		return finalize

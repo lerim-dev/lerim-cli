@@ -19,12 +19,20 @@ model = "MiniMax-M2.5"                 # OpenCode Go models: minimax-m2.7, minim
 api_base = ""
 # Model names are auto-normalized per provider (e.g. minimax-m2.5 → MiniMax-M2.5 for minimax provider).
 fallback_models = ["zai:glm-4.7"]  # auto-switch on quota/rate-limit errors
-# PydanticAI three-pass sync usage limits (per-pass request_limit)
-usage_limit_reflect = 15               # Pass 1 (reflect) max tool calls
-usage_limit_extract = 15               # Pass 2 (extract) max tool calls
-usage_limit_finalize = 8               # Pass 3 (finalize) max tool calls
+# PydanticAI three-pass sync usage limits (per-pass request_limit).
+# Sizing rationale: read("trace") is capped at 50KB per chunk (see
+# lerim.agents.tools.TRACE_MAX_CHUNK_BYTES). A 1MB trace needs ~20 chunks
+# end-to-end plus ~5 overhead calls (read index, grep remember, final
+# output) = 25 for reflect/extract. Finalize has HARD RULES that forbid
+# trace reads so it only needs verify_index + optional edit + write
+# summary = 15 with reasoning overhead. Single source of truth — these
+# values flow to `lerim.agents.extract.run_extraction_three_pass` via
+# `Config.agent_role` in runtime.py and the eval harness.
+usage_limit_reflect = 30               # Pass 1 (reflect) max tool calls
+usage_limit_extract = 30               # Pass 2 (extract) max tool calls
+usage_limit_finalize = 30               # Pass 3 (finalize) max tool calls
 max_iters_maintain = 50                # max ReAct iterations for agent role in maintain flow
-max_iters_ask = 15                     # max ReAct iterations for agent role in ask flow
+max_iters_ask = 20                     # max ReAct iterations for agent role in ask flow
 openrouter_provider_order = []
 thinking = true
 temperature = 0.1

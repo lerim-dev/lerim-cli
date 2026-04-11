@@ -69,9 +69,18 @@ def test_type_conversion_non_empty_string():
 
 
 def test_role_config_construction():
-    """_build_role produces RoleConfig from explicit config values."""
+    """_build_role produces RoleConfig from explicit config values.
+
+    Usage-limit keys are REQUIRED by _require_int — fixtures that build
+    a role directly must supply them. Production sources them from
+    default.toml which always has them.
+    """
     role = _build_role(
-        {},
+        {
+            "usage_limit_reflect": 30,
+            "usage_limit_extract": 30,
+            "usage_limit_finalize": 30,
+        },
         default_provider="openrouter",
         default_model="qwen/qwen3-coder-30b-a3b-instruct",
     )
@@ -86,6 +95,9 @@ def test_dspy_role_config_construction():
         {
             "max_window_tokens": 300000,
             "window_overlap_tokens": 5000,
+            "usage_limit_reflect": 30,
+            "usage_limit_extract": 30,
+            "usage_limit_finalize": 30,
         },
         default_provider="ollama",
         default_model="qwen3:8b",

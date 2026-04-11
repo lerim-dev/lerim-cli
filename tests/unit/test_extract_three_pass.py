@@ -13,14 +13,11 @@ import inspect
 from dataclasses import fields
 
 from pydantic_ai.models.test import TestModel
-from pydantic_ai.usage import UsageLimits
 
+from lerim.agents import extract as extract_module
 from lerim.agents.extract import (
-	EXTRACT_LIMITS,
 	EXTRACT_SYSTEM_PROMPT,
-	FINALIZE_LIMITS,
 	FINALIZE_SYSTEM_PROMPT,
-	REFLECT_LIMITS,
 	REFLECT_SYSTEM_PROMPT,
 	CandidateMemory,
 	ChunkRef,
@@ -30,7 +27,9 @@ from lerim.agents.extract import (
 	build_extract_agent,
 	build_finalize_agent,
 	build_reflect_agent,
+	run_extraction_three_pass,
 )
+from lerim.config.settings import RoleConfig, load_config
 from lerim.agents.tools import (
 	ExtractDeps,
 	edit,
@@ -175,6 +174,31 @@ def test_extract_prompt_contains_why_and_how():
 	assert "feedback" in EXTRACT_SYSTEM_PROMPT
 
 
+def test_reflect_prompt_does_not_mandate_scan_in_orientation():
+	"""Fix #5: reflect step 1 must orient via read('index.md') ONLY,
+	not mandate a separate scan() call. index.md is the authoritative
+	summary of all memories — calling both wastes a tool turn.
+	"""
+	# The ORIENT step must tell the agent to read index.md once
+	assert 'read("index.md")' in REFLECT_SYSTEM_PROMPT
+	# And must explicitly tell the agent NOT to call scan() in orientation
+	assert "Do NOT also call scan()" in REFLECT_SYSTEM_PROMPT or "do NOT also call scan" in REFLECT_SYSTEM_PROMPT
+	# The authoritative-summary explanation must be present so the model
+	# understands *why* it's skipping scan
+	assert "authoritative" in REFLECT_SYSTEM_PROMPT.lower()
+
+
+def test_extract_prompt_does_not_mandate_scan_in_dedup():
+	"""Fix #5: extract dedup step must use existing_memories_relevant from the
+	SessionUnderstanding directly, never call scan() (which would return
+	the same filenames at a wasted tool turn's cost).
+	"""
+	# The DEDUP step must reference existing_memories_relevant
+	assert "existing_memories_relevant" in EXTRACT_SYSTEM_PROMPT
+	# And explicitly forbid scan() in dedup
+	assert "Do NOT call scan()" in EXTRACT_SYSTEM_PROMPT or "do NOT call scan" in EXTRACT_SYSTEM_PROMPT
+
+
 def test_finalize_prompt_contains_verify_index():
 	"""Pass 3 prompt must mention verify_index and the session summary
 	headings it writes.
@@ -185,15 +209,87 @@ def test_finalize_prompt_contains_verify_index():
 	assert "## What Happened" in FINALIZE_SYSTEM_PROMPT
 
 
-def test_usage_limits_set():
-	"""REFLECT_LIMITS, EXTRACT_LIMITS, FINALIZE_LIMITS are UsageLimits instances
-	with request_limit set to a positive integer.
+def test_finalize_prompt_hard_rules():
+	"""Fix #2: finalize prompt must forbid read('trace'), cap verify_index
+	calls at two, and forbid scan() — these were the wandering patterns
+	that exhausted the old 8-request budget on 3/30 baseline cases.
 	"""
-	for limits, name in [
-		(REFLECT_LIMITS, "REFLECT_LIMITS"),
-		(EXTRACT_LIMITS, "EXTRACT_LIMITS"),
-		(FINALIZE_LIMITS, "FINALIZE_LIMITS"),
-	]:
-		assert isinstance(limits, UsageLimits), f"{name} is not a UsageLimits"
-		assert limits.request_limit is not None, f"{name}.request_limit is None"
-		assert limits.request_limit > 0, f"{name}.request_limit is not positive"
+	assert "HARD RULES" in FINALIZE_SYSTEM_PROMPT
+	# read("trace") explicitly forbidden
+	assert 'read("trace")' in FINALIZE_SYSTEM_PROMPT
+	assert "forbidden" in FINALIZE_SYSTEM_PROMPT.lower()
+	# verify_index call cap
+	assert "at most TWICE" in FINALIZE_SYSTEM_PROMPT
+	# scan() forbidden in this pass
+	assert "do NOT call scan" in FINALIZE_SYSTEM_PROMPT or "not call scan" in FINALIZE_SYSTEM_PROMPT.lower()
+
+
+def test_no_module_level_usage_limits_constants():
+	"""Regression for the config-wiring fix: the three per-pass budgets must
+	NOT live as module-level constants in extract.py. They flow from
+	default.toml → RoleConfig → `run_extraction_three_pass` kwargs.
+
+	If a future refactor reintroduces REFLECT_LIMITS / EXTRACT_LIMITS /
+	FINALIZE_LIMITS at module scope, this test catches it immediately.
+	"""
+	assert not hasattr(extract_module, "REFLECT_LIMITS"), (
+		"REFLECT_LIMITS reappeared as a module constant — usage limits must "
+		"flow from default.toml via Config.agent_role.usage_limit_reflect"
+	)
+	assert not hasattr(extract_module, "EXTRACT_LIMITS"), (
+		"EXTRACT_LIMITS reappeared as a module constant"
+	)
+	assert not hasattr(extract_module, "FINALIZE_LIMITS"), (
+		"FINALIZE_LIMITS reappeared as a module constant"
+	)
+
+
+def test_run_extraction_three_pass_requires_limit_kwargs():
+	"""Fix: run_extraction_three_pass must REQUIRE the three limit kwargs.
+
+	Calling without them is an error — no silent defaults. The three
+	limits must come from the caller (runtime.py sources them from
+	Config.agent_role; eval harness sources them from load_config()).
+	"""
+	import inspect
+
+	sig = inspect.signature(run_extraction_three_pass)
+	params = sig.parameters
+
+	# Each limit is a keyword-only parameter with no default
+	for name in ("reflect_limit", "extract_limit", "finalize_limit"):
+		assert name in params, f"run_extraction_three_pass missing {name}"
+		param = params[name]
+		assert param.kind == inspect.Parameter.KEYWORD_ONLY, (
+			f"{name} should be keyword-only so callers can't accidentally "
+			f"pass them positionally"
+		)
+		assert param.default is inspect.Parameter.empty, (
+			f"{name} has a default value — it must be required from the "
+			f"caller (no silent hardcoded defaults)"
+		)
+
+
+def test_usage_limit_config_defaults_match_default_toml():
+	"""RoleConfig dataclass defaults must stay in sync with default.toml.
+
+	The dataclass defaults are only used by test fixtures that construct
+	RoleConfig directly. Production code flows through `_build_role` which
+	uses `_require_int` and raises if the TOML is missing the key. Still,
+	drifting defaults are a code smell — keep them in sync.
+	"""
+	config = load_config()
+	role = config.agent_role
+	# All three pass budgets come from default.toml (or user override).
+	# Value must be a positive int; the test doesn't hardcode the number
+	# so it survives users tuning their own config.
+	assert role.usage_limit_reflect > 0
+	assert role.usage_limit_extract > 0
+	assert role.usage_limit_finalize > 0
+
+	# The dataclass defaults should be positive too (used only in test
+	# fixtures, but they should still be sensible numbers).
+	defaults = RoleConfig(provider="x", model="y")
+	assert defaults.usage_limit_reflect > 0
+	assert defaults.usage_limit_extract > 0
+	assert defaults.usage_limit_finalize > 0

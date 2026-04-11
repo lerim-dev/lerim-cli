@@ -126,6 +126,115 @@ class TestRead:
 		# Trace reads always include the pagination header now.
 		assert f"[100 lines, showing 1-{TRACE_MAX_LINES_PER_READ}]" in result
 
+	# -----------------------------------------------------------------
+	# Byte cap regression tests (Bug #3: context window exceeded)
+	# -----------------------------------------------------------------
+	#
+	# Regression for "context window exceeds limit" failures on 2/30 cases
+	# in the 2026-04-11 baseline. Raw Claude trace events can be 50KB+ per
+	# line (large tool results), so a 100-line chunk was blowing MiniMax's
+	# input limit by turn 3. Fix: per-line cap at TRACE_MAX_LINE_BYTES,
+	# total chunk cap at TRACE_MAX_CHUNK_BYTES. Memory-file reads untouched.
+
+	def test_trace_huge_single_line_is_truncated(self, tmp_path):
+		"""A single trace line >TRACE_MAX_LINE_BYTES gets truncated in place."""
+		from lerim.agents.tools import MemoryTools, TRACE_MAX_LINE_BYTES
+
+		mem = tmp_path / "memory"
+		mem.mkdir()
+		trace = tmp_path / "trace.jsonl"
+		# Line 0: 20KB of 'x'. Line 1: normal short line.
+		big_line = "x" * 20_000
+		trace.write_text(big_line + "\n" + "short line 2\n", encoding="utf-8")
+
+		tools = MemoryTools(memory_root=mem, trace_path=trace)
+		result = tools.read("trace", offset=0, limit=2)
+
+		# The big line is truncated with a marker; the short line survives.
+		# Header says there are 2 total lines.
+		assert "[2 lines," in result
+		assert "truncated" in result
+		assert "chars from this line" in result
+		# The returned big line (after its line-number prefix) must be
+		# no larger than TRACE_MAX_LINE_BYTES + a small marker suffix.
+		# Split off the header line, take the first content line.
+		content = result.split("\n", 1)[1]
+		first_line = content.split("\n")[0]  # "1\t<truncated content>"
+		# Strip line-number prefix "1\t"
+		line_body = first_line.split("\t", 1)[1]
+		# Body length <= cap + marker (~60 chars)
+		assert len(line_body) <= TRACE_MAX_LINE_BYTES + 100, (
+			f"Line body is {len(line_body)} chars, should be <= {TRACE_MAX_LINE_BYTES + 100}"
+		)
+		# Short line 2 should still be visible
+		assert "short line 2" in result
+
+	def test_trace_chunk_byte_cap_cuts_chunk_short(self, tmp_path):
+		"""A 100-line chunk whose total bytes >TRACE_MAX_CHUNK_BYTES is cut short."""
+		from lerim.agents.tools import (
+			MemoryTools,
+			TRACE_MAX_CHUNK_BYTES,
+			TRACE_MAX_LINES_PER_READ,
+		)
+
+		mem = tmp_path / "memory"
+		mem.mkdir()
+		trace = tmp_path / "trace.jsonl"
+		# 100 lines × 2KB each = 200KB total, well over the 50KB chunk cap.
+		lines = ["y" * 2_000 for _ in range(100)]
+		trace.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+		tools = MemoryTools(memory_root=mem, trace_path=trace)
+		result = tools.read("trace", offset=0, limit=100)
+
+		# Count how many lines the cap let through (line-numbered content rows).
+		content_rows = [
+			row for row in result.split("\n")
+			if "\t" in row and row.split("\t", 1)[0].isdigit()
+		]
+		# Each line is ~2000 bytes. 50KB / 2000 ≈ 25 lines. Assert the cap
+		# triggered (i.e. we got fewer than 100 lines) AND the rough shape
+		# is right.
+		assert len(content_rows) < TRACE_MAX_LINES_PER_READ, (
+			f"Expected cap to cut chunk short; got {len(content_rows)} lines"
+		)
+		# Total bytes of content rows should be <= cap + small overhead
+		# (line numbers, tabs, newlines).
+		content_bytes = sum(len(row.encode("utf-8")) for row in content_rows)
+		assert content_bytes <= TRACE_MAX_CHUNK_BYTES + 1_000, (
+			f"Content bytes {content_bytes} exceeded chunk cap {TRACE_MAX_CHUNK_BYTES}"
+		)
+		# Header should announce that more lines remain (pagination works).
+		assert "more lines" in result
+		assert "offset=" in result
+
+	def test_trace_small_lines_unchanged_by_cap(self, tools):
+		"""Normal-sized trace lines (tools fixture) are unaffected by byte caps."""
+		result = tools.read("trace", offset=0, limit=50)
+		# The fixture has 100 lines of short JSON; 50-line chunk is ~3KB,
+		# well under both caps. All 50 lines should come back.
+		content_rows = [
+			row for row in result.split("\n")
+			if "\t" in row and row.split("\t", 1)[0].isdigit()
+		]
+		assert len(content_rows) == 50
+		assert "[100 lines, showing 1-50]" in result
+		assert "truncated" not in result
+
+	def test_memory_file_read_ignores_byte_cap(self, tools, mem_root):
+		"""Memory-file reads are NOT subject to trace byte caps (small files only)."""
+		# Intentionally write a memory file larger than TRACE_MAX_LINE_BYTES
+		# to prove the cap doesn't apply to non-trace reads.
+		huge_body = "z" * 10_000
+		(mem_root / "feedback_huge.md").write_text(
+			f"---\nname: Huge\ndescription: Big body\ntype: feedback\n---\n\n{huge_body}\n",
+			encoding="utf-8",
+		)
+		result = tools.read("feedback_huge.md")
+		# All 10k chars of z must come back intact — no truncation for memory files.
+		assert "z" * 10_000 in result
+		assert "truncated" not in result
+
 
 # ---------------------------------------------------------------------------
 # grep
@@ -426,6 +535,109 @@ class TestWrite:
 		# Read it back to confirm it works
 		content = tools.read(filename)
 		assert "Body." in content
+
+	# -----------------------------------------------------------------
+	# YAML frontmatter stress tests (Bug #1: colon-in-description crash)
+	# -----------------------------------------------------------------
+	#
+	# Regression for the "mapping values are not allowed in this context"
+	# class of failures observed on 9/30 cases in the 2026-04-11 baseline.
+	# The old implementation built frontmatter via f-string concat, so any
+	# YAML special character (':', '#', '"', '[', leading '-', '|', '>')
+	# inside `name` or `description` corrupted the file. The fix routes
+	# serialization through yaml.safe_dump which auto-quotes such values.
+
+	@pytest.mark.parametrize(
+		"value",
+		[
+			"Redis chosen: faster than Memcached",    # the literal bug trigger
+			'Quote in "description" field',           # embedded double quotes
+			"leading: colon and: more: colons",       # many colons
+			"ends with a colon:",
+			"#hashtag at start",                       # YAML comment marker
+			"- leading dash",                          # list item marker
+			"[flow sequence]",                         # flow style
+			"key: value | pipe >> gt",                 # block scalar markers
+			"Unicode: café — résumé ☃",              # unicode
+			"Multi\nline\nvalue",                      # embedded newlines
+			"value with 'single quotes' and \"double\"",
+			"'starts with quote",
+		],
+	)
+	def test_write_yaml_roundtrip_description(self, tools, mem_root, value):
+		"""Every YAML special char in description: write -> frontmatter.load round-trip."""
+		import frontmatter as fm_lib
+
+		result = json.loads(tools.write(
+			type="feedback",
+			name="roundtrip",
+			description=value,
+			body="Body content.",
+		))
+		path = mem_root / result["filename"]
+		assert path.exists()
+
+		# The real bug: frontmatter.load used to crash with ScannerError.
+		# After the yaml.safe_dump fix it must round-trip losslessly.
+		post = fm_lib.load(str(path))
+		assert post.get("description") == value, (
+			f"YAML round-trip failed for description={value!r}; "
+			f"got {post.get('description')!r}"
+		)
+		assert post.get("name") == "roundtrip"
+		assert post.get("type") == "feedback"
+		assert "Body content." in post.content
+
+	@pytest.mark.parametrize(
+		"value",
+		[
+			"Name: with colon",
+			"Name #with hash",
+			"Name with - dash",
+			'Name "with" quotes',
+			"Name | with | pipes",
+		],
+	)
+	def test_write_yaml_roundtrip_name(self, tools, mem_root, value):
+		"""Every YAML special char in name: write -> frontmatter.load round-trip."""
+		import frontmatter as fm_lib
+
+		result = json.loads(tools.write(
+			type="feedback",
+			name=value,
+			description="stress test",
+			body="Body.",
+		))
+		path = mem_root / result["filename"]
+		assert path.exists()
+
+		post = fm_lib.load(str(path))
+		assert post.get("name") == value
+		assert post.get("description") == "stress test"
+		assert post.get("type") == "feedback"
+
+	def test_write_yaml_roundtrip_extreme_combined(self, tools, mem_root):
+		"""Pathological combined case: every nasty char in both name and description."""
+		import frontmatter as fm_lib
+
+		nasty_name = 'Name: with #all [the] - "YAML" | specials'
+		nasty_description = (
+			"Redis chosen: because Memcached can't scale #reasons. "
+			'Quote: "faster by 10x". Leading dash: - stuff.'
+		)
+		result = json.loads(tools.write(
+			type="project",
+			name=nasty_name,
+			description=nasty_description,
+			body="## User Intent\n\nTest.\n\n## What Happened\n\nDone.",
+		))
+		path = mem_root / result["filename"]
+		assert path.exists()
+
+		post = fm_lib.load(str(path))
+		assert post.get("name") == nasty_name
+		assert post.get("description") == nasty_description
+		assert post.get("type") == "project"
 
 
 # ---------------------------------------------------------------------------

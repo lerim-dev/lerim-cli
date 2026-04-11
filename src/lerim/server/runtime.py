@@ -505,11 +505,19 @@ class LerimRuntime:
 			return build_pydantic_model("agent", config=self.config)
 
 		def _call(model: Any) -> FinalizeResult:
-			"""Invoke the PydanticAI three-pass pipeline with the given model."""
+			"""Invoke the PydanticAI three-pass pipeline with the given model.
+
+			Per-pass usage limits flow from `default.toml` → `self.config.agent_role`
+			→ here, so ops can tune them by editing `~/.lerim/config.toml` without
+			touching source code.
+			"""
 			return run_extraction_three_pass(
 				memory_root=resolved_memory_root,
 				trace_path=trace_file,
 				model=model,
+				reflect_limit=self.config.agent_role.usage_limit_reflect,
+				extract_limit=self.config.agent_role.usage_limit_extract,
+				finalize_limit=self.config.agent_role.usage_limit_finalize,
 				run_folder=run_folder,
 				return_messages=False,
 			)

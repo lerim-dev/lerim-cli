@@ -38,6 +38,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.usage import UsageLimits
 
@@ -117,8 +118,14 @@ extractable_candidates, and existing_memories_relevant.
 
 STEPS:
 
-1. ORIENT: Call scan("") to see existing memories, then
-   read("index.md") for current organization.
+1. ORIENT: Call read("index.md") ONCE. index.md is the authoritative summary
+   of ALL existing memories — it lists every memory file with its title,
+   description, and semantic category (User Preferences, Project State,
+   Feedback, References, etc.). Do NOT also call scan() here — scan("")
+   returns the same filenames and descriptions that index.md already lists,
+   so calling both wastes a tool turn for zero new information. Only fall
+   back to scan("") if read("index.md") returns an error or the file looks
+   malformed.
 
 2. FIND EXPLICIT REMEMBER REQUESTS: Call grep("trace", "remember") to
    locate any explicit user requests to remember or store something. Also try
@@ -229,10 +236,13 @@ STEPS:
    evidence_offset via read("trace", offset=X, limit=100). You may also
    read("trace", offset=N, limit=100) on important_chunks for context.
 
-2. DEDUP: Check existing_memories_relevant (from the understanding). For each
-   candidate, read the potentially-related existing memory via read
-   ("feedback_foo.md"). If the existing memory already covers the same topic,
-   skip or edit; do not write a duplicate.
+2. DEDUP: Use existing_memories_relevant from the SessionUnderstanding — Pass 1
+   already scanned the memory root and listed the filenames relevant to this
+   session. Do NOT call scan() here — it returns the same filenames you
+   already have in your input and wastes a tool turn. For each candidate,
+   read() the SPECIFIC potentially-related memory by filename
+   (e.g. read("feedback_tabs.md")) and compare. If the existing memory
+   already covers the same topic, skip or edit; do not write a duplicate.
 
 3. WRITE: For each novel memory, call:
      write(type="user"|"feedback"|"project"|"reference",
@@ -256,6 +266,17 @@ You are the Lerim memory finalization agent. This is Pass 3 of a three-pass
 pipeline. You receive the SessionUnderstanding from Pass 1 and the list of
 memory filenames written by Pass 2 (both as JSON in your user prompt). Your
 job is to fix the index and write the session summary.
+
+HARD RULES — violations waste the request budget and fail the run:
+- You do NOT call read("trace") in this pass. Everything you need is already
+  in your user prompt (the SessionUnderstanding from Pass 1 plus the list of
+  filenames from Pass 2). Reading the trace here is forbidden.
+- You call verify_index() at most TWICE: once to check, once to confirm
+  after any edit. Not a third time.
+- You read() a memory file ONLY when verify_index reports it is broken and
+  you must edit() it. Otherwise do not open memory files in this pass.
+- You do NOT call scan() in this pass. The filenames from Pass 2 plus
+  verify_index() give you all the state you need.
 
 STEPS:
 
@@ -295,11 +316,12 @@ only job is: verify_index + edit index + write session summary + return.
 
 
 # ── UsageLimits per pass ─────────────────────────────────────────────────
-
-
-REFLECT_LIMITS = UsageLimits(request_limit=15)
-EXTRACT_LIMITS = UsageLimits(request_limit=15)
-FINALIZE_LIMITS = UsageLimits(request_limit=8)
+#
+# Per-pass budgets are NOT defined as module constants — they flow from
+# Lerim's config (default.toml / ~/.lerim/config.toml) through
+# Config.agent_role.usage_limit_{reflect,extract,finalize} and are passed
+# into `run_extraction_three_pass` as required kwargs. Single source of
+# truth: the TOML. No hardcoded fallbacks in this module.
 
 
 # ── Agent builders ───────────────────────────────────────────────────────
@@ -394,18 +416,27 @@ def run_extraction_three_pass(
 	memory_root: Path,
 	trace_path: Path,
 	model: OpenAIChatModel,
+	*,
+	reflect_limit: int,
+	extract_limit: int,
+	finalize_limit: int,
 	run_folder: Path | None = None,
 	return_messages: bool = False,
 ):
 	"""Run the three-pass PydanticAI extraction pipeline.
 
-	Signature matches `extract_pydanticai.run_extraction()` for drop-in
-	compatibility with the eval harness.
+	Per-pass request budgets are REQUIRED kwargs — the caller must source them
+	from Lerim's Config (`Config.agent_role.usage_limit_{reflect,extract,finalize}`)
+	or an equivalent config layer. There are no module-level defaults and no
+	fallback values in this function. Single source of truth is `default.toml`.
 
 	Args:
 		memory_root: Directory containing memory files, index.md, and summaries/.
 		trace_path: Path to the session trace .jsonl file.
-		model: PydanticAI OpenAIChatModel (built by `build_model()`).
+		model: PydanticAI OpenAIChatModel (built by the canonical builder).
+		reflect_limit: Pass 1 request_limit. From `config.agent_role.usage_limit_reflect`.
+		extract_limit: Pass 2 request_limit. From `config.agent_role.usage_limit_extract`.
+		finalize_limit: Pass 3 request_limit. From `config.agent_role.usage_limit_finalize`.
 		run_folder: Optional run workspace folder for artifact output.
 		return_messages: If True, return `(FinalizeResult, list[ModelMessage])`
 			where the message list is the concatenation of all three passes.
@@ -420,19 +451,33 @@ def run_extraction_three_pass(
 		run_folder=run_folder,
 	)
 
+	# Build per-pass UsageLimits from the caller-supplied ints. UsageLimits
+	# is an immutable dataclass — constructing once per run is cheap.
+	reflect_limits = UsageLimits(request_limit=reflect_limit)
+	extract_limits = UsageLimits(request_limit=extract_limit)
+	finalize_limits = UsageLimits(request_limit=finalize_limit)
+
 	reflect_agent = build_reflect_agent(model)
 	extract_agent = build_extract_agent(model)
 	finalize_agent = build_finalize_agent(model)
 
 	# --- Pass 1: Reflect ---
-	reflection = reflect_agent.run_sync(
-		"Reflect on the session trace. Read it end-to-end via chunked "
-		"read('trace', offset=N, limit=100), scan existing memories, "
-		"grep for 'remember', and produce a structured SessionUnderstanding "
-		"for the extractor.",
-		deps=deps,
-		usage_limits=REFLECT_LIMITS,
-	)
+	# Wrap UsageLimitExceeded with a pass label so the eval harness can
+	# identify which pass blew its budget. Without this, the error message
+	# ("request_limit of N") is ambiguous when multiple passes share a value.
+	try:
+		reflection = reflect_agent.run_sync(
+			"Reflect on the session trace. Read it end-to-end via chunked "
+			"read('trace', offset=N, limit=100), scan existing memories, "
+			"grep for 'remember', and produce a structured SessionUnderstanding "
+			"for the extractor.",
+			deps=deps,
+			usage_limits=reflect_limits,
+		)
+	except UsageLimitExceeded as e:
+		raise UsageLimitExceeded(
+			f"[PASS_1_REFLECT] {e} (budget={reflect_limit})"
+		) from e
 	understanding: SessionUnderstanding = reflection.output
 
 	# --- Empty-trace short-circuit (saves 2 full agent runs) ---
@@ -444,26 +489,36 @@ def run_extraction_three_pass(
 		return empty_result
 
 	# --- Pass 2: Extract ---
-	extraction = extract_agent.run_sync(
-		"Extract memories per the session understanding below. Apply extraction "
-		"criteria and dedup rules. Write novel memories via write() and "
-		"edit existing ones via edit() where appropriate.\n\n"
-		"SessionUnderstanding:\n"
-		f"{understanding.model_dump_json(indent=2)}",
-		deps=deps,
-		usage_limits=EXTRACT_LIMITS,
-	)
+	try:
+		extraction = extract_agent.run_sync(
+			"Extract memories per the session understanding below. Apply extraction "
+			"criteria and dedup rules. Write novel memories via write() and "
+			"edit existing ones via edit() where appropriate.\n\n"
+			"SessionUnderstanding:\n"
+			f"{understanding.model_dump_json(indent=2)}",
+			deps=deps,
+			usage_limits=extract_limits,
+		)
+	except UsageLimitExceeded as e:
+		raise UsageLimitExceeded(
+			f"[PASS_2_EXTRACT] {e} (budget={extract_limit})"
+		) from e
 	extracted: ExtractResult = extraction.output
 
 	# --- Pass 3: Finalize ---
-	finalization = finalize_agent.run_sync(
-		"Finalize the memory index and write a session summary.\n\n"
-		"Session understanding:\n"
-		f"{understanding.model_dump_json(indent=2)}\n\n"
-		f"Memories written in this session: {extracted.filenames}",
-		deps=deps,
-		usage_limits=FINALIZE_LIMITS,
-	)
+	try:
+		finalization = finalize_agent.run_sync(
+			"Finalize the memory index and write a session summary.\n\n"
+			"Session understanding:\n"
+			f"{understanding.model_dump_json(indent=2)}\n\n"
+			f"Memories written in this session: {extracted.filenames}",
+			deps=deps,
+			usage_limits=finalize_limits,
+		)
+	except UsageLimitExceeded as e:
+		raise UsageLimitExceeded(
+			f"[PASS_3_FINALIZE] {e} (budget={finalize_limit})"
+		) from e
 	final_result: FinalizeResult = finalization.output
 
 	if return_messages:

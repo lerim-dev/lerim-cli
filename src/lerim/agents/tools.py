@@ -25,13 +25,20 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import frontmatter as fm_lib
+import yaml
 from pydantic_ai import RunContext
 
 MEMORY_TYPES = ("user", "feedback", "project", "reference", "summary")
 
-# Hard cap on lines returned per read("trace", ...) call. Forces chunked
-# reads so agent trajectories stay bounded. The agent paginates via offset.
+# Hard caps on read("trace", ...) output. The line-count cap forces
+# chunked reads (agent paginates via offset) so trajectories stay bounded.
+# The byte caps protect the model's context window from single huge trace
+# lines (e.g. massive tool results) and runaway chunk payloads that would
+# otherwise blow the input limit. Memory-file reads are unbounded — memory
+# files are small by design.
 TRACE_MAX_LINES_PER_READ = 100
+TRACE_MAX_LINE_BYTES = 5_000       # per-line truncation cap
+TRACE_MAX_CHUNK_BYTES = 50_000     # total chunk payload cap
 
 
 # ── Deps ─────────────────────────────────────────────────────────────────
@@ -145,10 +152,40 @@ def read(ctx: RunContext[ExtractDeps], filename: str, offset: int = 0, limit: in
 
 	if limit > 0:
 		chunk = lines[offset:offset + limit]
+
+		# Byte caps — trace reads only. A single Claude trace line can be
+		# 50KB+ (large tool outputs), so a raw 100-line chunk could be 5MB
+		# and blow the model's context window after 2-3 turns. Truncate any
+		# line over TRACE_MAX_LINE_BYTES, and stop adding lines once the
+		# running total crosses TRACE_MAX_CHUNK_BYTES. The early break
+		# shrinks len(chunk); the existing "more lines" header logic below
+		# picks up the new next-offset naturally.
+		if is_trace:
+			safe_chunk: list[str] = []
+			running_bytes = 0
+			for line in chunk:
+				if len(line) > TRACE_MAX_LINE_BYTES:
+					dropped = len(line) - TRACE_MAX_LINE_BYTES
+					line = (
+						line[:TRACE_MAX_LINE_BYTES]
+						+ f" ... [truncated {dropped} chars from this line]"
+					)
+				line_bytes = len(line.encode("utf-8"))
+				if running_bytes + line_bytes > TRACE_MAX_CHUNK_BYTES:
+					break
+				safe_chunk.append(line)
+				running_bytes += line_bytes
+			chunk = safe_chunk
+
 		numbered = [f"{offset + i + 1}\t{line}" for i, line in enumerate(chunk)]
-		header = f"[{total} lines, showing {offset + 1}-{offset + len(chunk)}]"
-		if is_trace and offset + len(chunk) < total:
-			header += f" — {total - (offset + len(chunk))} more lines, call read('trace', offset={offset + len(chunk)}, limit={TRACE_MAX_LINES_PER_READ}) for the next chunk"
+		last_line = offset + len(chunk)
+		header = f"[{total} lines, showing {offset + 1}-{last_line}]"
+		if is_trace and last_line < total:
+			header += (
+				f" — {total - last_line} more lines, call "
+				f"read('trace', offset={last_line}, limit={TRACE_MAX_LINES_PER_READ}) "
+				f"for the next chunk"
+			)
 		return header + "\n" + "\n".join(numbered)
 
 	# Full file read (non-trace files only)
@@ -404,15 +441,21 @@ def write(ctx: RunContext[ExtractDeps], type: str, name: str, description: str, 
 		)
 
 	# --- Build frontmatter + body ---
-	content = (
-		f"---\n"
-		f"name: {name.strip()}\n"
-		f"description: {description.strip()}\n"
-		f"type: {type}\n"
-		f"---\n"
-		f"\n"
-		f"{body.strip()}\n"
+	# yaml.safe_dump auto-quotes any value containing YAML specials (':', '#',
+	# '"', '[', leading '-', '|', '>', etc.) and handles unicode. Hand-built
+	# f-strings here previously crashed frontmatter.load() whenever the model
+	# wrote a description with a colon.
+	frontmatter_yaml = yaml.safe_dump(
+		{
+			"name": name.strip(),
+			"description": description.strip(),
+			"type": type,
+		},
+		default_flow_style=False,
+		sort_keys=False,
+		allow_unicode=True,
 	)
+	content = f"---\n{frontmatter_yaml}---\n\n{body.strip()}\n"
 
 	target.parent.mkdir(parents=True, exist_ok=True)
 	target.write_text(content, encoding="utf-8")
