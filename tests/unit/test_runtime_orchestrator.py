@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import dspy
 import pytest
 
-from lerim.agents.extract import FinalizeResult
+from lerim.agents.extract import ExtractionResult
 from tests.helpers import make_config
 
 
@@ -354,12 +354,12 @@ class TestRunDSPyWithFallback:
 # ---------------------------------------------------------------------------
 
 
-def _patch_pydantic_sync(monkeypatch, *, finalize: FinalizeResult):
+def _patch_pydantic_sync(monkeypatch, *, result: ExtractionResult):
 	"""Replace the PydanticAI sync callable + model builder with stubs.
 
 	The runtime's `sync()` flow calls `build_pydantic_model(...)` and
-	`run_extraction_three_pass(...)`. For unit tests we swap both so nothing
-	touches a real provider.
+	`run_extraction(...)`. For unit tests we swap both so nothing touches
+	a real provider.
 	"""
 	# Signature mirrors the real lerim.config.providers.build_pydantic_model
 	# which takes (role, *, config=None). Runtime.sync calls it as
@@ -369,30 +369,25 @@ def _patch_pydantic_sync(monkeypatch, *, finalize: FinalizeResult):
 		lambda role, *, config=None: f"fake-model-{role}",
 	)
 
-	def fake_three_pass(
-		*,
+	def fake_run_extraction(
 		memory_root,
 		trace_path,
 		model,
-		reflect_limit,
-		extract_limit,
-		finalize_limit,
 		run_folder=None,
 		return_messages=False,
 	):
-		"""Stub runner that returns a deterministic FinalizeResult.
+		"""Stub runner that returns a deterministic ExtractionResult.
 
-		Signature mirrors the real run_extraction_three_pass, which requires
-		per-pass usage-limit kwargs sourced from Config.agent_role.usage_limit_*.
-		The mock accepts them (to prove they flow through runtime) but
-		doesn't enforce anything on the values.
+		Signature mirrors the real lerim.agents.extract.run_extraction — no
+		per-pass budget kwargs (the real runner auto-scales the budget
+		internally via compute_request_budget).
 		"""
 		if return_messages:
-			return finalize, []
-		return finalize
+			return result, []
+		return result
 
 	monkeypatch.setattr(
-		"lerim.server.runtime.run_extraction_three_pass", fake_three_pass
+		"lerim.server.runtime.run_extraction", fake_run_extraction
 	)
 
 
@@ -416,10 +411,8 @@ class TestSyncFlow:
 
 		_patch_pydantic_sync(
 			monkeypatch,
-			finalize=FinalizeResult(
+			result=ExtractionResult(
 				completion_summary="Extracted 2 memories.",
-				index_ok=True,
-				summary_filename="20260410-session.md",
 			),
 		)
 
@@ -443,10 +436,8 @@ class TestSyncFlow:
 
 		_patch_pydantic_sync(
 			monkeypatch,
-			finalize=FinalizeResult(
+			result=ExtractionResult(
 				completion_summary="Done.",
-				index_ok=True,
-				summary_filename="20260410-run.md",
 			),
 		)
 

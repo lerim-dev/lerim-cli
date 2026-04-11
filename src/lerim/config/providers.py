@@ -25,7 +25,7 @@ from httpx import AsyncClient, HTTPStatusError
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 from pydantic_ai.models import Model
 from pydantic_ai.models.fallback import FallbackModel
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
 from tenacity import retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -331,6 +331,52 @@ def _make_retrying_http_client(
 	return AsyncClient(transport=transport)
 
 
+def _build_model_settings(provider: str, cfg: Config) -> OpenAIChatModelSettings:
+	"""Build PydanticAI model settings from Lerim Config.agent_role.
+
+	Threads ``temperature`` and ``max_tokens`` from ``default.toml`` into
+	the PydanticAI path (previously dead fields — only DSPy honored
+	them). Also enables ``parallel_tool_calls=True`` so the model can
+	emit multiple independent tool calls in a single turn (1 LLM round-
+	trip instead of N), which is a big wall-clock win on write/note
+	bursts where each call is logically independent.
+
+	Provider-specific clamping:
+	- MiniMax documents a valid temperature range of ``(0.0, 1.0]``.
+	  Values outside this range produce errors at the API. We clamp to
+	  that window specifically for minimax to prevent a config-time
+	  error from leaking into a runtime agent run. Other providers pass
+	  through unchanged.
+
+	Known sensitivity: with MiniMax-M2.5, the combination of low
+	temperature (e.g. 0.1) and ``retries=3`` previously caused the agent
+	to crash on stochastic tool-call flub bursts because low temperature
+	made the flubs deterministic. The current setup pairs config
+	temperature with ``retries=5`` on the Agent + ``parallel_tool_calls=
+	True`` to absorb both stochastic flubs AND collapse independent
+	calls into one turn. If smoke shows regression, bump ``temperature``
+	in ``default.toml`` instead of reverting this threading.
+
+	We deliberately do NOT set ``extra_body={"reasoning_split": True}``
+	for MiniMax-M2.x, even though the docs expose it, because
+	pydantic_ai does not preserve the resulting ``reasoning_details``
+	field in message history. Setting it would break MiniMax's chain-
+	of-thought continuity across turns. The default behavior (thinking
+	embedded in ``content`` as ``<think>`` tags) is correctly replayed
+	by pydantic_ai verbatim.
+	"""
+	role_cfg = cfg.agent_role
+	temperature = role_cfg.temperature
+	if provider == "minimax":
+		# Clamp strictly inside (0.0, 1.0] per MiniMax API docs
+		temperature = max(0.01, min(1.0, temperature))
+	return OpenAIChatModelSettings(
+		temperature=temperature,
+		max_tokens=role_cfg.max_tokens,
+		parallel_tool_calls=True,
+	)
+
+
 def _build_pydantic_model_for_provider(
 	*,
 	provider: str,
@@ -341,9 +387,10 @@ def _build_pydantic_model_for_provider(
 ) -> OpenAIChatModel:
 	"""Build a single PydanticAI OpenAI-compatible model with HTTP retry.
 
-	Uses the shared Config to resolve API keys and base URLs — no hardcoded
-	endpoints. Every provider Lerim supports has an OpenAI-compatible API,
-	so `OpenAIChatModel` with a `OpenAIProvider` works universally.
+	Uses the shared Config to resolve API keys, base URLs, AND model
+	settings (temperature, max_tokens) — no hardcoded endpoints. Every
+	provider Lerim supports has an OpenAI-compatible API, so
+	``OpenAIChatModel`` with a ``OpenAIProvider`` works universally.
 	"""
 	provider = provider.strip().lower()
 	validate_provider_for_role(provider, "agent", model)
@@ -373,7 +420,8 @@ def _build_pydantic_model_for_provider(
 		http_client=http_client,
 	)
 	canonical_model = normalize_model_name(provider, model)
-	return OpenAIChatModel(canonical_model, provider=openai_provider)
+	settings = _build_model_settings(provider, cfg)
+	return OpenAIChatModel(canonical_model, provider=openai_provider, settings=settings)
 
 
 def _wrap_with_fallback(

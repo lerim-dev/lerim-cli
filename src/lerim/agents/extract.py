@@ -1,544 +1,395 @@
-"""Three-pass PydanticAI memory extraction pipeline.
+"""PydanticAI ExtractAgent — single-pass with note-taking and dynamic pruning.
 
-Replaces the former DSPy ReAct ExtractAgent. Runs three specialized passes
-against a session trace to produce memory files, a session summary, and an
-updated index:
+The agent reads a coding-agent session trace end-to-end in ONE loop and writes
+durable memory files + a session summary. Unlike the previous three-pass
+pipeline, this design avoids re-reading the trace across pass boundaries and
+instead manages its own context budget via two reasoning-state tools:
 
-1. **Reflect** — read-only pass that scans existing memories, greps for explicit
-   "remember" requests, pages through the trace, and produces a structured
-   `SessionUnderstanding` (no writes). Uses `read`, `grep`, `scan` tools.
+- ``note(findings: list[Finding])`` — captures structured findings from
+  trace chunks the agent just read. Findings live on ``ctx.deps.notes``
+  (mutable state) and as tool-call arguments in conversation history. The
+  ``notes_state_injector`` history processor surfaces the running count and
+  theme distribution in a compact ``NOTES:`` system message each turn.
+- ``prune(trace_offsets: list[int])`` — marks earlier trace-chunk reads for
+  stubbing. ``prune_history_processor`` walks the message list before each
+  model request and replaces matching ``ToolReturnPart.content`` with
+  ``"[pruned]"``. Tool CALLS stay visible (the agent still knows it read
+  offset X), only the chunk text is discarded.
 
-2. **Extract** — takes the `SessionUnderstanding` from pass 1, reads relevant
-   trace chunks by evidence offset, dedups against existing memories, and
-   writes novel memories or edits existing ones. Uses the same read tools plus
-   `write` and `edit`.
+A third history processor (``context_pressure_injector``) shows real-time
+token-usage pressure so the agent knows when it's safe or necessary to prune.
 
-3. **Finalize** — verifies `index.md` consistency (and fixes any mismatches via
-   `edit`), then writes the session summary via `write(type="summary", ...)`.
-   Uses `read`, `scan`, `verify_index`, `edit`, `write`.
+The per-run request budget is auto-scaled from trace size via
+``compute_request_budget(trace_path)``: short traces get 20 turns, 2000-line
+traces get 45, pathological inputs clamp at 80.
 
-Shared infrastructure (single source of truth, reused by `extract_pydanticai.py`
-single-pass baseline):
-- `ExtractDeps` dataclass and the six PydanticAI tool functions (`read`,
-  `grep`, `scan`, `write`, `edit`, `verify_index`) are imported directly
-  from `lerim.agents.tools` — one function per tool, no wrappers.
-- Three Agent builders + the pipeline runner
+All six file/search tools (``read``, ``grep``, ``scan``, ``write``, ``edit``,
+``verify_index``) are unchanged and live in ``lerim.agents.tools``. This file
+owns only:
 
-Empty-trace short-circuit: after Pass 1, if the `SessionUnderstanding` carries
-no extractable candidates AND no relevant existing memories, Pass 2 and Pass 3
-are skipped. A minimal "no memories extracted" summary is written via Python.
+- ``SYSTEM_PROMPT`` — the combined single-pass prompt
+- ``ExtractionResult`` — structured output type
+- ``build_extract_agent`` — constructs the PydanticAI ``Agent`` with 8 tools
+  and 3 history processors wired in
+- ``run_extraction`` — the synchronous runner with auto-scaled request budget
+
+Training compatibility: every agent action (``read``, ``note``, ``prune``,
+``write``, ``edit``, ``verify_index``) is a discrete tool call that can serve
+as an RL action. History processors observe state but never take actions, so
+no hidden framework rule competes with the agent for context management.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
-from pydantic_ai.exceptions import UsageLimitExceeded
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
 from lerim.agents.tools import (
 	ExtractDeps,
+	compute_request_budget,
+	context_pressure_injector,
 	edit,
 	grep,
+	note,
+	notes_state_injector,
+	prune,
+	prune_history_processor,
 	read,
-	scan,
 	verify_index,
 	write,
 )
 
 
-# ── Pydantic output models ───────────────────────────────────────────────
+# ── System prompt ────────────────────────────────────────────────────────
+#
+# Written for an untrained open-weights model (MiniMax-M2.5 class). Dense
+# but not verbose: concrete worked example > prose; HARD RULES > aspirational
+# guidance. Target length is ≤150% of the pre-redesign single-pass prompt.
 
+SYSTEM_PROMPT = """\
+You are the Lerim memory extraction agent. Your goal: read one session
+trace, commit to a short summary of what the session was globally about,
+write 1-3 memory files derived from that summary, and verify the index.
+That is the whole job. Be efficient — every extra tool call burns budget.
 
-class ChunkRef(BaseModel):
-	"""Pointer to an interesting region of the trace."""
+======================================================================
+DASHBOARD (two system messages appear every turn — check them first)
+======================================================================
 
-	offset: int = Field(description="Trace line offset where this topic appears")
-	topic: str = Field(description="Short description of what's at this offset")
+  CONTEXT: <tokens>/<limit> (<pct>%) [soft/hard pressure if >60%/>80%]
+  NOTES:   <N> findings across <M> theme(s) — 'theme1' (k1), ...
 
+CONTEXT tells you how full your context is. NOTES is your running
+synthesis — before committing the summary and writing memories, check
+it so your decisions cover the real themes you identified.
 
-class CandidateMemory(BaseModel):
-	"""A single extractable memory identified during reflection."""
+======================================================================
+CORE FLOW (strict, six steps, no loops)
+======================================================================
 
-	type: Literal["user", "feedback", "project", "reference"] = Field(
-		description="Memory type — drives filename prefix and body format"
-	)
-	topic: str = Field(description="Short topic/title for the memory")
-	evidence_offset: int = Field(description="Trace line where evidence appears")
+1. ORIENT (exactly 3 calls):
+   - read("index.md")           # see what's already stored
+   - verify_index("index.md")   # confirm index matches disk — if NOT OK
+                                # the report shows you every real file
+                                # on disk; use that as ground truth
+   - grep("trace", "remember|memorize|keep in mind|note this")
+                                # ONE regex alternation covers 4 synonyms
 
+2. SCAN the trace:
+   - read("trace", offset=N, limit=100), incrementing offset by 100.
+   - Read every chunk ONCE. Never re-read a chunk you already saw.
+   - Every 2-4 chunks, call note() batching ALL findings from those
+     chunks into ONE call. Each Finding has three fields:
+       Finding(theme="short label", offset=<trace line>, quote="verbatim snippet")
+     Example:
+       note(findings=[
+         Finding(theme="DSPy migration", offset=45,  quote="..."),
+         Finding(theme="DSPy migration", offset=178, quote="..."),
+       ])
+   - If CONTEXT rises above 60%, call prune(trace_offsets=[...]) on
+     chunks you have already noted. On small traces (< 5 chunks)
+     where CONTEXT stays under 50%, you NEVER need to call prune().
 
-class SessionUnderstanding(BaseModel):
-	"""Pass 1 output. Transient — NOT persisted as a memory file."""
+3. SYNTHESIZE (no tool call — think silently):
+   After you have scanned the whole trace, pause and decide: what are
+   the 1-3 durable themes this session really boils down to? Write at
+   the THEME level, not one-per-local-candidate. A session with 12
+   local findings usually becomes 2-3 good memories, not 12 mediocre
+   ones.
 
-	user_goal: str = Field(description="What the user was trying to achieve this session")
-	key_decisions: list[str] = Field(description="Durable decisions or conclusions from the session")
-	important_chunks: list[ChunkRef] = Field(description="Pointers to interesting trace regions")
-	extractable_candidates: list[CandidateMemory] = Field(
-		description="Memory candidates identified for Pass 2 to write"
-	)
-	existing_memories_relevant: list[str] = Field(
-		description="Filenames of existing memories relevant to this session (for dedup in Pass 2)"
-	)
+4. COMMIT THE SUMMARY FIRST (one write call):
+   - write(type="summary", name="...", description="...",
+           body="## User Intent\\n<one paragraph>\\n\\n## What Happened\\n<one paragraph>")
+     The body MUST come from the NOTES system message + your own
+     accumulated note() calls. This summary CRYSTALLIZES what this
+     session was about. Every memory you write next must derive from
+     one of the themes the summary commits to.
+   - Do NOT call read("trace", ...) at this step.
+   - ## What Happened is NARRATIVE of the session (what the user did,
+     what got decided), NOT a list of filenames.
 
+5. WRITE THEME-LEVEL MEMORIES (one write per theme, zero refinement):
+   - For each theme in the summary, write one memory:
+     write(type, name, description, body) with **Why:** + **How to apply:**
+   - If write() returns "already exists", that's TERMINAL. Do not
+     retry this topic. Either read() the existing file and edit() it,
+     or skip this candidate. Retrying with a slug variant is a bug.
+   - edit() ONLY to update an EXISTING memory discovered in step 1's
+     index.md / verify_index report.
+   - Do NOT write a memory then edit it then edit it again. Get it
+     right the first time.
 
-class ExtractResult(BaseModel):
-	"""Pass 2 output. Summarizes what Pass 2 wrote."""
+6. VERIFY the index one last time and return:
+   - verify_index("index.md") — should be OK after your writes.
+   - If NOT OK, edit("index.md", ...) to add the new memory entries
+     (the report tells you exactly what's missing).
+   - Return ExtractionResult(completion_summary="wrote N memories + summary").
 
-	filenames: list[str] = Field(description="Memory filenames written in this session")
-	completion_summary: str = Field(description="Short plain-text summary of Pass 2 actions")
+======================================================================
+STRICT DISCIPLINE (violations waste budget and fail the run)
+======================================================================
 
+D1. Call grep("trace", ...) exactly ONCE in ORIENT, with a regex
+    alternation like "remember|memorize|keep in mind|note this".
+    Do NOT grep for other patterns — they rarely pay for themselves.
 
-class FinalizeResult(BaseModel):
-	"""Pass 3 output. Final pipeline return value."""
+D2. One write() per final memory. If write() returns "already exists",
+    STOP for that topic immediately. The SAME write call with a slug
+    variant (e.g. "feedback_foo" → "feedback_foo_v2") is FORBIDDEN.
+    Either read+edit the existing file, or skip — do not retry.
 
-	completion_summary: str = Field(description="Short plain-text completion summary for the whole pipeline")
-	index_ok: bool = Field(description="True if index.md is consistent after Pass 3")
-	summary_filename: str = Field(description="Filename of the session summary written in Pass 3")
+D3. Pruning is OPTIONAL on short traces. If CONTEXT never crosses 50%,
+    you never need to call prune(). Don't ritually invoke it because
+    this prompt mentions it.
 
+D4. Summary is committed FIRST in step 4, then memories derive from it.
+    A memory that doesn't fit one of the summary's themes is a noisy
+    local extraction — skip it.
 
-# ── System prompts (one per pass) ────────────────────────────────────────
+D5. Never call read("trace", ...) after step 3. The summary body and
+    every memory body must come from the NOTES system message plus
+    your own note() tool call history plus the decisions in the
+    summary you already committed.
 
+D6. Duplicates are worse than gaps. Skip a candidate when uncertain.
+    An empty session (zero memories, only a summary) is valid when
+    the trace has no durable signal — pure debugging, ephemeral
+    tasks, or content already covered by existing memories.
 
-REFLECT_SYSTEM_PROMPT = """\
-You are the Lerim memory reflection agent. This is Pass 1 of a three-pass
-memory extraction pipeline. Your job is to READ the session and produce a
-structured SessionUnderstanding for the extractor. You do NOT write memories
-in this pass.
+D7. Explicit remember requests override everything else. If step 1's
+    grep returned a user ask like "remember X", you MUST write() or
+    edit() a memory for X, even if it looks thin.
 
-DO NOT WRITE MEMORIES. You only have read-only tools: read, grep,
-scan. There is no write or edit in your toolset. Your output is
-a SessionUnderstanding object with user_goal, key_decisions, important_chunks,
-extractable_candidates, and existing_memories_relevant.
+======================================================================
+WORKED EXAMPLE (compact)
+======================================================================
 
-STEPS:
+Small trace (e.g. 150 lines, 2 chunks):
+  read("index.md") → verify_index() → grep("trace", SYNONYM_REGEX) →
+  read(trace,0,100) → read(trace,100,100) → note(findings=[...]) →
+  write(summary) → write(project_theme1) → verify_index() → return.
+  Total ~9-11 calls. No prune(). No grep repeat.
 
-1. ORIENT: Call read("index.md") ONCE. index.md is the authoritative summary
-   of ALL existing memories — it lists every memory file with its title,
-   description, and semantic category (User Preferences, Project State,
-   Feedback, References, etc.). Do NOT also call scan() here — scan("")
-   returns the same filenames and descriptions that index.md already lists,
-   so calling both wastes a tool turn for zero new information. Only fall
-   back to scan("") if read("index.md") returns an error or the file looks
-   malformed.
+Large trace (e.g. 2000 lines, 20 chunks):
+  Same ORIENT. Then alternate read→note→prune every 3-5 chunks as
+  CONTEXT pressure rises. After the last chunk: synthesize silently,
+  write summary first, write each theme memory once, verify_index,
+  return. Total ~35-50 calls depending on theme count.
 
-2. FIND EXPLICIT REMEMBER REQUESTS: Call grep("trace", "remember") to
-   locate any explicit user requests to remember or store something. Also try
-   grep("trace", "memorize") and grep("trace", "keep in mind").
+======================================================================
+MEMORY FILE FORMAT
+======================================================================
 
-3. CHUNKED READ: read("trace") is hard-capped at 100 lines per call.
-   You MUST page through the trace by incrementing offset by 100 each call:
-     read("trace", offset=0,   limit=100)  -> lines 1-100
-     read("trace", offset=100, limit=100)  -> lines 101-200
-     read("trace", offset=200, limit=100)  -> lines 201-300
-     ...continue until the header says Y == total lines.
-   NEVER re-read the same chunk. Always look at the header
-   "[N lines, showing A-B]" and use offset=B on the next call.
+Files: {type}_{topic}.md with YAML frontmatter (name, description, type)
+and a markdown body.
 
-4. IDENTIFY EXTRACTABLE CANDIDATES as you read each chunk. Use these criteria:
-   - Extract: user role, goals, preferences, working style (about the person)
-   - Extract: feedback corrections ("don't do X") AND confirmations ("yes, exactly")
-   - Extract: project decisions, context, constraints NOT in code or git
-   - Extract: reference pointers to external systems (dashboards, Linear projects, etc.)
-   - Do NOT extract: Code patterns, architecture, file paths, function names
-   - Do NOT extract: Git history, recent changes
-   - Do NOT extract: Debugging solutions (the fix is in the code)
-   - Do NOT extract: Anything in CLAUDE.md or README
-   - Do NOT extract: Ephemeral task details, in-progress work
-   - Do NOT extract: Generic programming knowledge everyone knows
-   For each candidate, note the type, topic, and evidence_offset (trace line).
-
-5. CHECK DEDUP: For each candidate, identify if a relevant existing memory
-   exists from step 1. Populate existing_memories_relevant with their filenames.
-
-6. PRODUCE SessionUnderstanding with:
-   - user_goal: one sentence about what the user was trying to do
-   - key_decisions: durable decisions (decisions, NOT task list)
-   - important_chunks: ChunkRef(offset, topic) for interesting regions
-   - extractable_candidates: CandidateMemory(type, topic, evidence_offset)
-   - existing_memories_relevant: filenames of existing memories relevant to this session
-
-If the trace contains NO extractable content (pure debugging, stale, or empty),
-return an empty extractable_candidates list and empty existing_memories_relevant.
-Pass 2 and Pass 3 will be skipped automatically for empty understandings.
-
-CRITICAL: You do NOT call write or edit in this pass. Those tools
-are not available to you. Your sole output is the SessionUnderstanding.
-"""
-
-
-EXTRACT_SYSTEM_PROMPT = """\
-You are the Lerim memory extraction agent. This is Pass 2 of a three-pass
-pipeline. You receive a SessionUnderstanding from Pass 1 (as JSON in the
-user prompt) and write the actual memory files.
-
-INPUTS: Parse the SessionUnderstanding JSON from your user prompt. It has:
-  - user_goal: high-level session goal
-  - key_decisions: list of durable decisions
-  - important_chunks: ChunkRef(offset, topic) pointers
-  - extractable_candidates: CandidateMemory(type, topic, evidence_offset) — what to write
-  - existing_memories_relevant: filenames of existing memories (for dedup)
-
-YOUR JOB: For each extractable_candidate, read the evidence at its
-evidence_offset from the trace, dedup against existing memories, and either
-write a new memory or edit an existing one.
-
-FORMAT RULES (critical):
-
-Memory files are named {type}_{topic}.md (e.g. feedback_use_tabs.md,
-project_dspy_migration.md). The type is encoded in the filename.
-Each file has YAML frontmatter (name, description, type) and a markdown body.
-
-Body format for feedback/project memories — use inline bold, NOT ## headings:
-  State the rule or decision first (one line).
+feedback/project body uses inline bold, NOT ## headings:
+  State the rule or decision in ONE line.
   **Why:** reason it matters.
   **How to apply:** concrete action for future sessions.
+
 Example:
   Use tabs for indentation in all code files.
   **Why:** team convention; spaces were rejected in code review.
   **How to apply:** set indent_style=tab; flag spaces in PRs.
-DO NOT use ## headings inside the body — headings are only for summaries.
 
-Project memories must lead with the fact or decision, not narrate what happened.
-Bad: "## What Happened\\nWe decided to use Redis..." — this is summary style.
-Good: "Redis chosen as cache layer (replaced Memcached).\\n**Why:** ..."
+Project memories lead with the fact, not a narration:
+  Bad:  "## What Happened\\nWe decided to use Redis..."
+  Good: "Redis chosen as cache layer (replaced Memcached).\\n**Why:** ..."
 
-CRITICAL RULE: If the user explicitly asks to remember, memorize, store, or
-"keep in mind" something (check the SessionUnderstanding for such candidates),
-you MUST call write() for that content (usually type user or feedback)
-or if exists, edit(). This overrides all skip rules below. Do not treat
-explicit requests as debugging or ephemeral.
+Session summary (type="summary") uses two ## headings exactly:
+  ## User Intent
+  <one paragraph about what the user was trying to do>
 
-Duplicates are worse than gaps -- skip when uncertain.
-An empty session (no memories written) is valid only when nothing in the
-critical rule applies and there is no durable signal in the trace.
+  ## What Happened
+  <one paragraph narrating what got decided / accomplished — this is
+  a narrative of the SESSION, not a list of memory filenames>
 
-EXTRACTION CRITERIA (applied to each candidate before writing):
-- Extract: user role, goals, preferences, working style (about the person)
-- Extract: feedback corrections ("don't do X") AND confirmations ("yes, exactly")
-- Extract: project decisions, context, constraints NOT in code or git
-- Extract: reference pointers to external systems (dashboards, Linear projects, etc.)
-- Do NOT extract: Code patterns, architecture, file paths, function names, module names
-- Do NOT extract: Git history, recent changes
-- Do NOT extract: Debugging solutions
-- Do NOT extract: Anything in CLAUDE.md or README
-- Do NOT extract: Ephemeral task details, in-progress work
-- Do NOT extract: Generic programming knowledge everyone knows
+======================================================================
+EXTRACTION CRITERIA
+======================================================================
 
-STEPS:
+Extract:
+- User role, goals, preferences, working style (about the person)
+- Feedback corrections ("don't do X") AND confirmations ("yes, exactly")
+- Project decisions, context, constraints NOT in code or git
+- Reference pointers to external systems (dashboards, Linear, etc.)
 
-1. For each candidate in extractable_candidates, read the trace near its
-   evidence_offset via read("trace", offset=X, limit=100). You may also
-   read("trace", offset=N, limit=100) on important_chunks for context.
-
-2. DEDUP: Use existing_memories_relevant from the SessionUnderstanding — Pass 1
-   already scanned the memory root and listed the filenames relevant to this
-   session. Do NOT call scan() here — it returns the same filenames you
-   already have in your input and wastes a tool turn. For each candidate,
-   read() the SPECIFIC potentially-related memory by filename
-   (e.g. read("feedback_tabs.md")) and compare. If the existing memory
-   already covers the same topic, skip or edit; do not write a duplicate.
-
-3. WRITE: For each novel memory, call:
-     write(type="user"|"feedback"|"project"|"reference",
-                name="Short title (max 10 words)",
-                description="One-line hook for retrieval (~150 chars)",
-                body="Content with **Why:** and **How to apply:**")
-
-4. EDIT: For existing memories that need an update, use read then
-   edit with old_string, new_string, and optional near_line.
-
-5. STOP writing once all extractable_candidates have been processed. Return an
-   ExtractResult with the list of filenames you wrote and a short summary.
-
-CRITICAL: Do NOT call verify_index or write a session summary. Pass 3 handles
-those. Your only output is ExtractResult(filenames, completion_summary).
-"""
+Do NOT extract:
+- Code patterns, architecture, file paths, function/module names
+- Git history, recent changes (git log is authoritative)
+- Debugging solutions (the fix is in the code)
+- Anything already in CLAUDE.md or README
+- Ephemeral task details, in-progress work
+- Generic programming knowledge everyone knows"""
 
 
-FINALIZE_SYSTEM_PROMPT = """\
-You are the Lerim memory finalization agent. This is Pass 3 of a three-pass
-pipeline. You receive the SessionUnderstanding from Pass 1 and the list of
-memory filenames written by Pass 2 (both as JSON in your user prompt). Your
-job is to fix the index and write the session summary.
-
-HARD RULES — violations waste the request budget and fail the run:
-- You do NOT call read("trace") in this pass. Everything you need is already
-  in your user prompt (the SessionUnderstanding from Pass 1 plus the list of
-  filenames from Pass 2). Reading the trace here is forbidden.
-- You call verify_index() at most TWICE: once to check, once to confirm
-  after any edit. Not a third time.
-- You read() a memory file ONLY when verify_index reports it is broken and
-  you must edit() it. Otherwise do not open memory files in this pass.
-- You do NOT call scan() in this pass. The filenames from Pass 2 plus
-  verify_index() give you all the state you need.
-
-STEPS:
-
-1. VERIFY INDEX: Call verify_index("index.md"). If it returns OK, move
-   to step 3. If it returns NOT OK, read the report carefully — it lists
-   missing entries, stale entries, broken links, and duplicates.
-
-2. FIX INDEX: Call edit("index.md", old_string, new_string) to add missing
-   entries, remove stale ones, and fix broken links. The index format is:
-     # Memory Index
-     ## User Preferences
-     - [Title](filename.md) — one-line description
-     ## Project State
-     - [Title](filename.md) — one-line description
-   Organize by semantic section (User Preferences, Project State, Feedback, etc.).
-   After edits, call verify_index again to confirm OK.
-
-3. WRITE SESSION SUMMARY: Call write with type="summary":
-     write(
-         type="summary",
-         name="Short title (max 10 words)",
-         description="One-line summary of the session",
-         body="## User Intent\\n<one paragraph about what user wanted>\\n\\n## What Happened\\n<one paragraph about what was accomplished and what memories were written>",
-     )
-   The session summary MUST include both "## User Intent" and "## What Happened"
-   headings exactly.
-
-4. RETURN FinalizeResult(completion_summary, index_ok, summary_filename).
-   - completion_summary: one-sentence summary of the whole pipeline run
-   - index_ok: True if the final verify_index returned OK, else False
-   - summary_filename: the filename returned by write for the summary
-
-CRITICAL: Do NOT extract new memories from the trace in this pass. If Pass 2
-missed something, that's a Pass 2 bug — don't try to compensate here. Your
-only job is: verify_index + edit index + write session summary + return.
-"""
+# ── Output type ──────────────────────────────────────────────────────────
 
 
-# ── UsageLimits per pass ─────────────────────────────────────────────────
-#
-# Per-pass budgets are NOT defined as module constants — they flow from
-# Lerim's config (default.toml / ~/.lerim/config.toml) through
-# Config.agent_role.usage_limit_{reflect,extract,finalize} and are passed
-# into `run_extraction_three_pass` as required kwargs. Single source of
-# truth: the TOML. No hardcoded fallbacks in this module.
+class ExtractionResult(BaseModel):
+	"""Structured output from the extraction agent."""
 
-
-# ── Agent builders ───────────────────────────────────────────────────────
-
-
-def build_reflect_agent(model: OpenAIChatModel) -> Agent[ExtractDeps, SessionUnderstanding]:
-	"""Build the Pass 1 reflect agent (read-only tools, SessionUnderstanding output)."""
-	return Agent(
-		model,
-		deps_type=ExtractDeps,
-		output_type=SessionUnderstanding,
-		system_prompt=REFLECT_SYSTEM_PROMPT,
-		tools=[read, grep, scan],
-		output_retries=3,
+	completion_summary: str = Field(
+		description="Short plain-text summary of what the run accomplished"
 	)
 
 
-def build_extract_agent(model: OpenAIChatModel) -> Agent[ExtractDeps, ExtractResult]:
-	"""Build the Pass 2 extract agent (read + write + edit tools, ExtractResult output)."""
-	return Agent(
-		model,
-		deps_type=ExtractDeps,
-		output_type=ExtractResult,
-		system_prompt=EXTRACT_SYSTEM_PROMPT,
-		tools=[read, grep, scan, write, edit],
-		output_retries=3,
-	)
+# ── Agent builder ────────────────────────────────────────────────────────
 
 
-def build_finalize_agent(model: OpenAIChatModel) -> Agent[ExtractDeps, FinalizeResult]:
-	"""Build the Pass 3 finalize agent (verify_index + edit + write tools, FinalizeResult output)."""
-	return Agent(
-		model,
-		deps_type=ExtractDeps,
-		output_type=FinalizeResult,
-		system_prompt=FINALIZE_SYSTEM_PROMPT,
-		tools=[read, scan, verify_index, edit, write],
-		output_retries=3,
-	)
+def build_extract_agent(model: Model) -> Agent[ExtractDeps, ExtractionResult]:
+	"""Build the single-pass extraction agent with 7 tools + 3 history processors.
 
+	Tools (in wiring order for legibility):
+	  read, grep              — read-only file/search
+	  note, prune             — reasoning-state management
+	  write, edit, verify_index — writes and index maintenance
 
-# ── Empty-trace short-circuit (no LLM call) ──────────────────────────────
+	Deliberately NOT included: ``scan()``. Smoke testing showed MiniMax
+	ignored the prompt rule forbidding scan(); removing it from the tool
+	surface is the structural fix. ``read("index.md")`` + ``verify_index()``
+	together give the agent the same information scan() would.
 
+	History processors (run in order before each model request):
+	  context_pressure_injector — CONTEXT: X/Y (pct%) soft/hard pressure label
+	  notes_state_injector      — NOTES: N findings across M themes — ...
+	  prune_history_processor   — stubs trace-read results for pruned offsets
 
-def _python_finalize_empty(deps: ExtractDeps, understanding: SessionUnderstanding) -> FinalizeResult:
-	"""Write a minimal "no memories extracted" summary via Python (no LLM call).
-
-	Used by the empty-trace short-circuit after Pass 1 when the
-	SessionUnderstanding has no extractable_candidates and no
-	existing_memories_relevant. Saves two full agent runs.
+	All three processors take ``(ctx: RunContext[ExtractDeps], messages)``
+	and read live state from ``ctx.deps`` directly. No closure factories.
 	"""
-	from datetime import datetime, timezone
-
-	user_goal = (understanding.user_goal or "").strip() or "(no goal identified)"
-	summary_body = (
-		"## User Intent\n"
-		f"{user_goal}\n\n"
-		"## What Happened\n"
-		"No durable memories were extracted from this session. The trace did not "
-		"contain extractable signals per the memory extraction criteria, and no "
-		"existing memories needed updating.\n"
-	)
-	# Include a short timestamp tag so repeated empty sessions don't collide.
-	ts = datetime.now(timezone.utc).strftime("%H%M%S")
-	# Call the module-level write() tool function directly with a synthetic
-	# context — we're Python-side (no LLM), so we bypass the Agent loop.
-	ctx = SimpleNamespace(deps=deps)
-	result = write(
-		ctx,
-		type="summary",
-		name=f"Empty session {ts}",
-		description="No extractable content in session trace.",
-		body=summary_body,
-	)
-	try:
-		payload = json.loads(result)
-		summary_filename = payload.get("filename", "")
-	except json.JSONDecodeError:
-		summary_filename = ""
-
-	return FinalizeResult(
-		completion_summary="No extractable content.",
-		index_ok=True,
-		summary_filename=summary_filename,
+	return Agent(
+		model,
+		deps_type=ExtractDeps,
+		output_type=ExtractionResult,
+		system_prompt=SYSTEM_PROMPT,
+		tools=[
+			read,
+			grep,
+			note,
+			prune,
+			write,
+			edit,
+			verify_index,
+		],
+		history_processors=[
+			context_pressure_injector,
+			notes_state_injector,
+			prune_history_processor,
+		],
+		# Tool-call arg validation retries. Default is 1 which is too
+		# tight for untrained models on heavy contexts — MiniMax-M2.5
+		# has stochastic early-run tool-call flubs where it emits
+		# malformed JSON args for the first few turns before stabilizing.
+		# Observed on the 137/157-line smoke traces: retries=3 would
+		# exhaust at 21-200s, retries=5 absorbs the flub burst and lets
+		# the model recover. Generous enough to handle warmup
+		# stochasticity, tight enough to still crash on genuine bugs.
+		retries=5,
+		output_retries=3,
 	)
 
 
-# ── Pipeline runner ──────────────────────────────────────────────────────
+# Note: model construction lives in ``lerim.config.providers``. This file
+# intentionally does NOT re-export ``build_pydantic_model`` — callers must
+# import from the canonical location so the provider/endpoint/fallback
+# chain stays readable from one place.
 
 
-def run_extraction_three_pass(
+# ── Runner ───────────────────────────────────────────────────────────────
+
+
+def run_extraction(
 	memory_root: Path,
 	trace_path: Path,
-	model: OpenAIChatModel,
-	*,
-	reflect_limit: int,
-	extract_limit: int,
-	finalize_limit: int,
+	model: Model,
 	run_folder: Path | None = None,
 	return_messages: bool = False,
 ):
-	"""Run the three-pass PydanticAI extraction pipeline.
+	"""Run the single-pass extraction agent.
 
-	Per-pass request budgets are REQUIRED kwargs — the caller must source them
-	from Lerim's Config (`Config.agent_role.usage_limit_{reflect,extract,finalize}`)
-	or an equivalent config layer. There are no module-level defaults and no
-	fallback values in this function. Single source of truth is `default.toml`.
+	Computes the per-run request budget from trace size via
+	``compute_request_budget(trace_path)`` and passes it as
+	``UsageLimits(request_limit=budget)`` into ``agent.run_sync``. Short
+	traces get ~20 turns, 2000-line traces get ~45, pathological inputs
+	clamp at 80.
 
 	Args:
-		memory_root: Directory containing memory files, index.md, and summaries/.
-		trace_path: Path to the session trace .jsonl file.
-		model: PydanticAI OpenAIChatModel (built by the canonical builder).
-		reflect_limit: Pass 1 request_limit. From `config.agent_role.usage_limit_reflect`.
-		extract_limit: Pass 2 request_limit. From `config.agent_role.usage_limit_extract`.
-		finalize_limit: Pass 3 request_limit. From `config.agent_role.usage_limit_finalize`.
+		memory_root: Directory containing memory files, ``index.md``, and
+			``summaries/``.
+		trace_path: Path to the session trace ``.jsonl`` file.
+		model: PydanticAI ``Model`` built by
+			``lerim.config.providers.build_pydantic_model`` or
+			``build_pydantic_model_from_provider``. Typically a
+			``FallbackModel`` wrapping the primary with HTTP retry + provider
+			fallback.
 		run_folder: Optional run workspace folder for artifact output.
-		return_messages: If True, return `(FinalizeResult, list[ModelMessage])`
-			where the message list is the concatenation of all three passes.
-			Default False for backward compatibility.
+		return_messages: If True, return
+			``(ExtractionResult, list[ModelMessage])``. Default False for
+			backward compatibility with single-return callers.
 
 	Returns:
-		FinalizeResult, or a `(FinalizeResult, list)` tuple if return_messages=True.
+		``ExtractionResult``, or ``(ExtractionResult, list[ModelMessage])``
+		if ``return_messages=True``. The caller can also inspect
+		``ExtractDeps`` state after the run by constructing deps externally
+		and passing them in (future extension).
 	"""
+	agent = build_extract_agent(model)
 	deps = ExtractDeps(
 		memory_root=memory_root,
 		trace_path=trace_path,
 		run_folder=run_folder,
 	)
-
-	# Build per-pass UsageLimits from the caller-supplied ints. UsageLimits
-	# is an immutable dataclass — constructing once per run is cheap.
-	reflect_limits = UsageLimits(request_limit=reflect_limit)
-	extract_limits = UsageLimits(request_limit=extract_limit)
-	finalize_limits = UsageLimits(request_limit=finalize_limit)
-
-	reflect_agent = build_reflect_agent(model)
-	extract_agent = build_extract_agent(model)
-	finalize_agent = build_finalize_agent(model)
-
-	# --- Pass 1: Reflect ---
-	# Wrap UsageLimitExceeded with a pass label so the eval harness can
-	# identify which pass blew its budget. Without this, the error message
-	# ("request_limit of N") is ambiguous when multiple passes share a value.
-	try:
-		reflection = reflect_agent.run_sync(
-			"Reflect on the session trace. Read it end-to-end via chunked "
-			"read('trace', offset=N, limit=100), scan existing memories, "
-			"grep for 'remember', and produce a structured SessionUnderstanding "
-			"for the extractor.",
-			deps=deps,
-			usage_limits=reflect_limits,
-		)
-	except UsageLimitExceeded as e:
-		raise UsageLimitExceeded(
-			f"[PASS_1_REFLECT] {e} (budget={reflect_limit})"
-		) from e
-	understanding: SessionUnderstanding = reflection.output
-
-	# --- Empty-trace short-circuit (saves 2 full agent runs) ---
-	if (not understanding.extractable_candidates and
-		not understanding.existing_memories_relevant):
-		empty_result = _python_finalize_empty(deps, understanding)
-		if return_messages:
-			return empty_result, list(reflection.all_messages())
-		return empty_result
-
-	# --- Pass 2: Extract ---
-	try:
-		extraction = extract_agent.run_sync(
-			"Extract memories per the session understanding below. Apply extraction "
-			"criteria and dedup rules. Write novel memories via write() and "
-			"edit existing ones via edit() where appropriate.\n\n"
-			"SessionUnderstanding:\n"
-			f"{understanding.model_dump_json(indent=2)}",
-			deps=deps,
-			usage_limits=extract_limits,
-		)
-	except UsageLimitExceeded as e:
-		raise UsageLimitExceeded(
-			f"[PASS_2_EXTRACT] {e} (budget={extract_limit})"
-		) from e
-	extracted: ExtractResult = extraction.output
-
-	# --- Pass 3: Finalize ---
-	try:
-		finalization = finalize_agent.run_sync(
-			"Finalize the memory index and write a session summary.\n\n"
-			"Session understanding:\n"
-			f"{understanding.model_dump_json(indent=2)}\n\n"
-			f"Memories written in this session: {extracted.filenames}",
-			deps=deps,
-			usage_limits=finalize_limits,
-		)
-	except UsageLimitExceeded as e:
-		raise UsageLimitExceeded(
-			f"[PASS_3_FINALIZE] {e} (budget={finalize_limit})"
-		) from e
-	final_result: FinalizeResult = finalization.output
-
+	usage_limits = UsageLimits(request_limit=compute_request_budget(trace_path))
+	result = agent.run_sync(
+		"Extract memories from the session trace. Follow the core cycle: "
+		"read → note → prune → synthesize → write.",
+		deps=deps,
+		usage_limits=usage_limits,
+	)
 	if return_messages:
-		all_messages = (
-			list(reflection.all_messages())
-			+ list(extraction.all_messages())
-			+ list(finalization.all_messages())
-		)
-		return final_result, all_messages
-	return final_result
+		return result.output, list(result.all_messages())
+	return result.output
+
+
+# ── Self-test (uv run python -m lerim.agents.extract [trace_path]) ───────
 
 
 if __name__ == "__main__":
-	"""Self-test: run the three-pass pipeline on a fixture trace and inspect results."""
+	"""Self-test: run the extraction agent on a fixture trace.
+
+	Prints the final ExtractionResult, the memories written, the summary,
+	and the final deps.notes / deps.pruned_offsets so you can eyeball
+	whether the agent actually used note() and prune() during the run.
+	"""
 	import sys
 	import tempfile
 
-	from lerim.config.providers import build_pydantic_model
-
-	# Use fixture trace or first CLI arg
 	trace_path = Path(sys.argv[1]) if len(sys.argv) > 1 else (
 		Path(__file__).parents[3] / "tests" / "fixtures" / "traces" / "claude_short.jsonl"
 	)
@@ -554,10 +405,12 @@ if __name__ == "__main__":
 
 		print(f"Trace: {trace_path}")
 		print(f"Memory root: {memory_root}")
+		print(f"Budget: {compute_request_budget(trace_path)} requests")
 		print()
 
+		from lerim.config.providers import build_pydantic_model
 		model = build_pydantic_model("agent")
-		result = run_extraction_three_pass(
+		result = run_extraction(
 			memory_root=memory_root,
 			trace_path=trace_path,
 			model=model,
@@ -567,8 +420,6 @@ if __name__ == "__main__":
 		print("RESULTS")
 		print("=" * 60)
 		print(f"Completion summary: {result.completion_summary}")
-		print(f"Index OK:           {result.index_ok}")
-		print(f"Summary filename:   {result.summary_filename}")
 		print()
 
 		memories = [f for f in memory_root.glob("*.md") if f.name != "index.md"]

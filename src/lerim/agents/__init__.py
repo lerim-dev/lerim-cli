@@ -1,8 +1,11 @@
-"""Agent modules: extract (PydanticAI three-pass), maintain, ask + shared tools.
+"""Agent modules: extract (PydanticAI single-pass), maintain, ask + shared tools.
 
-`ExtractAgent` is no longer exported. Sync flow now uses the PydanticAI
-three-pass pipeline in `lerim.agents.extract.run_extraction_three_pass`,
-imported directly by the runtime. Maintain and ask remain DSPy ReAct modules.
+Sync flow uses the PydanticAI single-pass extraction agent in
+`lerim.agents.extract.run_extraction`, imported directly by the runtime.
+The agent auto-scales its request budget from trace size via
+`lerim.agents.tools.compute_request_budget` and manages its own context
+via `note()` and `prune()` tools plus three history processors.
+Maintain and ask remain DSPy ReAct modules (future migration deferred).
 """
 
 from __future__ import annotations

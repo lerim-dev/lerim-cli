@@ -44,14 +44,10 @@ class RoleConfig:
 	thinking: bool = True
 	temperature: float = 1.0
 	max_tokens: int = 32000
-	# PydanticAI three-pass sync usage limits (per-pass request_limit).
-	# Production values come from default.toml via _require_int in _build_role
-	# (fails fast if a TOML key is missing). The dataclass defaults below are
-	# only used by test fixtures that construct RoleConfig directly — they
-	# match default.toml so production and test defaults never drift.
-	usage_limit_reflect: int = 30
-	usage_limit_extract: int = 30
-	usage_limit_finalize: int = 30
+	# PydanticAI single-pass sync now auto-scales its request_limit from
+	# trace size via lerim.agents.tools.compute_request_budget(trace_path).
+	# No static extract-budget field on RoleConfig — the budget is derived
+	# at run start from the actual trace's line count, clamped [50, 100].
 	# DSPy ReAct iteration limits (maintain/ask still DSPy)
 	max_iters_maintain: int = 30
 	max_iters_ask: int = 30
@@ -283,11 +279,6 @@ def _build_role(
 		thinking=bool(raw.get("thinking", True)),
 		temperature=float(raw.get("temperature", 1.0)),
 		max_tokens=int(raw.get("max_tokens", 32000)),
-		# Required from TOML — _require_int raises if missing from both
-		# default.toml and the user config. No silent defaults in production.
-		usage_limit_reflect=_require_int(raw, "usage_limit_reflect", minimum=1),
-		usage_limit_extract=_require_int(raw, "usage_limit_extract", minimum=1),
-		usage_limit_finalize=_require_int(raw, "usage_limit_finalize", minimum=1),
 		max_iters_maintain=int(raw.get("max_iters_maintain", 30)),
 		max_iters_ask=int(raw.get("max_iters_ask", 30)),
 		max_window_tokens=int(raw.get("max_window_tokens", 100000)),

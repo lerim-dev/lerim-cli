@@ -24,7 +24,7 @@ Quick LLM sanity checks for maintain and ask. Verifies `MaintainAgent` runs on s
 
 ### Integration (`tests/integration/`, 11 tests)
 
-Real LLM calls testing pipeline quality across multiple components. Files: `test_extraction_quality.py` (runs `run_extraction_three_pass` against fixture traces), `test_maintain_quality.py`, `test_ask_quality.py`. Covers extraction output quality (schema conformance, type classification, minimum recall), maintain quality (dedup detection, staleness handling, index consistency), and ask quality (answer relevance, memory citation). Gate: `LERIM_INTEGRATION=1`.
+Real LLM calls testing pipeline quality across multiple components. Files: `test_extraction_quality.py` (runs `run_extraction` against fixture traces), `test_maintain_quality.py`, `test_ask_quality.py`. Covers extraction output quality (schema conformance, type classification, minimum recall), maintain quality (dedup detection, staleness handling, index consistency), and ask quality (answer relevance, memory citation). Gate: `LERIM_INTEGRATION=1`.
 
 ### E2E (`tests/e2e/`, ~7 tests)
 
@@ -32,7 +32,7 @@ Full agent flows as a user would invoke them. Files: `test_sync_flow.py`, `test_
 
 ## Architecture Under Test
 
-- **Sync**: PydanticAI three-pass pipeline `run_extraction_three_pass(memory_root, trace_path, model, run_folder)` — reflect, extract, finalize. Each pass is a `pydantic_ai.Agent` with typed Pydantic outputs and per-pass `UsageLimits`.
+- **Sync**: PydanticAI single-pass extraction agent `run_extraction(memory_root, trace_path, model, run_folder)` — one `pydantic_ai.Agent` with 8 tools (read/grep/scan/note/prune/write/edit/verify_index) and 3 history processors (context pressure, notes state, prune rewriter). Request budget auto-scales from trace size via `compute_request_budget`.
 - **Agents (DSPy)**: `MaintainAgent`, `AskAgent` -- still DSPy ReAct modules taking `Path` args directly (no RuntimeContext).
 - **Tools**: `MemoryTools` class with 7 methods: `read`, `grep`, `scan`, `write`, `edit`, `archive`, `verify_index`. Extract uses six standalone async tool functions from `lerim.agents.extract` that adapt calls onto `MemoryTools`.
 - **Config**: single `[roles.agent]` role (no separate extract_role).

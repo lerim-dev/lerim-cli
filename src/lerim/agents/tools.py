@@ -19,16 +19,41 @@ import json
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import frontmatter as fm_lib
 import yaml
+from pydantic import BaseModel, Field
 from pydantic_ai import RunContext
+from pydantic_ai.messages import (
+	ModelMessage,
+	ModelRequest,
+	ModelResponse,
+	SystemPromptPart,
+	ToolCallPart,
+	ToolReturnPart,
+)
 
 MEMORY_TYPES = ("user", "feedback", "project", "reference", "summary")
+
+# Model context window cap (tokens). Used by context_pressure_injector to
+# compute graduated soft/hard pressure thresholds. 128K is MiniMax-M2.5's
+# limit and a safe baseline for Claude/GPT-4 class models too. If a future
+# provider has a smaller window, override via config (future work).
+MODEL_CONTEXT_TOKEN_LIMIT = 128_000
+CONTEXT_SOFT_PRESSURE_PCT = 0.60
+CONTEXT_HARD_PRESSURE_PCT = 0.80
+
+# Rough token estimator constant: ~4 chars per token for English+code.
+# Not exact (real tokenizers vary), but stable enough for soft/hard
+# thresholding. Underestimating is worse than overestimating here, so
+# we round UP in the injector.
+_TOKENS_PER_CHAR = 0.25
 
 # Hard caps on read("trace", ...) output. The line-count cap forces
 # chunked reads (agent paginates via offset) so trajectories stay bounded.
@@ -41,6 +66,37 @@ TRACE_MAX_LINE_BYTES = 5_000       # per-line truncation cap
 TRACE_MAX_CHUNK_BYTES = 50_000     # total chunk payload cap
 
 
+# ── Reasoning schemas ────────────────────────────────────────────────────
+
+
+class Finding(BaseModel):
+	"""A structured finding captured by the agent during trace scanning.
+
+	Findings are the atom of the agent's persistent reasoning state. One
+	note() tool call can record a list of Findings; they accumulate in
+	ctx.deps.notes and stay visible to the agent both via the NOTES system
+	message (injected by notes_state_injector each turn) and via the note()
+	tool call arguments that persist in conversation history.
+
+	Each Finding must point back to the trace via `offset` so the agent can
+	re-read the exact chunk if needed when writing the final memory. This
+	preserves evidence fidelity even after the originating chunk read has
+	been stubbed by prune().
+	"""
+
+	theme: str = Field(
+		description="Short theme label, e.g. 'DSPy migration' or 'config refactor'"
+	)
+	offset: int = Field(description="Trace line where the supporting evidence appears")
+	quote: str = Field(
+		description=(
+			"Verbatim quote from the trace supporting this finding. Keep it "
+			"short — under ~200 characters. The quote is the evidence, not the "
+			"conclusion."
+		)
+	)
+
+
 # ── Deps ─────────────────────────────────────────────────────────────────
 
 
@@ -48,14 +104,29 @@ TRACE_MAX_CHUNK_BYTES = 50_000     # total chunk payload cap
 class ExtractDeps:
 	"""Dependencies injected into every tool call.
 
-	Holds paths only. Tools reach memory files, the session trace, and the
-	run workspace via ctx.deps.memory_root / ctx.deps.trace_path /
-	ctx.deps.run_folder — never via a class instance.
+	Holds paths AND per-run mutable reasoning state. Tools reach memory
+	files, the session trace, and the run workspace via ctx.deps.memory_root
+	/ ctx.deps.trace_path / ctx.deps.run_folder. Tools and history_processors
+	share per-run state via:
+
+	- ctx.deps.notes: list of Finding objects populated by the note() tool
+	  during scanning. Visible to the agent via notes_state_injector's
+	  NOTES system message each turn and via note() tool call arguments in
+	  conversation history.
+	- ctx.deps.pruned_offsets: set of trace offsets the agent has asked to
+	  prune via the prune() tool. prune_history_processor reads this set
+	  each turn and stubs matching read('trace', offset=X, ...) tool
+	  returns to '[pruned]' to free context.
+
+	Mutable fields use field(default_factory=...) so each run starts with
+	fresh state — no cross-run leakage.
 	"""
 
 	memory_root: Path
 	trace_path: Path | None = None
 	run_folder: Path | None = None
+	notes: list[Finding] = field(default_factory=list)
+	pruned_offsets: set[int] = field(default_factory=set)
 
 
 # ── Internal helpers (not tools) ─────────────────────────────────────────
@@ -130,13 +201,22 @@ def read(ctx: RunContext[ExtractDeps], filename: str, offset: int = 0, limit: in
 			trace reads). Default 0.
 	"""
 	deps = ctx.deps
+	# Defensive: strip whitespace the model may append to the filename.
+	if isinstance(filename, str):
+		filename = filename.strip()
 	path = _resolve(deps, filename)
 	if path is None:
-		if not filename or not filename.strip():
-			return "Error: filename cannot be empty"
+		if not filename:
+			return (
+				"Error: read() requires a filename argument. "
+				"Examples: read('index.md'), "
+				"read('trace', offset=0, limit=100), "
+				"read('feedback_tabs.md'). "
+				"Retry with one of these shapes."
+			)
 		if filename in ("trace", "trace.jsonl"):
 			return "Error: no trace path configured"
-		return f"Error: invalid filename: {filename}"
+		return f"Error: invalid filename: {filename!r}"
 	if not path.exists():
 		return f"Error: file not found: {filename}"
 	if not path.is_file():
@@ -206,13 +286,18 @@ def grep(ctx: RunContext[ExtractDeps], filename: str, pattern: str, context_line
 		context_lines: Lines of context around each match. Default 2.
 	"""
 	deps = ctx.deps
+	# Defensive: strip whitespace the model may append to the filename/pattern.
+	if isinstance(filename, str):
+		filename = filename.strip()
+	if isinstance(pattern, str):
+		pattern = pattern.strip()
 	path = _resolve(deps, filename)
 	if path is None:
-		if not filename or not filename.strip():
-			return "Error: filename cannot be empty"
+		if not filename:
+			return "Error: grep() requires a filename argument (e.g. 'trace' or 'index.md')"
 		if filename in ("trace", "trace.jsonl"):
 			return "Error: no trace path configured"
-		return f"Error: invalid filename: {filename}"
+		return f"Error: invalid filename: {filename!r}"
 	if not path.exists():
 		return f"Error: file not found: {filename}"
 
@@ -325,6 +410,9 @@ def verify_index(ctx: RunContext[ExtractDeps], filename: str = "index.md") -> st
 		filename: Index file to verify. Default "index.md".
 	"""
 	deps = ctx.deps
+	# Defensive: strip whitespace the model may append.
+	if isinstance(filename, str):
+		filename = filename.strip() or "index.md"
 	index_path = deps.memory_root / "index.md"
 	md_files = sorted(deps.memory_root.glob("*.md"))
 	memory_files = {f.name for f in md_files if f.name != "index.md"}
@@ -383,6 +471,84 @@ def verify_index(ctx: RunContext[ExtractDeps], filename: str = "index.md") -> st
 	return "\n".join(parts)
 
 
+# ── Reasoning-state tools (note, prune) ─────────────────────────────────
+#
+# These two tools don't touch disk. They manage the agent's in-run
+# reasoning state (ctx.deps.notes, ctx.deps.pruned_offsets) so the agent
+# can accumulate structured findings while dynamically freeing context.
+# History processors (notes_state_injector, prune_history_processor)
+# consume this state on each subsequent turn to keep the agent grounded.
+
+
+# Short stub string used by prune_history_processor to replace pruned
+# trace-chunk tool returns. Kept deliberately tiny (~2 tokens) because
+# every subsequent turn pays for every pruned stub in context.
+PRUNED_STUB = "[pruned]"
+
+
+def note(ctx: RunContext[ExtractDeps], findings: list[Finding]) -> str:
+	"""Record structured findings from the trace chunks you just read.
+
+	Call this after reading one or more trace chunks to capture extractable
+	signal before pruning those chunks. Findings accumulate in your persistent
+	reasoning state and stay visible every turn via the NOTES system message.
+	You can batch multiple findings from several chunks in a single call — do
+	that whenever natural to save a tool turn.
+
+	After you note() a chunk's findings, it's safe to prune() that chunk to
+	free context. The finding's `offset` field lets you re-read the exact
+	trace lines later if you need the full context when writing the memory.
+
+	Args:
+		findings: List of Finding(theme, offset, quote) objects. `theme` is
+			a short label like 'DSPy migration' or 'config refactor' that
+			groups related findings. `offset` is the trace line where the
+			evidence appears (use the offset you just read from).  `quote`
+			is a short verbatim snippet from the trace (under ~200 chars)
+			that supports the finding.
+	"""
+	deps = ctx.deps
+	deps.notes.extend(findings)
+	total = len(deps.notes)
+	return f"Noted {len(findings)} findings (total {total} so far)."
+
+
+def prune(ctx: RunContext[ExtractDeps], trace_offsets: list[int]) -> str:
+	"""Drop trace-chunk read results from context to free tokens.
+
+	Call this when the CONTEXT: system message shows soft or hard pressure
+	(>60% or >80% usage) AND you have already captured findings from those
+	chunks via note(). Pruning replaces the results of matching
+	read('trace', offset=X, ...) calls with a short '[pruned]' stub. The
+	tool CALLS themselves remain visible so you still know 'I already read
+	offset X' — only the chunk CONTENT is discarded.
+
+	Pruning is NOT destructive to evidence: if you later need the full text
+	of a pruned chunk (e.g. to extract a verbatim quote for a write() call),
+	you can always call read('trace', offset=X, limit=N) again. Your notes
+	preserve the finding themes and offsets even when chunks are pruned.
+
+	Only trace-chunk reads can be pruned. index.md, memory files, scan()
+	results, and grep() results are never touched.
+
+	Args:
+		trace_offsets: Offsets of prior read('trace', offset=X, limit=N)
+			calls whose results should be stubbed. Example: [0, 100, 200]
+			prunes the first three chunk reads. You can batch several
+			offsets in one call.
+	"""
+	deps = ctx.deps
+	if not trace_offsets:
+		return "No offsets to prune."
+	before = len(deps.pruned_offsets)
+	deps.pruned_offsets.update(trace_offsets)
+	added = len(deps.pruned_offsets) - before
+	return (
+		f"Pruned {added} new offset(s) (requested {len(trace_offsets)}; "
+		f"total pruned: {len(deps.pruned_offsets)})."
+	)
+
+
 def write(ctx: RunContext[ExtractDeps], type: str, name: str, description: str, body: str) -> str:
 	"""Create a new memory or summary file.
 
@@ -409,12 +575,27 @@ def write(ctx: RunContext[ExtractDeps], type: str, name: str, description: str, 
 	"""
 	deps = ctx.deps
 
+	# --- Defensive arg normalization ---
+	# Models (esp. MiniMax-M2.5) occasionally serialize tool-call string args
+	# with trailing newlines or padding whitespace. Before v5 this caused
+	# spurious validation rejections where type="summary\n" wasn't in
+	# MEMORY_TYPES and the model had to burn a retry. Stripping at the tool
+	# boundary turns those failures into silent successes.
+	if isinstance(type, str):
+		type = type.strip()
+	if isinstance(name, str):
+		name = name.strip()
+	if isinstance(description, str):
+		description = description.strip()
+	# body stays untouched — it's multi-line markdown and trailing newlines
+	# inside the body are semantically meaningful.
+
 	# --- Validate ---
 	if type not in MEMORY_TYPES:
-		return f"Error: type must be one of {MEMORY_TYPES}, got '{type}'"
-	if not name or not name.strip():
+		return f"Error: type must be one of {MEMORY_TYPES}, got {type!r}"
+	if not name:
 		return "Error: name cannot be empty"
-	if not description or not description.strip():
+	if not description:
 		return "Error: description cannot be empty"
 	if not body or not body.strip():
 		return "Error: body cannot be empty"
@@ -432,12 +613,19 @@ def write(ctx: RunContext[ExtractDeps], type: str, name: str, description: str, 
 
 	target = target_dir / filename
 
-	# --- If file exists, tell model to use read + edit ---
+	# --- If file exists, tell model to STOP writing this topic ---
+	# Sharpened 2026-04-11 after smoke showed the agent retrying write()
+	# with slug variants (feedback_foo → feedback_foo_v2 → ...) when it
+	# saw "already exists". The new wording is terminal: stop for this
+	# topic, either read+edit or skip. Retry with a slug variant is a bug.
 	if target.exists():
 		return (
-			f"Error: '{filename}' already exists. "
-			f"Use read(\"{filename}\") to see its content, "
-			f"then edit(\"{filename}\", old_string, new_string) to update it."
+			f"Error: '{filename}' already exists. STOP writing this topic. "
+			f"Do NOT call write() again with this name OR a similar slug variant. "
+			f"Your two allowed next actions: "
+			f"(1) read(\"{filename}\") + edit(\"{filename}\", ...) to update it, "
+			f"OR (2) skip this candidate and move to the next memory. "
+			f"Retrying write() with any variant of this name is a bug."
 		)
 
 	# --- Build frontmatter + body ---
@@ -491,11 +679,14 @@ def edit(
 			1-based line number. 0 means no hint. Default 0.
 	"""
 	deps = ctx.deps
+	# Defensive: strip whitespace the model may append to the filename.
+	if isinstance(filename, str):
+		filename = filename.strip()
 	path = _resolve(deps, filename)
 	if path is None:
-		if not filename or not filename.strip():
-			return "Error: filename cannot be empty"
-		return f"Error: invalid filename: {filename}"
+		if not filename:
+			return "Error: edit() requires a filename argument (e.g. 'feedback_tabs.md' or 'index.md')"
+		return f"Error: invalid filename: {filename!r}"
 	if not path.exists():
 		return f"Error: file not found: {filename}"
 
@@ -579,6 +770,251 @@ def archive(ctx: RunContext[ExtractDeps], filename: str) -> str:
 	target = archive_dir / path.name
 	shutil.move(str(path), str(target))
 	return json.dumps({"archived": filename, "moved_to": f"archived/{filename}"})
+
+
+# ── Budget helper and history_processors ────────────────────────────────
+#
+# compute_request_budget() scales the per-run agent.run_sync() request_limit
+# with trace size — short traces get a small budget, 2000-line traces get
+# ~45 turns, pathological traces clamp at 80.
+#
+# The three history_processors are plain module-level functions with
+# signature (ctx: RunContext[ExtractDeps], messages: list[ModelMessage]) ->
+# list[ModelMessage]. PydanticAI 1.70.0's dispatcher inspects the first
+# parameter type and passes RunContext when it sees the annotation — so
+# these functions can read ctx.deps.notes and ctx.deps.pruned_offsets
+# directly without any closure factory plumbing.
+#
+# Processor order matters for the system-message injection order as the
+# agent sees them: agent.run_sync(history_processors=[context_pressure,
+# notes_state, prune_rewriter]) injects CONTEXT first, then NOTES, then
+# does the prune rewrite.
+
+
+def compute_request_budget(trace_path: Path) -> int:
+	"""Scale the agent's request_limit with trace size.
+
+	Formula: 25 base + 2 * chunks_needed, clamped to [50, 100].
+
+	Base (25) covers: orient, grep, a few synthesis thinking turns,
+	verify_index, 2-4 writes, the session summary, and a few retry
+	slots (Agent's ``retries=3`` means a flubbed tool call can burn
+	up to 3 slots of the same "effective" action). Per-chunk factor
+	of 2 covers both the ``read`` AND its follow-up
+	``note``/``prune`` activity. Floor 50 gives the smallest traces
+	comfortable headroom without being wasteful.
+
+	Floor 50 was empirically established during smoke testing:
+	20-floor traces hit ``UsageLimitExceeded`` on 137- and 157-line
+	inputs despite their tiny size, because the agent goes through
+	the full scan/note/prune ceremony and ``retries=3`` amplifies
+	every flubbed tool call. 30-floor also turned out tight with the
+	retry buffer; 50 is the new safe floor.
+
+	Examples:
+		100-line trace  (1 chunk)  → max(50, 27) = 50 (floor)
+		500-line trace  (5 chunks) → max(50, 35) = 50 (floor)
+		1000-line trace (10 chunks)→ max(50, 45) = 50 (floor)
+		2000-line trace (20 chunks)→ max(50, 65) = 65
+		2165-line trace (21 chunks)→ max(50, 67) = 67
+		5000-line trace (50 chunks)→ min(100, 125) = 100 (ceiling)
+
+	Args:
+		trace_path: Path to the session trace .jsonl file. Line count
+			determines the chunk budget. Unreadable files fall back to
+			a safe 100-line estimate so the agent still gets a budget.
+	"""
+	try:
+		with trace_path.open("r", encoding="utf-8") as fh:
+			lines = sum(1 for _ in fh)
+	except (OSError, UnicodeDecodeError):
+		lines = 100
+	chunks_needed = max(1, lines // TRACE_MAX_LINES_PER_READ)
+	raw = 25 + 2 * chunks_needed
+	return max(50, min(100, raw))
+
+
+def _estimate_message_tokens(messages: list[ModelMessage]) -> int:
+	"""Rough token count for a message list via ~4-char/token heuristic.
+
+	Not exact — real tokenizers vary ±20% — but stable and fast enough for
+	soft/hard pressure thresholding. Rounds UP (via ceiling) because over-
+	estimating is safer than under-estimating here: we want the agent to
+	see pressure slightly earlier than strictly necessary.
+	"""
+	total_chars = 0
+	for msg in messages:
+		for part in msg.parts:
+			# String-bearing fields across the message part dataclasses.
+			content = getattr(part, "content", None)
+			if isinstance(content, str):
+				total_chars += len(content)
+			elif isinstance(content, list):
+				for item in content:
+					if isinstance(item, str):
+						total_chars += len(item)
+					else:
+						# Best-effort for non-str user content.
+						total_chars += len(str(item))
+			args = getattr(part, "args", None)
+			if isinstance(args, str):
+				total_chars += len(args)
+			elif isinstance(args, dict):
+				total_chars += len(json.dumps(args))
+	return int(total_chars * _TOKENS_PER_CHAR) + 1
+
+
+def _inject_system_message(messages: list[ModelMessage], label: str) -> None:
+	"""Append a fresh SystemPromptPart with `label` to the last ModelRequest.
+
+	The last ModelRequest is the one about to be sent to the model, so
+	injecting there guarantees the agent sees the status on THIS turn (not
+	next turn). Mutates `messages` in place; caller is expected to return
+	the same list.
+	"""
+	target: ModelRequest | None = None
+	for msg in reversed(messages):
+		if isinstance(msg, ModelRequest):
+			target = msg
+			break
+	if target is None:
+		return
+	target.parts.append(
+		SystemPromptPart(
+			content=label,
+			timestamp=datetime.now(timezone.utc),
+		)
+	)
+
+
+def context_pressure_injector(
+	ctx: RunContext[ExtractDeps],
+	messages: list[ModelMessage],
+) -> list[ModelMessage]:
+	"""Inject a CONTEXT: status line with graduated pressure warnings.
+
+	Fires every turn. The agent always sees how close it is to the context
+	limit. Soft pressure at 60%+ suggests pruning; hard pressure at 80%+
+	demands it before any further read(). No force-eviction — the agent is
+	responsible for acting on the pressure (per plan phase one). If
+	experimentation shows the agent ignores hard pressure, a phase-two
+	safety net can be added.
+	"""
+	tokens = _estimate_message_tokens(messages)
+	pct = tokens / MODEL_CONTEXT_TOKEN_LIMIT
+	if pct > CONTEXT_HARD_PRESSURE_PCT:
+		label = (
+			f"CONTEXT: {tokens:,}/{MODEL_CONTEXT_TOKEN_LIMIT:,} "
+			f"({pct:.0%}) — HARD PRESSURE: prune(trace_offsets=[...]) "
+			f"BEFORE your next read('trace', ...)"
+		)
+	elif pct > CONTEXT_SOFT_PRESSURE_PCT:
+		label = (
+			f"CONTEXT: {tokens:,}/{MODEL_CONTEXT_TOKEN_LIMIT:,} "
+			f"({pct:.0%}) — soft pressure: consider prune() on chunks "
+			f"you've already captured via note()"
+		)
+	else:
+		label = (
+			f"CONTEXT: {tokens:,}/{MODEL_CONTEXT_TOKEN_LIMIT:,} ({pct:.0%})"
+		)
+	_inject_system_message(messages, label)
+	return messages
+
+
+def notes_state_injector(
+	ctx: RunContext[ExtractDeps],
+	messages: list[ModelMessage],
+) -> list[ModelMessage]:
+	"""Inject a NOTES: status line summarizing ctx.deps.notes each turn.
+
+	Gives the agent an always-fresh view of its accumulated findings
+	without scanning conversation history. Groups findings by theme with
+	counts so the agent sees the rough shape of its own synthesis as it
+	scans the trace.
+
+	Reads live state from ctx.deps.notes — mutation by note() in turn N
+	is visible to this injector in turn N+1 (confirmed on scratch
+	validation script).
+	"""
+	notes = ctx.deps.notes
+	if not notes:
+		label = "NOTES: 0 findings (scan phase in progress)"
+	else:
+		theme_counts: Counter[str] = Counter(f.theme for f in notes)
+		theme_list = ", ".join(
+			f"'{theme}' ({count})" for theme, count in theme_counts.most_common()
+		)
+		label = (
+			f"NOTES: {len(notes)} findings across "
+			f"{len(theme_counts)} theme(s) — {theme_list}"
+		)
+	_inject_system_message(messages, label)
+	return messages
+
+
+def prune_history_processor(
+	ctx: RunContext[ExtractDeps],
+	messages: list[ModelMessage],
+) -> list[ModelMessage]:
+	"""Rewrite trace-read tool returns to '[pruned]' for offsets marked by prune().
+
+	Two-pass walk over `messages`:
+	  1. Collect tool_call_ids of read() calls where filename is 'trace'/
+	     'trace.jsonl' AND the call's offset argument is in
+	     ctx.deps.pruned_offsets.
+	  2. Rewrite the matching ToolReturnPart.content in place to PRUNED_STUB.
+
+	Preserves ToolCallPart intact so the agent still sees 'I already read
+	offset X' (the call record is the record of action). Only the chunk
+	TEXT is discarded. OpenAI chat format invariant: every tool call must
+	have a matching tool return with a non-empty content string —
+	PRUNED_STUB satisfies this.
+
+	Non-trace reads (index.md, memory files, scan, grep) are never touched.
+	"""
+	deps = ctx.deps
+	if not deps.pruned_offsets:
+		return messages
+
+	# Pass 1: collect tool_call_ids of pruneable read-trace calls.
+	pruned_ids: set[str] = set()
+	for msg in messages:
+		if not isinstance(msg, ModelResponse):
+			continue
+		for part in msg.parts:
+			if not isinstance(part, ToolCallPart):
+				continue
+			if part.tool_name != "read":
+				continue
+			args: Any = part.args
+			if isinstance(args, str):
+				try:
+					args = json.loads(args)
+				except json.JSONDecodeError:
+					continue
+			if not isinstance(args, dict):
+				continue
+			if args.get("filename") not in ("trace", "trace.jsonl"):
+				continue
+			offset = args.get("offset", 0)
+			if not isinstance(offset, int):
+				continue
+			if offset in deps.pruned_offsets:
+				pruned_ids.add(part.tool_call_id)
+
+	if not pruned_ids:
+		return messages
+
+	# Pass 2: rewrite matching ToolReturnPart.content in place.
+	for msg in messages:
+		if not isinstance(msg, ModelRequest):
+			continue
+		for part in msg.parts:
+			if isinstance(part, ToolReturnPart) and part.tool_call_id in pruned_ids:
+				part.content = PRUNED_STUB
+
+	return messages
 
 
 # ── Legacy compatibility shim (DSPy maintain/ask agents only) ────────────

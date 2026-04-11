@@ -554,11 +554,11 @@ def test_run_with_fallback_usage_limit_short_circuits(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_runtime_sync_imports_three_pass():
-	"""runtime.py must expose run_extraction_three_pass (the sync callable)."""
-	from lerim.server.runtime import run_extraction_three_pass
+def test_runtime_sync_imports_run_extraction():
+	"""runtime.py must expose run_extraction (the single-pass sync callable)."""
+	from lerim.server.runtime import run_extraction
 
-	assert callable(run_extraction_three_pass)
+	assert callable(run_extraction)
 
 
 def test_runtime_sync_imports_pydantic_build_model():

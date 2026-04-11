@@ -1,13 +1,31 @@
-"""Unit tests for MemoryTools (read, grep, scan, write, edit, archive)."""
+"""Unit tests for MemoryTools + new reasoning-state tools and history processors."""
 
 from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from lerim.agents.tools import MEMORY_TYPES, MemoryTools
+from lerim.agents.tools import (
+	CONTEXT_HARD_PRESSURE_PCT,
+	CONTEXT_SOFT_PRESSURE_PCT,
+	ExtractDeps,
+	Finding,
+	MEMORY_TYPES,
+	MODEL_CONTEXT_TOKEN_LIMIT,
+	MemoryTools,
+	PRUNED_STUB,
+	compute_request_budget,
+	context_pressure_injector,
+	note,
+	notes_state_injector,
+	prune,
+	prune_history_processor,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -983,3 +1001,569 @@ class TestDspyIntrospection:
 		assert "project" in MEMORY_TYPES
 		assert "reference" in MEMORY_TYPES
 		assert "summary" in MEMORY_TYPES
+
+
+# ---------------------------------------------------------------------------
+# Finding schema
+# ---------------------------------------------------------------------------
+
+
+class TestFinding:
+	"""Finding is the atom of the agent's persistent reasoning state.
+
+	These tests pin the schema shape so refactors can't silently drop a
+	required field. The full RL-training story in the plan depends on
+	theme/offset/quote being present on every finding.
+	"""
+
+	def test_finding_round_trip(self):
+		"""Construct a Finding, serialize, deserialize, check field equality."""
+		f = Finding(theme="DSPy migration", offset=142, quote="the three-pass was overengineered")
+		data = f.model_dump()
+		assert data == {"theme": "DSPy migration", "offset": 142, "quote": "the three-pass was overengineered"}
+		f2 = Finding.model_validate(data)
+		assert f2 == f
+
+	def test_finding_requires_all_three_fields(self):
+		"""Missing theme, offset, or quote should fail validation."""
+		from pydantic import ValidationError
+
+		with pytest.raises(ValidationError):
+			Finding(theme="x", offset=0)  # type: ignore[call-arg]
+		with pytest.raises(ValidationError):
+			Finding(theme="x", quote="y")  # type: ignore[call-arg]
+		with pytest.raises(ValidationError):
+			Finding(offset=0, quote="y")  # type: ignore[call-arg]
+
+	def test_finding_offset_is_int(self):
+		"""offset must coerce to int; non-integer strings reject."""
+		from pydantic import ValidationError
+
+		f = Finding(theme="x", offset=42, quote="y")
+		assert f.offset == 42
+		# Pydantic's default coercion accepts "42" → 42; non-numeric fails.
+		with pytest.raises(ValidationError):
+			Finding(theme="x", offset="not a number", quote="y")  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# note() tool — mutable state + tool call arg preservation
+# ---------------------------------------------------------------------------
+
+
+class TestNote:
+	"""note() is the primary way the agent records findings.
+
+	The tool writes findings into ctx.deps.notes (for programmatic access
+	and the notes_state_injector to read) AND the findings also appear as
+	tool call arguments in conversation history (for training signal /
+	agent self-recall). Both locations matter and are independently tested.
+	"""
+
+	def test_note_appends_to_deps_notes(self, tmp_path):
+		"""A single note() call extends deps.notes with the findings list."""
+		deps = ExtractDeps(memory_root=tmp_path)
+		ctx = SimpleNamespace(deps=deps)
+		findings = [
+			Finding(theme="migration", offset=10, quote="..."),
+			Finding(theme="migration", offset=42, quote="..."),
+		]
+		ret = note(ctx, findings)
+		assert deps.notes == findings
+		assert "Noted 2 findings" in ret
+		assert "total 2" in ret
+
+	def test_note_accumulates_across_calls(self, tmp_path):
+		"""Two note() calls with 3+2 findings produce deps.notes of length 5 in order."""
+		deps = ExtractDeps(memory_root=tmp_path)
+		ctx = SimpleNamespace(deps=deps)
+		first = [Finding(theme="a", offset=1, quote="q1") for _ in range(3)]
+		second = [Finding(theme="b", offset=2, quote="q2") for _ in range(2)]
+		note(ctx, first)
+		note(ctx, second)
+		assert len(deps.notes) == 5
+		assert deps.notes[:3] == first
+		assert deps.notes[3:] == second
+
+	def test_note_empty_list(self, tmp_path):
+		"""note() with an empty list is a no-op that still returns a string."""
+		deps = ExtractDeps(memory_root=tmp_path)
+		ctx = SimpleNamespace(deps=deps)
+		ret = note(ctx, [])
+		assert deps.notes == []
+		assert "Noted 0 findings" in ret
+
+
+# ---------------------------------------------------------------------------
+# prune() tool — mutable state + set-union semantics
+# ---------------------------------------------------------------------------
+
+
+class TestPrune:
+	"""prune() marks trace offsets for stubbing via prune_history_processor.
+
+	prune() only touches ctx.deps.pruned_offsets — it does NOT rewrite
+	message history. That rewrite is done by prune_history_processor on
+	the next turn. These tests cover the tool's own state-mutation
+	contract; the processor behavior is tested separately below.
+	"""
+
+	def test_prune_populates_pruned_offsets(self, tmp_path):
+		"""A single prune() call updates the set."""
+		deps = ExtractDeps(memory_root=tmp_path)
+		ctx = SimpleNamespace(deps=deps)
+		ret = prune(ctx, [0, 100, 200])
+		assert deps.pruned_offsets == {0, 100, 200}
+		assert "Pruned 3 new" in ret
+
+	def test_prune_set_union_semantics(self, tmp_path):
+		"""Two prune() calls union their offsets; duplicates are not re-counted."""
+		deps = ExtractDeps(memory_root=tmp_path)
+		ctx = SimpleNamespace(deps=deps)
+		prune(ctx, [0, 100])
+		ret = prune(ctx, [100, 200])  # 100 is a duplicate
+		assert deps.pruned_offsets == {0, 100, 200}
+		# "new" should reflect only the genuinely-new additions (200, i.e. 1)
+		assert "Pruned 1 new" in ret
+		assert "total pruned: 3" in ret
+
+	def test_prune_empty_list_is_noop(self, tmp_path):
+		"""prune([]) returns a short no-op message without mutating state."""
+		deps = ExtractDeps(memory_root=tmp_path)
+		ctx = SimpleNamespace(deps=deps)
+		ret = prune(ctx, [])
+		assert deps.pruned_offsets == set()
+		assert "No offsets" in ret
+
+
+# ---------------------------------------------------------------------------
+# compute_request_budget — auto-scaled request_limit
+# ---------------------------------------------------------------------------
+
+
+class TestComputeRequestBudget:
+	"""Budget formula: max(50, min(100, 25 + 2*chunks))
+
+	Where chunks = max(1, lines // 100). The 50-floor covers short-trace
+	overhead plus the Agent's retries=3 buffer; the 100-ceiling protects
+	against pathological inputs. Floor was bumped from 20→30→50 after
+	smoke-testing on MiniMax showed small traces (137-line, 157-line)
+	exhausting the tighter budgets.
+	"""
+
+	def _make_trace(self, tmp_path, n_lines: int) -> Path:
+		trace = tmp_path / f"trace_{n_lines}.jsonl"
+		trace.write_text("\n".join(["x"] * n_lines), encoding="utf-8")
+		return trace
+
+	@pytest.mark.parametrize(
+		"n_lines,expected",
+		[
+			(50, 50),      # floor — tiny trace
+			(100, 50),     # floor — exactly one chunk (25+2)
+			(500, 50),     # floor — 25+10=35 below floor
+			(1000, 50),    # floor — 25+20=45 below floor
+			(2000, 65),    # 25 + 40
+			(2165, 67),    # 25 + 42 — claude_028 outlier
+			(10000, 100),  # 25 + 200 → ceiling
+			(20000, 100),  # ceiling (well past)
+		],
+	)
+	def test_budget_table(self, tmp_path, n_lines, expected):
+		"""Table-driven budget test for representative trace sizes."""
+		trace = self._make_trace(tmp_path, n_lines)
+		assert compute_request_budget(trace) == expected
+
+	def test_budget_unreadable_file_falls_back_safely(self, tmp_path):
+		"""A non-existent path falls back to the 100-line estimate (floor 50)."""
+		ghost = tmp_path / "ghost.jsonl"
+		assert not ghost.exists()
+		assert compute_request_budget(ghost) == 50
+
+
+# ---------------------------------------------------------------------------
+# History processors — test helpers
+# ---------------------------------------------------------------------------
+
+
+def _fake_ctx(deps: ExtractDeps) -> object:
+	"""Lightweight ctx stand-in. Processors only read ctx.deps, so
+	SimpleNamespace duck-types a real RunContext for unit tests.
+	"""
+	return SimpleNamespace(deps=deps)
+
+
+def _make_model_request_with_user_prompt(text: str):
+	"""Build a ModelRequest containing a single UserPromptPart with `text`."""
+	from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+	return ModelRequest(
+		parts=[UserPromptPart(content=text, timestamp=datetime.now(timezone.utc))]
+	)
+
+
+def _make_read_trace_call_and_return(
+	offset: int,
+	tool_call_id: str,
+	chunk_text: str,
+):
+	"""Build a (ModelResponse(ToolCallPart), ModelRequest(ToolReturnPart)) pair.
+
+	Matches the real shape PydanticAI produces for a read("trace", offset=N,
+	limit=100) round-trip: a ModelResponse holding the ToolCallPart followed
+	by a ModelRequest holding the matching ToolReturnPart.
+	"""
+	from pydantic_ai.messages import (
+		ModelRequest,
+		ModelResponse,
+		ToolCallPart,
+		ToolReturnPart,
+	)
+
+	call = ModelResponse(
+		parts=[
+			ToolCallPart(
+				tool_name="read",
+				args={"filename": "trace", "offset": offset, "limit": 100},
+				tool_call_id=tool_call_id,
+			)
+		]
+	)
+	ret = ModelRequest(
+		parts=[
+			ToolReturnPart(
+				tool_name="read",
+				content=chunk_text,
+				tool_call_id=tool_call_id,
+				metadata=None,
+				timestamp=datetime.now(timezone.utc),
+			)
+		]
+	)
+	return call, ret
+
+
+# ---------------------------------------------------------------------------
+# context_pressure_injector
+# ---------------------------------------------------------------------------
+
+
+class TestContextPressureInjector:
+	"""Injects a CONTEXT: system message with graduated pressure labels.
+
+	Label thresholds: <60% status only, 60-80% soft pressure, >80% hard.
+	Size is estimated via a 4-char/token heuristic over all string-bearing
+	message parts.
+	"""
+
+	def _messages_with_user_content(self, char_count: int):
+		"""Build a minimal message list with one user prompt of the given size."""
+		msg = _make_model_request_with_user_prompt("x" * char_count)
+		return [msg]
+
+	def test_low_pressure_status_only(self, tmp_path):
+		"""Below 60% only the plain CONTEXT: X/Y (pct%) line appears."""
+		deps = ExtractDeps(memory_root=tmp_path)
+		ctx = _fake_ctx(deps)
+		# 10K chars → ~2.5K tokens → well under 60% of 128K
+		messages = self._messages_with_user_content(10_000)
+		out = context_pressure_injector(ctx, messages)
+		from pydantic_ai.messages import SystemPromptPart
+
+		labels = [
+			p.content for m in out
+			for p in m.parts if isinstance(p, SystemPromptPart)
+		]
+		assert any("CONTEXT:" in l for l in labels)
+		# No pressure wording
+		for l in labels:
+			if "CONTEXT:" in l:
+				assert "pressure" not in l.lower()
+				assert "HARD" not in l
+
+	def test_soft_pressure_label(self, tmp_path):
+		"""60-80% triggers soft pressure wording suggesting prune()."""
+		deps = ExtractDeps(memory_root=tmp_path)
+		ctx = _fake_ctx(deps)
+		# Target ~65% of 128K → ~83K tokens → ~332K chars
+		soft_chars = int(
+			MODEL_CONTEXT_TOKEN_LIMIT * 4 * ((CONTEXT_SOFT_PRESSURE_PCT + CONTEXT_HARD_PRESSURE_PCT) / 2)
+		)
+		messages = self._messages_with_user_content(soft_chars)
+		context_pressure_injector(ctx, messages)
+		from pydantic_ai.messages import SystemPromptPart
+
+		labels = [
+			p.content for m in messages
+			for p in m.parts if isinstance(p, SystemPromptPart)
+		]
+		ctx_labels = [l for l in labels if "CONTEXT:" in l]
+		assert ctx_labels, "Expected at least one CONTEXT: label"
+		assert any("soft pressure" in l for l in ctx_labels)
+		assert not any("HARD PRESSURE" in l for l in ctx_labels)
+
+	def test_hard_pressure_label(self, tmp_path):
+		"""Above 80% triggers HARD PRESSURE wording demanding prune()."""
+		deps = ExtractDeps(memory_root=tmp_path)
+		ctx = _fake_ctx(deps)
+		# Target ~90% of 128K
+		hard_chars = int(MODEL_CONTEXT_TOKEN_LIMIT * 4 * 0.90)
+		messages = self._messages_with_user_content(hard_chars)
+		context_pressure_injector(ctx, messages)
+		from pydantic_ai.messages import SystemPromptPart
+
+		labels = [
+			p.content for m in messages
+			for p in m.parts if isinstance(p, SystemPromptPart)
+		]
+		ctx_labels = [l for l in labels if "CONTEXT:" in l]
+		assert ctx_labels
+		assert any("HARD PRESSURE" in l for l in ctx_labels)
+
+
+# ---------------------------------------------------------------------------
+# notes_state_injector
+# ---------------------------------------------------------------------------
+
+
+class TestNotesStateInjector:
+	"""Injects a NOTES: line summarizing deps.notes grouped by theme.
+
+	These tests pin the live-state invariant: mutating deps.notes between
+	two processor calls must yield two different injected messages.
+	"""
+
+	def test_empty_notes_shows_zero(self, tmp_path):
+		"""No findings yet → NOTES: 0 findings."""
+		deps = ExtractDeps(memory_root=tmp_path)
+		ctx = _fake_ctx(deps)
+		messages = [_make_model_request_with_user_prompt("hi")]
+		notes_state_injector(ctx, messages)
+		from pydantic_ai.messages import SystemPromptPart
+
+		labels = [
+			p.content for m in messages
+			for p in m.parts if isinstance(p, SystemPromptPart)
+		]
+		assert any("NOTES:" in l and "0 findings" in l for l in labels)
+
+	def test_notes_grouped_by_theme(self, tmp_path):
+		"""deps.notes with 8 findings across 3 themes produces a label listing all three."""
+		deps = ExtractDeps(memory_root=tmp_path)
+		ctx = _fake_ctx(deps)
+		deps.notes.extend([
+			Finding(theme="DSPy migration", offset=1, quote="a"),
+			Finding(theme="DSPy migration", offset=2, quote="b"),
+			Finding(theme="DSPy migration", offset=3, quote="c"),
+			Finding(theme="config refactor", offset=10, quote="d"),
+			Finding(theme="config refactor", offset=11, quote="e"),
+			Finding(theme="config refactor", offset=12, quote="f"),
+			Finding(theme="config refactor", offset=13, quote="g"),
+			Finding(theme="robustness", offset=20, quote="h"),
+		])
+		messages = [_make_model_request_with_user_prompt("hi")]
+		notes_state_injector(ctx, messages)
+		from pydantic_ai.messages import SystemPromptPart
+
+		labels = [
+			p.content for m in messages
+			for p in m.parts if isinstance(p, SystemPromptPart)
+		]
+		notes_line = next((l for l in labels if l.startswith("NOTES:")), None)
+		assert notes_line is not None
+		assert "8 findings" in notes_line
+		assert "3 theme" in notes_line
+		assert "DSPy migration" in notes_line
+		assert "config refactor" in notes_line
+		assert "robustness" in notes_line
+
+	def test_reads_live_state_not_snapshot(self, tmp_path):
+		"""Mutating deps.notes between two calls changes the injected label.
+
+		This pins the core closure-free design: the processor must read
+		ctx.deps.notes each call, not capture a snapshot.
+		"""
+		deps = ExtractDeps(memory_root=tmp_path)
+		ctx = _fake_ctx(deps)
+
+		# First call — 1 theme
+		deps.notes.append(Finding(theme="theme1", offset=1, quote="q"))
+		messages_1 = [_make_model_request_with_user_prompt("turn 1")]
+		notes_state_injector(ctx, messages_1)
+		from pydantic_ai.messages import SystemPromptPart
+
+		labels_1 = [
+			p.content for m in messages_1
+			for p in m.parts if isinstance(p, SystemPromptPart)
+		]
+		line_1 = next((l for l in labels_1 if l.startswith("NOTES:")), None)
+		assert line_1 is not None
+		assert "1 theme" in line_1
+
+		# Mutate deps.notes (like a note() call between turns) — add a new theme.
+		deps.notes.append(Finding(theme="theme2", offset=2, quote="q2"))
+
+		# Second call — should reflect the NEW state (2 themes)
+		messages_2 = [_make_model_request_with_user_prompt("turn 2")]
+		notes_state_injector(ctx, messages_2)
+		labels_2 = [
+			p.content for m in messages_2
+			for p in m.parts if isinstance(p, SystemPromptPart)
+		]
+		line_2 = next((l for l in labels_2 if l.startswith("NOTES:")), None)
+		assert line_2 is not None
+		assert "2 theme" in line_2
+		assert "theme2" in line_2
+
+
+# ---------------------------------------------------------------------------
+# prune_history_processor
+# ---------------------------------------------------------------------------
+
+
+class TestPruneHistoryProcessor:
+	"""Rewrites trace-read ToolReturnPart.content to '[pruned]' for matching offsets.
+
+	Tool calls themselves are preserved (agent still knows it read X);
+	only the content is neutralized. Non-trace reads are never touched
+	even if their offset argument happens to match.
+	"""
+
+	def test_rewrites_matching_trace_returns(self, tmp_path):
+		"""Three read-trace tool pairs at offsets 0/100/200; prune {0, 100}; only 0 and 100 become '[pruned]'."""
+		from pydantic_ai.messages import ToolReturnPart
+
+		deps = ExtractDeps(memory_root=tmp_path, pruned_offsets={0, 100})
+		ctx = _fake_ctx(deps)
+
+		messages: list = []
+		call_0, ret_0 = _make_read_trace_call_and_return(0, "c0", "chunk at 0")
+		call_1, ret_1 = _make_read_trace_call_and_return(100, "c100", "chunk at 100")
+		call_2, ret_2 = _make_read_trace_call_and_return(200, "c200", "chunk at 200")
+		messages = [call_0, ret_0, call_1, ret_1, call_2, ret_2]
+
+		prune_history_processor(ctx, messages)
+
+		# Walk results and check content
+		tr_parts = [
+			p for m in messages
+			for p in m.parts if isinstance(p, ToolReturnPart)
+		]
+		contents = {p.tool_call_id: p.content for p in tr_parts}
+		assert contents["c0"] == PRUNED_STUB
+		assert contents["c100"] == PRUNED_STUB
+		assert contents["c200"] == "chunk at 200"
+
+	def test_tool_call_parts_are_untouched(self, tmp_path):
+		"""Tool CALLS stay intact even when their RETURNS are stubbed.
+
+		The agent must still see that it read offset X on a prior turn —
+		otherwise it might loop re-reading the same chunk.
+		"""
+		from pydantic_ai.messages import ToolCallPart
+
+		deps = ExtractDeps(memory_root=tmp_path, pruned_offsets={0})
+		ctx = _fake_ctx(deps)
+
+		call_0, ret_0 = _make_read_trace_call_and_return(0, "c0", "chunk at 0")
+		messages = [call_0, ret_0]
+		prune_history_processor(ctx, messages)
+
+		tc_parts = [
+			p for m in messages
+			for p in m.parts if isinstance(p, ToolCallPart)
+		]
+		assert len(tc_parts) == 1
+		assert tc_parts[0].tool_name == "read"
+		assert tc_parts[0].args == {"filename": "trace", "offset": 0, "limit": 100}
+		assert tc_parts[0].tool_call_id == "c0"
+
+	def test_non_trace_reads_unaffected(self, tmp_path):
+		"""read('index.md') results are NEVER stubbed, even if offset matches."""
+		from pydantic_ai.messages import (
+			ModelRequest,
+			ModelResponse,
+			ToolCallPart,
+			ToolReturnPart,
+		)
+
+		deps = ExtractDeps(memory_root=tmp_path, pruned_offsets={0})
+		ctx = _fake_ctx(deps)
+
+		# Synthetic read('index.md', offset=0) pair — should NOT be pruned.
+		call = ModelResponse(
+			parts=[ToolCallPart(
+				tool_name="read",
+				args={"filename": "index.md", "offset": 0},
+				tool_call_id="idx0",
+			)]
+		)
+		ret = ModelRequest(
+			parts=[ToolReturnPart(
+				tool_name="read",
+				content="# Memory Index\n- foo.md\n",
+				tool_call_id="idx0",
+				metadata=None,
+				timestamp=datetime.now(timezone.utc),
+			)]
+		)
+		messages = [call, ret]
+		prune_history_processor(ctx, messages)
+
+		tr = [
+			p for m in messages
+			for p in m.parts if isinstance(p, ToolReturnPart)
+		]
+		assert tr[0].content == "# Memory Index\n- foo.md\n"
+
+	def test_no_op_when_pruned_offsets_empty(self, tmp_path):
+		"""Empty pruned_offsets → processor returns messages unchanged."""
+		deps = ExtractDeps(memory_root=tmp_path)
+		ctx = _fake_ctx(deps)
+		call_0, ret_0 = _make_read_trace_call_and_return(0, "c0", "chunk at 0")
+		messages = [call_0, ret_0]
+		prune_history_processor(ctx, messages)
+
+		from pydantic_ai.messages import ToolReturnPart
+		tr = [
+			p for m in messages
+			for p in m.parts if isinstance(p, ToolReturnPart)
+		]
+		assert tr[0].content == "chunk at 0"
+
+	def test_string_args_json_parse(self, tmp_path):
+		"""ToolCallPart.args may be a JSON string (some providers) — parse and match."""
+		from pydantic_ai.messages import (
+			ModelRequest,
+			ModelResponse,
+			ToolCallPart,
+			ToolReturnPart,
+		)
+
+		deps = ExtractDeps(memory_root=tmp_path, pruned_offsets={0})
+		ctx = _fake_ctx(deps)
+
+		call = ModelResponse(
+			parts=[ToolCallPart(
+				tool_name="read",
+				args='{"filename": "trace", "offset": 0, "limit": 100}',
+				tool_call_id="cstr",
+			)]
+		)
+		ret = ModelRequest(
+			parts=[ToolReturnPart(
+				tool_name="read",
+				content="chunk body",
+				tool_call_id="cstr",
+				metadata=None,
+				timestamp=datetime.now(timezone.utc),
+			)]
+		)
+		messages = [call, ret]
+		prune_history_processor(ctx, messages)
+
+		tr = [
+			p for m in messages
+			for p in m.parts if isinstance(p, ToolReturnPart)
+		]
+		assert tr[0].content == PRUNED_STUB

@@ -305,16 +305,14 @@ def test_port_over_65535_resets(tmp_path, monkeypatch):
 def test_agent_role_explicit_overrides():
     """_build_role uses explicit values over defaults.
 
-    Usage-limit keys are REQUIRED by _require_int, so the fixture must
-    supply them even if the test doesn't assert on the values.
+    Usage limits no longer live on RoleConfig — the single-pass extraction
+    agent auto-scales its budget from trace size, so this test only checks
+    the provider/model override path.
     """
     role = _build_role(
         {
             "provider": "anthropic",
             "model": "claude-3",
-            "usage_limit_reflect": 30,
-            "usage_limit_extract": 30,
-            "usage_limit_finalize": 30,
         },
         default_provider="openrouter",
         default_model="default-model",
@@ -331,9 +329,6 @@ def test_dspy_role_explicit_windowing():
             "model": "qwen3:8b",
             "max_window_tokens": 50000,
             "window_overlap_tokens": 2000,
-            "usage_limit_reflect": 30,
-            "usage_limit_extract": 30,
-            "usage_limit_finalize": 30,
         },
         default_provider="openrouter",
         default_model="default",

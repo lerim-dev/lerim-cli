@@ -1,7 +1,7 @@
 """Integration tests for extraction quality -- real LLM calls.
 
 Gate: LERIM_INTEGRATION=1. Uses retry_on_llm_flake for non-deterministic output.
-Each test runs the PydanticAI three-pass extraction pipeline against fixture
+Each test runs the PydanticAI single-pass extraction agent against fixture
 traces and asserts quality properties of the resulting memory files,
 summaries, and index.
 """
@@ -13,10 +13,9 @@ from pathlib import Path
 import frontmatter
 import pytest
 
-from lerim.agents.extract import run_extraction_three_pass
-from lerim.agents.extract_pydanticai import build_model
+from lerim.agents.extract import run_extraction
 from lerim.agents.tools import MemoryTools
-from lerim.config.settings import get_config
+from lerim.config.providers import build_pydantic_model
 from tests.integration.conftest import retry_on_llm_flake
 
 FIXTURES_DIR = Path(__file__).parents[1] / "fixtures"
@@ -38,11 +37,7 @@ def _summary_files(memory_root: Path) -> list[Path]:
 
 def _build_model_from_config():
 	"""Construct the primary PydanticAI chat model from the active config."""
-	config = get_config()
-	return build_model(
-		provider_name=config.agent_role.provider,
-		model_name=config.agent_role.model,
-	)
+	return build_pydantic_model("agent")
 
 
 @retry_on_llm_flake(max_attempts=3)
@@ -54,7 +49,7 @@ def test_extract_body_has_why_and_how(tmp_lerim_root):
 	(memory_root / "summaries").mkdir(exist_ok=True)
 	trace = TRACES_DIR / "claude_short.jsonl"
 
-	run_extraction_three_pass(
+	run_extraction(
 		memory_root=memory_root,
 		trace_path=trace,
 		model=_build_model_from_config(),
@@ -88,7 +83,7 @@ def test_extract_dedup_does_not_duplicate(tmp_lerim_root):
 	trace = TRACES_DIR / "claude_short.jsonl"
 
 	# First extraction
-	run_extraction_three_pass(
+	run_extraction(
 		memory_root=memory_root,
 		trace_path=trace,
 		model=_build_model_from_config(),
@@ -98,7 +93,7 @@ def test_extract_dedup_does_not_duplicate(tmp_lerim_root):
 	assert count_after_first >= 1, "First extraction should produce at least 1 memory"
 
 	# Second extraction on same trace, same memory_root
-	run_extraction_three_pass(
+	run_extraction(
 		memory_root=memory_root,
 		trace_path=trace,
 		model=_build_model_from_config(),
@@ -120,7 +115,7 @@ def test_extract_respects_do_not_extract(tmp_lerim_root):
 	(memory_root / "summaries").mkdir(exist_ok=True)
 	trace = TRACES_DIR / "edge_short.jsonl"
 
-	run_extraction_three_pass(
+	run_extraction(
 		memory_root=memory_root,
 		trace_path=trace,
 		model=_build_model_from_config(),
@@ -142,7 +137,7 @@ def test_extract_summary_has_sections(tmp_lerim_root):
 	(memory_root / "summaries").mkdir(exist_ok=True)
 	trace = TRACES_DIR / "claude_short.jsonl"
 
-	run_extraction_three_pass(
+	run_extraction(
 		memory_root=memory_root,
 		trace_path=trace,
 		model=_build_model_from_config(),
@@ -170,7 +165,7 @@ def test_extract_index_has_all_files(tmp_lerim_root):
 	(memory_root / "summaries").mkdir(exist_ok=True)
 	trace = TRACES_DIR / "claude_short.jsonl"
 
-	run_extraction_three_pass(
+	run_extraction(
 		memory_root=memory_root,
 		trace_path=trace,
 		model=_build_model_from_config(),

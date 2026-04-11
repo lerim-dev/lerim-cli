@@ -1,8 +1,11 @@
 """Runtime orchestrator for Lerim sync (PydanticAI) and maintain/ask (DSPy).
 
-Sync uses the PydanticAI three-pass pipeline in
-`lerim.agents.extract.run_extraction_three_pass`, constructed per call with a
-fresh `OpenAIChatModel` built by `lerim.agents.extract_pydanticai.build_model`.
+Sync uses the PydanticAI single-pass extraction agent in
+`lerim.agents.extract.run_extraction`, constructed per call with a fresh
+model built by `lerim.config.providers.build_pydantic_model`. The agent
+manages its own context budget via `note()` and `prune()` tools and runs
+under an auto-scaled `UsageLimits(request_limit=compute_request_budget(...))`.
+
 Maintain and ask still use DSPy ReAct modules (MaintainAgent, AskAgent) run
 via `dspy.context(lm=...)` for thread-safe model switching.
 
@@ -30,7 +33,7 @@ from lerim.agents.contracts import (
 )
 from lerim.agents.ask import format_ask_hints
 from lerim.agents.maintain import MaintainAgent
-from lerim.agents.extract import FinalizeResult, run_extraction_three_pass
+from lerim.agents.extract import ExtractionResult, run_extraction
 from lerim.config.providers import (
 	build_dspy_fallback_lms,
 	build_dspy_lm,
@@ -431,8 +434,9 @@ class LerimRuntime:
 	) -> dict[str, Any]:
 		"""Run memory-write sync flow and return stable contract payload.
 
-		Runs the PydanticAI three-pass extraction pipeline
-		(`run_extraction_three_pass`) with primary and fallback models.
+		Runs the PydanticAI single-pass extraction agent (`run_extraction`)
+		with primary and fallback models. Request budget auto-scales from
+		trace size via `compute_request_budget`.
 
 		Args:
 			trace_path: Path to the session trace JSONL file.
@@ -504,40 +508,38 @@ class LerimRuntime:
 			"""Return the (single) robust PydanticAI model for this run."""
 			return build_pydantic_model("agent", config=self.config)
 
-		def _call(model: Any) -> FinalizeResult:
-			"""Invoke the PydanticAI three-pass pipeline with the given model.
+		def _call(model: Any) -> ExtractionResult:
+			"""Invoke the PydanticAI single-pass extraction agent.
 
-			Per-pass usage limits flow from `default.toml` → `self.config.agent_role`
-			→ here, so ops can tune them by editing `~/.lerim/config.toml` without
-			touching source code.
+			Request budget is auto-scaled from trace size inside
+			`run_extraction` via `compute_request_budget(trace_path)`, so
+			this call site does not need to pass any per-pass limits.
 			"""
-			return run_extraction_three_pass(
+			return run_extraction(
 				memory_root=resolved_memory_root,
 				trace_path=trace_file,
 				model=model,
-				reflect_limit=self.config.agent_role.usage_limit_reflect,
-				extract_limit=self.config.agent_role.usage_limit_extract,
-				finalize_limit=self.config.agent_role.usage_limit_finalize,
 				run_folder=run_folder,
 				return_messages=False,
 			)
 
-		result: FinalizeResult = self._run_with_fallback(
+		result: ExtractionResult = self._run_with_fallback(
 			flow="sync",
 			callable_fn=_call,
 			model_builders=[_primary_builder],
 		)
 
-		# Extract completion summary from FinalizeResult.
+		# Extract completion summary from ExtractionResult.
 		response_text = (result.completion_summary or "").strip() or "(no response)"
 
 		# Write agent response text.
 		_write_text_with_newline(artifact_paths["agent_log"], response_text)
 
-		# The PydanticAI three-pass pipeline currently does not write
-		# agent_trace.json itself. Write an empty placeholder so downstream
+		# The PydanticAI extraction pipeline does not currently emit
+		# agent_trace.json. Write an empty placeholder so downstream
 		# consumers (daemon, dashboard) don't break on missing file. Full
-		# message capture is deferred until Phase 3 wires return_messages=True.
+		# message capture is deferred to a future pass that wires
+		# `return_messages=True` through the dashboard pipeline.
 		agent_trace_path = run_folder / "agent_trace.json"
 		if not agent_trace_path.exists():
 			agent_trace_path.write_text("[]", encoding="utf-8")
