@@ -29,11 +29,11 @@ API keys are **never** stored in TOML files. They come from environment variable
 
 | Variable | Provider | Required when |
 |----------|----------|---------------|
-| `OPENCODE_API_KEY` | OpenCode Go / Zen | When any role uses `provider = "opencode_go"` (common in shipped defaults) |
 | `MINIMAX_API_KEY` | MiniMax | When any role uses `provider = "minimax"` |
 | `ZAI_API_KEY` | Z.AI | When any role uses `provider = "zai"` |
 | `OPENROUTER_API_KEY` | OpenRouter | When any role uses `provider = "openrouter"` |
 | `OPENAI_API_KEY` | OpenAI | When any role uses `provider = "openai"` |
+| `OPENCODE_API_KEY` | OpenCode Go / Zen | When any role uses `provider = "opencode_go"` |
 
 !!! info "Only set what you use"
     You only need API keys for the providers referenced in your `[roles.*]` config. Switch providers freely — just set the matching key.
@@ -67,13 +67,14 @@ API keys are **never** stored in TOML files. They come from environment variable
 
 === "Model Roles"
 
-    Four roles control which models handle each task. See
-    [Model Roles](model-roles.md) for details.
+    Lerim uses one role today: `[roles.agent]`.
+    This single role powers sync extraction, maintain, and ask through PydanticAI.
+    See [Model Roles](model-roles.md) for details.
 
     ```toml
     [roles.agent]
     provider = "minimax"
-    model = "MiniMax-M2.5"
+    model = "MiniMax-M2.7"
     ```
 
 === "Server"
@@ -84,7 +85,7 @@ API keys are **never** stored in TOML files. They come from environment variable
     [server]
     host = "127.0.0.1"
     port = 8765
-    sync_interval_minutes = 10
+    sync_interval_minutes = 30
     ```
 
 ## Sub-pages
@@ -111,7 +112,7 @@ API keys are **never** stored in TOML files. They come from environment variable
 
     ---
 
-    OpenTelemetry setup with MLflow for agent observability.
+    MLflow tracing for PydanticAI agent observability.
 
     [:octicons-arrow-right-24: Tracing](tracing.md)
 

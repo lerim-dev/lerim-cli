@@ -15,6 +15,7 @@ hide:
 </p>
 
 Lerim is the **continual learning and context graph layer** for AI coding agents — it watches sessions, extracts structured knowledge, and builds a shared intelligence graph across agents, projects, and teams.
+Current runtime architecture is **PydanticAI-only** for sync, maintain, and ask.
 
 <p align="center">
   <img src="assets/agent-network.gif" alt="Lerim network animation" width="450">
@@ -37,7 +38,7 @@ This is **agent context amnesia**, and it's the biggest productivity drain in AI
 Lerim solves this by:
 
 - :material-sync: **Watching** your agent sessions across all supported coding agents
-- :material-brain: **Extracting** decisions and learnings automatically using a DSPy ReAct lead agent
+- :material-brain: **Extracting** decisions and learnings automatically using a PydanticAI extraction agent
 - :material-file-document: **Storing** everything as plain markdown files in your repo (`.lerim/`)
 - :material-refresh: **Refining** knowledge over time — merges duplicates, archives stale entries, refreshes the memory index
 - :material-share-variant: **Unifying** knowledge across all your agents — shared files under `.lerim/memory/`
@@ -111,7 +112,7 @@ No proprietary formats — just `.md` files in `.lerim/`
 
 #### :material-auto-fix: Automatic extraction
 
-LLM pipelines extract decisions and learnings from sessions
+PydanticAI agents extract decisions and learnings from sessions
 
 </div>
 
@@ -178,23 +179,27 @@ lerim connect auto
 
 ### Sync sessions
 
-Lerim reads session transcripts and runs **ExtractAgent** (DSPy ReAct) with the **`[roles.agent]`** model. The agent calls methods on `MemoryTools` to read the trace, scan existing memories, write or edit markdown, and save a session summary:
+Lerim reads session transcripts and runs the **PydanticAI extraction flow** with the **`[roles.agent]`** model. The agent uses tool functions to read the trace, take notes, prune context, search existing memories, write or edit markdown, and save a session summary:
 
 ```mermaid
 flowchart TB
-    subgraph lead["Lead"]
-        RT[LerimRuntime · ExtractAgent]
+    subgraph runtime_sync["Agent flow"]
+        RT[LerimRuntime · run_extraction]
     end
     subgraph lm["LM"]
         L[roles.agent]
     end
-    subgraph syncTools["Sync tools (5)"]
-        t1["read · grep · scan"]
+    subgraph syncTools["Sync tools (7)"]
+        t1["read · grep"]
+        c1["note · prune"]
         wm["write · edit"]
+        v1["verify_index"]
     end
     RT --> L
     RT --> t1
+    RT --> c1
     RT --> wm
+    RT --> v1
 ```
 
 </div>
@@ -203,21 +208,23 @@ flowchart TB
 
 ### Maintain knowledge
 
-Offline refinement merges duplicates, archives low-value entries, and consolidates related learnings. **MaintainAgent** uses the same **`[roles.agent]`** model with maintain-only tools:
+Offline refinement merges duplicates, archives low-value entries, and consolidates related learnings. The **maintain flow** uses the same **`[roles.agent]`** model with maintain-only tools:
 
 ```mermaid
 flowchart TB
-    subgraph lead_m["Lead"]
-        RT_m[LerimRuntime · MaintainAgent]
+    subgraph runtime_maintain["Agent flow"]
+        RT_m[LerimRuntime · run_maintain]
     end
-    subgraph maintainTools["Maintain tools (5)"]
+    subgraph maintainTools["Maintain tools (6)"]
         t2["read · scan"]
         wm2["write · edit"]
         ar[archive]
+        v2[verify_index]
     end
     RT_m --> t2
     RT_m --> wm2
     RT_m --> ar
+    RT_m --> v2
 ```
 
 </div>
@@ -239,11 +246,11 @@ lerim memory list
 
 ---
 
-## Web UI (Lerim Cloud)
+## Dashboard
 
-The browser UI lives in **[Lerim Cloud](https://lerim.dev)** (separate from this CLI package). The local daemon still exposes a **JSON API** on `http://localhost:8765` for the CLI and for Cloud when connected.
+Dashboard UI is not released yet. The local daemon exposes a **JSON API** on `http://localhost:8765` for CLI usage.
 
-See [Web UI (Lerim Cloud)](guides/dashboard.md).
+See [Dashboard (Coming Soon)](guides/dashboard.md).
 
 ---
 

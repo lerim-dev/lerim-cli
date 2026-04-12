@@ -32,7 +32,7 @@ lerim ask <question> [--limit N] [--project NAME] [--json]
     <span class="param-type">integer</span>
     <span class="param-badge default">default: 12</span>
   </div>
-  <p class="param-desc">Maximum number of memory items to include as context.</p>
+  <p class="param-desc">Accepted for forward compatibility. Current runtime accepts the flag but does not enforce a retrieval cap yet.</p>
 </div>
 
 <div class="param-field">
@@ -70,9 +70,9 @@ for API requests. This pattern was chosen for its simplicity and
 compatibility with standard HTTP clients.
 ```
 
-### Limited context
+### Limit flag (current behavior)
 
-Limit the number of memories used as context:
+`--limit` is accepted today for CLI/API compatibility, but retrieval capping is not enforced yet:
 
 ```bash
 lerim ask "How is the database configured?" --limit 5
@@ -90,20 +90,21 @@ lerim ask "What testing framework do we use?" --json
 
 ```json
 {
-  "question": "What testing framework do we use?",
-  "answer": "Your project uses pytest as the primary testing framework...",
-  "memories_used": 8,
-  "confidence": 0.87
+  "answer": "Your project uses pytest...",
+  "agent_session_id": "4f5e0c0a-...",
+  "memories_used": [],
+  "error": false,
+  "cost_usd": 0.0012
 }
 ```
 
 ## How it works
 
 1. Your question is sent to the running Lerim server via HTTP POST to `/api/ask`
-2. Lerim performs memory retrieval to find relevant decisions and learnings
-3. The top N memories (default 12) are used as context
-4. An LLM generates an answer informed by these memories
-5. The answer is returned with citation evidence
+2. Lerim asks the PydanticAI ask agent to scan/read relevant memory files
+3. `--limit` is accepted but not currently wired to enforce retrieval count
+4. The model generates an answer grounded in the memory files it read
+5. The answer is returned as plain text (or JSON with metadata using `--json`)
 
 !!! tip
     For best results, ask specific questions about decisions, patterns, or procedures in your project.
@@ -138,6 +139,7 @@ lerim ask "What testing framework do we use?" --json
 
 ## Notes
 
-- Ask uses memory retrieval evidence to ground its answers
+- Ask uses memory scan/read tools to ground its answers in local memory files
 - If provider auth fails (missing API key), the CLI returns exit code 1
+- `--limit` is currently a no-op (reserved for retrieval-cap behavior)
 - The `--project` flag is reserved for future project-scoped queries

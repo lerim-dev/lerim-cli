@@ -1165,7 +1165,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=_F,
         help="Index new sessions and extract memories (hot path)",
         description=(
-            "Index new sessions and extract memories via DSPy.\n\n"
+            "Index new sessions and extract memories via PydanticAI.\n\n"
             "Examples:\n"
             "  lerim sync                      # default 7d window\n"
             "  lerim sync --window 30d         # last 30 days\n"
@@ -1207,7 +1207,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument(
         "--no-extract",
         action="store_true",
-        help="Index and enqueue sessions but skip DSPy extraction entirely. "
+        help="Index and enqueue sessions but skip extraction entirely. "
         "Useful to populate the queue without creating memories yet.",
     )
     _add_force_flag(sync)
@@ -1257,8 +1257,8 @@ def build_parser() -> argparse.ArgumentParser:
     memory_list = memory_sub.add_parser(
         "list",
         formatter_class=_F,
-        help="List recent memory items",
-        description="List stored memories ordered by recency.",
+        help="List memory files",
+        description="List stored memories as a sorted file list.",
     )
     memory_list.add_argument(
         "--project", help="Filter to a specific project (not yet implemented)."
@@ -1312,7 +1312,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         default=12,
-        help="Maximum number of memory items to include as context. (default: 12)",
+        help="Accepted flag for future retrieval cap behavior (currently not enforced). (default: 12)",
     )
     ask.set_defaults(func=_cmd_ask)
 
@@ -1477,7 +1477,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Start HTTP API + daemon loop (Docker entrypoint)",
         description="HTTP API + daemon loop in one process (Docker entrypoint).",
     )
-    serve.add_argument("--host", help="Bind address (default: 0.0.0.0).")
+    serve.add_argument("--host", help="Bind address (default: from config [server].host).")
     serve.add_argument("--port", type=int, help="Bind port (default: 8765).")
     serve.set_defaults(func=_cmd_serve)
 

@@ -2,24 +2,27 @@
 
 ## Summary
 
-This folder contains Lerim runtime code.
+This folder contains the Lerim runtime package.
+Current architecture is PydanticAI-only for agent execution.
+
 The package is organized by feature boundary:
 
-- `agents/`: DSPy ReAct agents (`extract.py`, `maintain.py`, `ask.py`), class-based `MemoryTools` (`tools.py`), typed contracts (`contracts.py`)
-- `server/`: CLI entry point (`cli.py`), HTTP API (`httpd.py`), daemon loop (`daemon.py`), runtime orchestrator (`runtime.py`), core API logic (`api.py`)
-- `cloud/`: Lerim Cloud integration — data shipper (`shipper.py`), OAuth (`auth.py`)
-- `config/`: config loading (`settings.py`), DSPy LM builders (`providers.py`), logging, OpenTelemetry tracing, project scope resolution
-- `memory/`: repository paths and directory layout (`repo.py`), trace formatting (`transcript.py`)
-- `sessions/`: SQLite FTS session catalog, job queue, service run log (`catalog.py`)
-- `adapters/`: platform-specific session readers (claude, codex, cursor, opencode)
-- `skills/`: filesystem skill packs
+- `agents/`: agent flows (`extract.py`, `maintain.py`, `ask.py`), memory tools (`tools.py`), typed contracts (`contracts.py`)
+- `server/`: CLI (`cli.py`), HTTP API (`httpd.py`), daemon (`daemon.py`), runtime orchestrator (`runtime.py`), Docker/runtime API helpers (`api.py`)
+- `config/`: config loading (`settings.py`), PydanticAI model builders (`providers.py`), tracing and logging setup
+- `memory/`: memory layout and repo-scoped paths (`repo.py`), trace formatting helpers (`transcript.py`)
+- `sessions/`: session catalog and queue state (`catalog.py`)
+- `adapters/`: session readers for Claude, Codex, Cursor, OpenCode
+- `cloud/`: Lerim Cloud integration (`auth.py`, `shipper.py`)
+- `skills/`: bundled skill markdown files
 
 ## How to use
 
-Read these files in order:
+If you are new to the codebase, read in this order:
 
 1. `server/cli.py` for the public command surface.
-2. `server/daemon.py` for sync/maintain execution flow.
-3. `agents/tools.py` for the `MemoryTools` class (read, grep, scan, write, edit, archive).
-4. `agents/extract.py` + `agents/maintain.py` + `agents/ask.py` for the three ReAct agents.
-5. `memory/repo.py` for persisted memory layout.
+2. `server/daemon.py` for sync/maintain scheduling and lock flow.
+3. `server/runtime.py` for runtime orchestration across extract/maintain/ask.
+4. `agents/tools.py` for memory tool functions (`read`, `grep`, `scan`, `write`, `edit`, `archive`, `verify_index`).
+5. `agents/extract.py`, `agents/maintain.py`, `agents/ask.py` for PydanticAI agent behavior.
+6. `memory/repo.py` for on-disk layout under project and global scopes.

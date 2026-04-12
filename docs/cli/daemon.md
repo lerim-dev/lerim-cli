@@ -10,7 +10,7 @@ Configure in `~/.lerim/config.toml` or `<repo>/.lerim/config.toml` under `[serve
 
 | Setting | Typical default | Description |
 |---------|-----------------|-------------|
-| `sync_interval_minutes` | `10`–`30` (see shipped `default.toml`) | How often the daemon runs sync |
+| `sync_interval_minutes` | `30` | How often the daemon runs sync |
 | `maintain_interval_minutes` | `60` | How often the daemon runs maintain |
 
 Sessions are processed **sequentially in chronological order** (oldest first) so
@@ -19,7 +19,7 @@ later sessions can update memories from earlier ones.
 ## What to run
 
 ```bash
-lerim serve          # JSON API + background loop (web UI: Lerim Cloud)
+lerim serve          # JSON API + background loop
 lerim up             # Docker: same combined process
 ```
 

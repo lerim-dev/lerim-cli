@@ -1,6 +1,7 @@
 # How It Works
 
 Lerim is the **continual learning layer** for AI coding agents. It watches your agent sessions, extracts decisions and learnings, and makes that knowledge available to every agent on every future session.
+The active runtime is **PydanticAI-only** across sync, maintain, and ask.
 
 ---
 
@@ -38,7 +39,7 @@ Lerim is the **continual learning layer** for AI coding agents. It watches your 
 
 ## Data flow
 
-Lerim has two runtime paths that work together: **sync** (hot path) and **maintain** (cold path).
+Lerim has two write paths that work together: **sync** (hot path) and **maintain** (cold path). Querying uses a separate read-only ask path.
 
 ```mermaid
 flowchart TD
@@ -48,7 +49,8 @@ flowchart TD
     D --> E["Project memory\n(.lerim/memory/)"]
     E --> F["Maintain path\n(refine memories)"]
     F --> E
-    E --> G["Query\n(lerim ask / index.md)"]
+    E --> G["Ask path\n(read-only query)"]
+    G --> H["Answer with citations"]
 ```
 
 ---
@@ -57,23 +59,27 @@ flowchart TD
 
 The sync path processes new agent sessions and turns them into memories.
 
-**Agent / tools view** -- `LerimRuntime` runs **ExtractAgent** (DSPy ReAct) with the **`[roles.agent]`** language model. The agent calls methods on `MemoryTools(memory_root, trace_path)` to read the trace, inspect existing memories, write or edit files, and save summaries:
+**Agent / tools view** -- `LerimRuntime` runs the **PydanticAI extraction flow** with the **`[roles.agent]`** model. The agent uses memory tool functions (`read`, `grep`, `note`, `prune`, `write`, `edit`, `verify_index`) to inspect trace content and write summaries/memories.
 
 ```mermaid
 flowchart TB
-    subgraph lead["Lead"]
-        RT[LerimRuntime · ExtractAgent]
+    subgraph runtime_sync["Agent flow"]
+        RT[LerimRuntime · run_extraction]
     end
     subgraph lm["LM"]
         L[roles.agent]
     end
-    subgraph syncTools["Sync tools (5)"]
-        t1["read · grep · scan"]
+    subgraph syncTools["Sync tools (7)"]
+        t1["read · grep"]
+        c1["note · prune"]
         wm["write · edit"]
+        v1["verify_index"]
     end
     RT --> L
     RT --> t1
+    RT --> c1
     RT --> wm
+    RT --> v1
 ```
 
 **Pipeline steps** (ingest + agent run):
@@ -81,9 +87,10 @@ flowchart TB
 1. **Discover** -- adapters scan session directories for new sessions within the time window (default: last 7 days)
 2. **Index** -- new sessions are cataloged with metadata (agent type, repo path, timestamps)
 3. **Compact** -- traces are compacted by stripping tool outputs and reasoning blocks (typically 40-90% size reduction), cached in `~/.lerim/cache/`
-4. **Extract (ReAct)** -- the lead agent reads the transcript and existing memories, then writes high-value items as typed markdown (`user`, `feedback`, `project`, `reference`)
-5. **Dedupe** -- happens inside the agent loop via `scan`, `read`, `write`, and `edit` on `MemoryTools`
+4. **Extract** -- the extraction agent reads transcript + existing memories, then writes high-value items as typed markdown (`user`, `feedback`, `project`, `reference`)
+5. **Dedupe** -- happens inside the extraction loop via `read`, `grep`, `write`, and `edit`
 6. **Summarize** -- `write(type="summary", ...)` stores an episodic summary under `memory/summaries/`
+7. **Budget control** -- request-turn budget is bounded by config and auto-scaled for extraction by trace size
 
 ---
 
@@ -91,21 +98,23 @@ flowchart TB
 
 The maintain path refines existing memories offline.
 
-**Agent / tools view** — same **`[roles.agent]`** model; **MaintainAgent** uses `MemoryTools(memory_root)` (no trace ingestion):
+**Agent / tools view** — same **`[roles.agent]`** model; **maintain flow** uses read/write tool functions (no trace ingestion):
 
 ```mermaid
 flowchart TB
-    subgraph lead_m["Lead"]
-        RT_m[LerimRuntime · MaintainAgent]
+    subgraph runtime_maintain["Agent flow"]
+        RT_m[LerimRuntime · run_maintain]
     end
-    subgraph maintainTools["Maintain tools (5)"]
+    subgraph maintainTools["Maintain tools (6)"]
         t2["read · scan"]
         wm2["write · edit"]
         ar[archive]
+        v2[verify_index]
     end
     RT_m --> t2
     RT_m --> wm2
     RT_m --> ar
+    RT_m --> v2
 ```
 
 **Pipeline steps** (what the maintainer prompt instructs):
@@ -114,13 +123,19 @@ flowchart TB
 2. **Merge duplicates** -- archive or edit redundant files
 3. **Archive low-value** -- `archive()` moves files to `memory/archived/`
 4. **Consolidate** -- combine topics via `edit()` / `write()`
-5. **Re-index** -- agent uses `edit("index.md", ...)` to refresh the memory index
+5. **Re-index** -- `verify_index()` checks consistency; agent uses `edit("index.md", ...)` when needed
+
+---
+
+## Ask path (read-only)
+
+`lerim ask` runs a PydanticAI query flow using the same `[roles.agent]` model configuration. It uses read-only tools (`scan`, `read`) to gather evidence from memory files and return an answer with filename citations.
 
 ---
 
 ## Deployment model
 
-Lerim runs as a **single process** (`lerim serve`) that provides the daemon loop and JSON API. The **web UI** is **[Lerim Cloud](https://lerim.dev)**. Typically this runs inside a Docker container via `lerim up`, but can also be started directly.
+Lerim runs as a **single process** (`lerim serve`) that provides the daemon loop and JSON API. Dashboard UI is not released yet. Typically this runs inside a Docker container via `lerim up`, but can also be started directly.
 
 Service commands (`ask`, `sync`, `maintain`, `status`) are thin HTTP clients that forward requests to the server.
 
@@ -131,7 +146,7 @@ lerim ask "q"   --HTTP POST-->      /api/ask
 lerim sync      --HTTP POST-->      /api/sync
 lerim maintain  --HTTP POST-->      /api/maintain
 lerim status    --HTTP GET--->      /api/status
-browser         --HTTPS------->     Lerim Cloud (web UI)
+browser         --HTTP------->      Local API root (stub/diagnostic page)
 
 lerim init        (host only, no server needed)
 lerim project add (host only, no server needed)
@@ -167,7 +182,7 @@ lerim up/down     (host only, manages Docker)
 ├── memory/
 │   ├── *.md                     # flat memory files (YAML frontmatter)
 │   ├── index.md                 # optional index (maintained by the agent)
-│   ├── summaries/YYYYMMDD/HHMMSS/  # episodic session summaries
+│   ├── summaries/               # episodic session summaries (timestamped .md files)
 │   └── archived/                # soft-deleted memories
 └── workspace/                   # run artifacts (logs, per-run JSON)
 ```

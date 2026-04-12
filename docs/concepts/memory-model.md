@@ -27,7 +27,7 @@ Each project stores memories under `.lerim/memory/`:
 <repo>/.lerim/memory/
 ├── *.md                         # flat memory files (one file per memory)
 ├── index.md                     # optional index (updated by the agent)
-├── summaries/YYYYMMDD/HHMMSS/   # episodic session summaries
+├── summaries/                   # episodic session summaries (timestamped .md files)
 └── archived/                    # soft-deleted memories (from archive)
 ```
 
@@ -37,18 +37,18 @@ Each project stores memories under `.lerim/memory/`:
 
 ```mermaid
 flowchart LR
-    A["Agent session"] --> B["ExtractAgent sync"]
-    B --> C["Dedupe via scan + edits"]
+    A["Agent session"] --> B["PydanticAI sync agent"]
+    B --> C["Dedupe via read/grep + edits"]
     C -->|New| D["write"]
     C -->|Update| E["edit"]
     D --> F["Active .md files"]
     E --> F
-    F --> G["MaintainAgent"]
+    F --> G["PydanticAI maintain agent"]
     G -->|Duplicate / stale| H["archive"]
     G -->|Consolidate| F
 ```
 
-1. **Sync** -- the lead agent reads the trace and writes or edits markdown memories.
+1. **Sync** -- the PydanticAI extraction agent reads the trace and writes or edits markdown memories.
 2. **Maintain** -- a separate pass merges duplicates, archives noise, and refreshes `index.md`.
 
 ---

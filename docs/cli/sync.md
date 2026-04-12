@@ -4,10 +4,10 @@ Index new sessions and extract memories (hot path).
 
 ## Overview
 
-Hot-path: discover new agent sessions from connected platforms, enqueue them, and run DSPy extraction to create memory primitives. Requires a running server (`lerim up` or `lerim serve`).
+Hot-path: discover new agent sessions from connected platforms, enqueue them, and run PydanticAI extraction to create memory primitives. Requires a running server (`lerim up` or `lerim serve`).
 
 !!! note
-    `sync` is the hot path (queue + DSPy extraction + lead decision/write). Cold maintenance work is handled by [`lerim maintain`](maintain.md).
+    `sync` is the hot path (queue + PydanticAI extraction + memory writes). Cold maintenance work is handled by [`lerim maintain`](maintain.md).
 
 ## Syntax
 

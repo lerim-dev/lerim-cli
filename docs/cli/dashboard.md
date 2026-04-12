@@ -1,10 +1,10 @@
 # lerim dashboard
 
-Shows that the web UI has moved to **Lerim Cloud** and lists CLI alternatives.
+Shows that dashboard UI is not released yet and lists CLI alternatives.
 
 ## Overview
 
-The browser UI is hosted separately at **[lerim.dev](https://lerim.dev)** (not yet available). This command prints a transition message and lists CLI commands you can use in the meantime.
+This command prints a temporary notice and lists CLI commands you can use in the meantime.
 
 ## Syntax
 
@@ -21,8 +21,7 @@ lerim dashboard
 Sample output:
 
 ```
-  Lerim Dashboard is moving to the cloud.
-  The new dashboard will be available at https://lerim.dev
+  Lerim Dashboard is not available yet.
 
   In the meantime, use these CLI commands:
     lerim status     - system overview
@@ -36,4 +35,4 @@ Sample output:
 
 - [lerim status](status.md) — runtime state overview
 - [lerim serve](serve.md) — HTTP API + daemon loop
-- [Web UI (Lerim Cloud)](../guides/dashboard.md)
+- [Dashboard (Coming Soon)](../guides/dashboard.md)

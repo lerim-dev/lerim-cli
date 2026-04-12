@@ -32,7 +32,7 @@ This reads `~/.lerim/config.toml`, generates a `docker-compose.yml` in `~/.lerim
 
 By default the compose file references the pre-built GHCR image (`ghcr.io/lerim-dev/lerim-cli`) tagged with the current package version. Use `--build` to build from the local Dockerfile instead (useful for development).
 
-Running `lerim up` again recreates the container.
+Running `lerim up` again recreates the container. After start, the CLI waits for `GET /api/health` to return `200 OK` before reporting success.
 
 ### `lerim down`
 
@@ -117,8 +117,9 @@ lerim down
 
 ## Notes
 
-- The container runs `lerim serve` which provides the daemon loop and JSON API (web UI: [Lerim Cloud](https://lerim.dev))
-- Dashboard is available at `http://localhost:8765` when running
+- The container runs `lerim serve` which provides the daemon loop and JSON API
+- `http://localhost:8765/api/health` is the local health endpoint
+- `http://localhost:8765/` serves a small local stub/diagnostic page
 - Docker restart policy is `"no"` — the container does not auto-restart after reboots
 
 ## Related commands

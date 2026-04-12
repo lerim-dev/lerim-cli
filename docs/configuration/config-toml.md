@@ -18,33 +18,46 @@ dir = "~/.lerim"
 [server]
 host = "127.0.0.1"
 port = 8765
-sync_interval_minutes = 30
-maintain_interval_minutes = 60
+sync_interval_minutes = 30          # sync hot path interval
+maintain_interval_minutes = 60       # maintain cold path interval
 sync_window_days = 7
 sync_max_sessions = 50
 
 [roles.agent]
-provider = "minimax"
-model = "MiniMax-M2.5"
+provider = "minimax"               # opencode_go | minimax | zai | openrouter | openai | ollama
+model = "MiniMax-M2.7"                 # package default model for minimax provider
 api_base = ""
-fallback_models = ["zai:glm-4.7"]
-max_iters_sync = 30
-max_iters_maintain = 50
-max_iters_ask = 15
+# Model names are auto-normalized per provider (e.g. minimax-m2.5 → MiniMax-M2.5 for minimax provider).
+fallback_models = []  # disabled for now — ensure exact model is used, no silent fallback
+# PydanticAI single-pass sync auto-scales its request budget from trace
+# size via lerim.agents.tools.compute_request_budget(trace_path). Small
+# traces get the 50-turn floor; 2000-line traces get ~65; pathological
+# inputs clamp at 100. The formula lives in tools.py and is the single
+# source of truth — no per-pass limits in config.
+max_iters_maintain = 50                # max request turns for maintain flow
+max_iters_ask = 20                     # max request turns for ask flow
 openrouter_provider_order = []
 thinking = true
+top_p = 0.95
+top_k = 40
 temperature = 1.0
 max_tokens = 32000
+parallel_tool_calls = true
 
 [providers]
+# Default API base URLs per provider.
+# Override here to point all roles using that provider at a different endpoint.
+# Per-role api_base (under [roles.*]) takes precedence over these defaults.
 minimax = "https://api.minimax.io/v1"
+minimax_anthropic = "https://api.minimax.io/anthropic"
 zai = "https://api.z.ai/api/coding/paas/v4"
 openai = "https://api.openai.com/v1"
 openrouter = "https://openrouter.ai/api/v1"
 opencode_go = "https://opencode.ai/zen/go/v1"
 ollama = "http://127.0.0.1:11434"
+# Docker: use "http://host.docker.internal:11434" if Ollama runs on the host.
 mlx = "http://127.0.0.1:8000/v1"
-auto_unload = true
+auto_unload = true                     # unload Ollama models after each sync/maintain cycle to free RAM
 
 [cloud]
 endpoint = "https://api.lerim.dev"
@@ -88,21 +101,26 @@ HTTP server and daemon loop configuration.
 
 See [Model Roles](model-roles.md) for detail. Shipped defaults define a single **`[roles.agent]`** role.
 
-**Agent** (`agent`) -- this is the **only** `dspy.LM` used by `LerimRuntime` for **sync, maintain, and ask** (DSPy ReAct). It must be configured for your provider.
+**Agent** (`agent`) -- this is the **only** PydanticAI model role used by `LerimRuntime` for **sync, maintain, and ask**.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `provider` | string | `"minimax"` | Provider backend (`minimax`, `zai`, `openrouter`, `openai`, `opencode_go`, `ollama`, ...). |
-| `model` | string | `"MiniMax-M2.5"` | Model identifier. |
+| `model` | string | `"MiniMax-M2.7"` | Model identifier. |
 | `api_base` | string | `""` | Custom API base URL. Empty = use provider default from `[providers]`. |
-| `fallback_models` | list | `["zai:glm-4.7"]` | Fallback model chain (format: `"model"` or `"provider:model"`). Auto-switch on quota/rate-limit errors. |
-| `max_iters_sync` | int | `30` | Max ReAct iterations for sync (`ExtractAgent`). |
-| `max_iters_maintain` | int | `50` | Max ReAct iterations for maintain (`MaintainAgent`). |
-| `max_iters_ask` | int | `15` | Max ReAct iterations for ask (`AskAgent`). |
+| `fallback_models` | list | `[]` | Optional ordered fallback model chain (format: `"model"` or `"provider:model"`). Shipped default disables fallback (`[]`). |
+| `max_iters_maintain` | int | `50` | Request-turn budget for maintain flow (`run_maintain`). |
+| `max_iters_ask` | int | `20` | Request-turn budget for ask flow (`run_ask`). |
 | `openrouter_provider_order` | list | `[]` | OpenRouter-specific provider ordering preference. |
 | `thinking` | bool | `true` | Enable model thinking/reasoning. |
-| `temperature` | float | `1.0` | Sampling temperature. MiniMax recommends 1.0 for creative output; 0.0 causes rigid pattern-copying. |
+| `temperature` | float | `1.0` | Sampling temperature. |
+| `top_p` | float | `0.95` | Nucleus sampling control when supported. |
+| `top_k` | int | `40` | Top-k sampling control (sent via `extra_body`). |
 | `max_tokens` | int | `32000` | Max completion tokens. |
+| `parallel_tool_calls` | bool | `true` | Enable parallel tool calls when provider/model supports it. |
+
+!!! info "Sync budget"
+    Sync extraction does not use a static `max_iters_sync` key. The extraction request budget is auto-scaled from trace size at run time.
 
 ### `[providers]`
 
@@ -110,7 +128,8 @@ Default API base URLs per provider. Per-role `api_base` takes precedence over th
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `minimax` | string | `"https://api.minimax.io/v1"` | MiniMax API base (Coding Plan). |
+| `minimax` | string | `"https://api.minimax.io/v1"` | MiniMax OpenAI-compatible API base. |
+| `minimax_anthropic` | string | `"https://api.minimax.io/anthropic"` | MiniMax Anthropic-compatible API base used by the runtime. |
 | `zai` | string | `"https://api.z.ai/api/coding/paas/v4"` | Z.AI API base (Coding Plan). |
 | `openai` | string | `"https://api.openai.com/v1"` | OpenAI API base. |
 | `openrouter` | string | `"https://openrouter.ai/api/v1"` | OpenRouter API base. |
@@ -121,11 +140,11 @@ Default API base URLs per provider. Per-role `api_base` takes precedence over th
 
 ### `[cloud]`
 
-Lerim Cloud web UI / API endpoint (token via `lerim auth` or `LERIM_CLOUD_TOKEN`).
+Hosted service API endpoint (token via `lerim auth` or `LERIM_CLOUD_TOKEN`).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `endpoint` | string | `https://api.lerim.dev` | Cloud API base URL. |
+| `endpoint` | string | `https://api.lerim.dev` | Hosted API base URL. |
 
 ### `[agents]`
 

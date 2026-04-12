@@ -1,10 +1,10 @@
 # lerim status
 
-Print runtime state: connected platforms, memory count, session queue stats, and latest run timestamps.
+Print runtime state: connected platforms, memory count, queue stats, and latest run timestamps.
 
 ## Overview
 
-A quick health-check for your Lerim instance. Shows what platforms are connected, how many memories exist, session queue depth, and when sync/maintain last ran.
+A quick health-check for your Lerim instance. Human-readable output shows key counts (connected agents, memory files, indexed sessions, queue summary). Use `--json` for full platform and latest-run metadata.
 
 !!! note
     This command requires a running server. Start it with `lerim up` (Docker) or `lerim serve` (direct).
@@ -34,29 +34,14 @@ lerim status [--json]
 lerim status
 ```
 
-**Output:**
+**Output (shape):**
 
 ```
-Lerim v0.4.0  —  running on http://localhost:8765
-
-Platforms:
-  claude   connected   ~/.claude/projects/
-  codex    connected   ~/.codex/sessions/
-  cursor   not connected
-
-Projects: 2 registered
-  ~/codes/my-app       42 memories (28 learnings, 14 decisions)
-  ~/codes/backend      17 memories (12 learnings, 5 decisions)
-
-Session queue:
-  total indexed:  134
-  pending:          3
-  processed:      128
-  failed:           3
-
-Last runs:
-  sync:      2026-02-28 14:32:00  (7 min ago)
-  maintain:  2026-02-28 13:45:00  (54 min ago)
+Lerim status:
+- connected_agents: 2
+- memory_count: 59
+- sessions_indexed_count: 134
+- queue: 3 pending, 128 done, 3 failed
 ```
 
 ### JSON output
@@ -75,27 +60,26 @@ Last runs:
 
     ```json
     {
-      "version": "0.4.0",
-      "server_url": "http://localhost:8765",
-      "platforms": {
-        "claude": {"connected": true, "path": "~/.claude/projects/"},
-        "codex": {"connected": true, "path": "~/.codex/sessions/"},
-        "cursor": {"connected": false, "path": null}
-      },
-      "projects": [
+      "timestamp": "2026-04-12T08:24:00.000000+00:00",
+      "connected_agents": ["claude", "codex"],
+      "platforms": [
         {
-          "path": "~/codes/my-app",
-          "memories": {"total": 42, "learnings": 28, "decisions": 14}
+          "name": "claude",
+          "path": "/Users/me/.claude/projects",
+          "exists": true,
+          "session_count": 120
         }
       ],
-      "session_queue": {
-        "total": 134,
+      "memory_count": 59,
+      "sessions_indexed_count": 134,
+      "queue": {
         "pending": 3,
-        "processed": 128,
+        "running": 0,
+        "done": 128,
         "failed": 3
       },
-      "last_sync": "2026-02-28T14:32:00Z",
-      "last_maintain": "2026-02-28T13:45:00Z"
+      "latest_sync": null,
+      "latest_maintain": null
     }
     ```
 
@@ -131,7 +115,7 @@ Last runs:
 
     ---
 
-    Print API URL + Lerim Cloud
+    Print temporary dashboard notice
 
     [:octicons-arrow-right-24: lerim dashboard](dashboard.md)
 

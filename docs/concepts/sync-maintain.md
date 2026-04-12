@@ -6,6 +6,7 @@ Lerim has two runtime paths that keep your memory store accurate and clean:
 - **Maintain** (cold path) -- refines existing memories offline
 
 Both run automatically in the daemon loop and can also be triggered manually.
+Both use the same PydanticAI runtime and the `[roles.agent]` role model.
 
 ---
 
@@ -17,7 +18,7 @@ The sync path turns raw agent session transcripts into structured memories:
 2. **Index** -- new sessions are cataloged in `sessions.sqlite3`
 3. **Match to project** -- sessions matching a registered project are enqueued; unmatched sessions are indexed but not extracted
 4. **Compact** -- traces are compacted (tool outputs stripped) and cached
-5. **ExtractAgent** -- the DSPy ReAct lead agent (`[roles.agent]`) reads the trace and calls `MemoryTools` methods to write or edit memories, update `index.md`, and save a session summary
+5. **Extract flow** -- the PydanticAI extraction agent (`[roles.agent]`) reads the trace and uses memory tools (`read`, `grep`, `note`, `prune`, `write`, `edit`, `verify_index`) to write or edit memories, update `index.md`, and save a session summary
 
 ### Time window
 
@@ -47,7 +48,16 @@ The maintain path runs offline refinement over stored memories, iterating over a
 2. **Merge duplicates** -- edit or archive redundant markdown files
 3. **Archive low-value** -- `archive()` moves files to `memory/archived/`
 4. **Consolidate** -- combine related topics via `edit()` / `write()`
-5. **Re-index** -- agent uses `edit("index.md", ...)` to refresh the memory index
+5. **Re-index** -- `verify_index()` checks consistency; the agent uses `edit("index.md", ...)` to refresh the memory index when needed
+
+### Request turn limits
+
+The maintain and ask flows use explicit request-turn budgets from config:
+
+| Flow | Config key | Purpose |
+|------|------------|---------|
+| Maintain | `max_iters_maintain` | Caps maintain agent request turns per run |
+| Ask | `max_iters_ask` | Caps ask agent request turns per query |
 
 ---
 

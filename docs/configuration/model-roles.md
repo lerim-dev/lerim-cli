@@ -1,72 +1,68 @@
 # Model Roles
 
-Lerim's runtime uses a **single DSPy language model** for all orchestration: **`[roles.agent]`** powers `ExtractAgent` (sync), `MaintainAgent`, and `AskAgent` via `dspy.context(lm=...)`.
-
-The role name is enforced in code as `DSPyRoleName = Literal["agent"]` (in `lerim.config.providers`).
+Lerim runtime uses one model role: **`[roles.agent]`**.
+That role powers all three PydanticAI flows: sync extraction, maintain, and ask.
 
 ## Runtime roles
 
 | Role | Used by | Purpose |
 |------|---------|---------|
-| `agent` | `LerimRuntime` | **Only** LLM for DSPy ReAct: sync, maintain, ask. Tools are methods on `MemoryTools` in `lerim.agents.tools` (`read`, `grep`, `scan`, `write`, `edit`, `archive`). |
+| `agent` | `LerimRuntime` | Shared model for `run_extraction`, `run_maintain`, and `run_ask`. |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
 	subgraph rt [LerimRuntime]
-		AgentLM["dspy.LM roles.agent"]
-		EA[ExtractAgent]
-		MA[MaintainAgent]
-		AA[AskAgent]
+		AgentModel["PydanticAI roles.agent model"]
+		EA[run_extraction]
+		MA[run_maintain]
+		AA[run_ask]
 	end
-	AgentLM --> EA
-	AgentLM --> MA
-	AgentLM --> AA
+	AgentModel --> EA
+	AgentModel --> MA
+	AgentModel --> AA
 ```
 
 ## Role configuration
 
-The single role is configured under `[roles.agent]` in your TOML config:
+Configure the role under `[roles.agent]` in your TOML config:
 
 ```toml
 [roles.agent]
 provider = "minimax"
-model = "MiniMax-M2.5"
+model = "MiniMax-M2.7"
 api_base = ""
-fallback_models = ["zai:glm-4.7"]
-max_iters_sync = 30
+fallback_models = []
 max_iters_maintain = 50
-max_iters_ask = 15
+max_iters_ask = 20
 openrouter_provider_order = []
 thinking = true
 temperature = 1.0
+top_p = 0.95
+top_k = 40
 max_tokens = 32000
+parallel_tool_calls = true
 ```
 
-The agent model runs **DSPy ReAct** for all user-facing flows. It calls bound methods on `MemoryTools` (defined in `lerim.agents.tools`) through `dspy.ReAct`.
+`max_iters_maintain` and `max_iters_ask` are request-turn budgets for those flows.
+Sync extraction request budget is auto-scaled from trace size and does not use a static `max_iters_sync` field.
 
 ## Provider support
 
-Providers are configured via `provider` + `[providers]` default URLs. See [config.toml](config-toml.md).
-
 Supported providers: `minimax`, `opencode_go`, `zai`, `openai`, `openrouter`, `ollama`, `mlx`.
 
-## Switching providers
-
-You can point the **agent** role at any supported backend:
-
-### Use MiniMax directly (default)
+### MiniMax (default)
 
 ```toml
 [roles.agent]
 provider = "minimax"
-model = "MiniMax-M2.5"
+model = "MiniMax-M2.7"
 ```
 
-Requires `MINIMAX_API_KEY` in your environment.
+Requires `MINIMAX_API_KEY`.
 
-### Use OpenAI directly
+### OpenAI
 
 ```toml
 [roles.agent]
@@ -74,9 +70,9 @@ provider = "openai"
 model = "gpt-5"
 ```
 
-Requires `OPENAI_API_KEY` in your environment.
+Requires `OPENAI_API_KEY`.
 
-### Use OpenCode Go
+### OpenCode Go
 
 ```toml
 [roles.agent]
@@ -84,9 +80,9 @@ provider = "opencode_go"
 model = "minimax-m2.5"
 ```
 
-Requires `OPENCODE_API_KEY` (or your provider's env var as documented for that backend).
+Requires `OPENCODE_API_KEY`.
 
-### Use Ollama (local models)
+### Ollama (local)
 
 ```toml
 [roles.agent]
@@ -95,36 +91,31 @@ model = "qwen3:32b"
 api_base = "http://127.0.0.1:11434"
 ```
 
-No API key required. `auto_unload` in `[providers]` frees RAM between cycles.
+No API key required.
 
 ## Common options
 
 | Option | Description |
 |--------|-------------|
-| `provider` | Backend: `minimax`, `opencode_go`, `zai`, `openrouter`, `openai`, `ollama`, `mlx` |
-| `model` | Model identifier (OpenRouter: full slug) |
-| `api_base` | Custom API endpoint |
-| `fallback_models` | Ordered fallback chain on quota/rate-limit errors |
+| `provider` | Backend provider |
+| `model` | Model identifier |
+| `api_base` | Optional custom API endpoint |
+| `fallback_models` | Optional fallback chain on quota/rate-limit errors (default disabled) |
 | `thinking` | Enable reasoning mode when supported |
-| `temperature` | Sampling temperature (default `1.0`) |
-| `max_tokens` | Maximum output tokens (default `32000`) |
-| `max_iters_sync` | Max ReAct iterations for sync flow |
-| `max_iters_maintain` | Max ReAct iterations for maintain flow |
-| `max_iters_ask` | Max ReAct iterations for ask flow |
-| `openrouter_provider_order` | Preferred provider ordering for OpenRouter |
+| `temperature` | Sampling temperature |
+| `top_p` | Nucleus sampling control |
+| `top_k` | Top-k sampling control |
+| `max_tokens` | Maximum output tokens |
+| `parallel_tool_calls` | Enable parallel tool calls when supported |
+| `max_iters_maintain` | Maintain request-turn budget |
+| `max_iters_ask` | Ask request-turn budget |
+| `openrouter_provider_order` | Preferred OpenRouter provider ordering |
 
 ## Fallback models
 
-When the primary model returns a quota or rate-limit error, `LerimRuntime` retries with each `fallback_models` entry:
-
-```toml
-[roles.agent]
-provider = "minimax"
-model = "MiniMax-M2.5"
-fallback_models = ["zai:glm-4.7"]
-```
-
-Each entry uses `provider:model` syntax. The runtime builds a separate `dspy.LM` for each fallback and tries them in order.
+When configured (non-empty list), runtime falls through `fallback_models` in order on quota/rate-limit errors.
+Shipped default is `[]`, so fallback is disabled unless you opt in.
+Each fallback entry can be either `provider:model` or just `model` (which defaults to `openrouter`).
 
 ## API key resolution
 
@@ -139,4 +130,4 @@ Each entry uses `provider:model` syntax. The runtime builds a separate `dspy.LM`
 | `mlx` | *(none required)* |
 
 !!! warning "Missing keys"
-	If the required API key for the agent role's provider is not set, Lerim raises an error at startup.
+	If the API key for the primary provider is missing, Lerim fails at runtime model construction.

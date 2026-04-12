@@ -4,12 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-03-25
+> Historical entries below are point-in-time snapshots. The current runtime architecture is PydanticAI-only.
+
+## [Unreleased]
 
 ### Changed
 
-- **Migrated from PydanticAI to DSPy ReAct** -- the lead agent now runs on DSPy ReAct modules (`SyncAgent`, `MaintainAgent`, `AskAgent`). All providers are supported via `dspy.LM` through unified `providers.py`.
-- **Removed explorer subagent** -- search, read, and writes go through DSPy ReAct tool functions on the lead agent (e.g. `read_file`, `list_files`, `scan_memory_manifest`, `write_memory`) instead of a nested explorer.
+- Migrated `maintain` and `ask` to PydanticAI agents, aligned with the existing PydanticAI extraction flow.
+- Simplified runtime orchestration to a single PydanticAI execution path (sync, maintain, ask).
+- Updated tracing integration to `mlflow.pydantic_ai.autolog()`.
+- Updated docs to describe the current PydanticAI-only runtime and request-turn limits.
+
+### Removed
+
+- Removed DSPy runtime branches and DSPy-specific config surface from active runtime paths.
+- Removed DSPy and LiteLLM runtime dependencies from active package/lock state.
+
+## [0.2.0] - 2026-03-25
+
+_Historical note: this release snapshot was later superseded by the PydanticAI-only runtime noted above._
+
+### Changed
+
+- **Migrated to a legacy ReAct stack** -- the lead agent moved off the original Pydantic flow onto role-specific ReAct modules at that time.
+- **Removed explorer subagent** -- search, read, and writes moved onto lead-agent tool functions (`read_file`, `list_files`, `scan_memory_manifest`, `write_memory`) instead of a nested explorer.
 - Removed `max_explorers` config option (no longer applicable).
 - Removed `[roles.explorer]` config section.
 - Runtime module reorganized: `agent.py` replaced by `runtime.py`, `tools.py`/`subagents.py` replaced by `tools.py`, `providers.py`, `context.py`, `helpers.py`.
@@ -24,20 +42,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Evaluation framework** — dataset pipeline to build benchmarks from real traces, LLM-as-judge scoring with Claude CLI / Codex / OpenCode, per-model eval configs (MiniMax, Ollama Qwen 3.5 4B/9B/35B), and benchmark script for model comparison.
 - **Trace compaction** — Claude and Codex adapters strip noise lines (progress updates, file snapshots, context dumps) before extraction. Claude ~80% reduction, Codex ~65%. Cached in `~/.lerim/cache/{claude,codex}/`.
-- **Parallel window processing** — DSPy extraction and summarization pipelines process transcript windows in parallel via `ThreadPoolExecutor`. Controlled by `max_workers` (default: 4).
+- **Parallel window processing** — extraction and summarization pipelines process transcript windows in parallel via `ThreadPoolExecutor`. Controlled by `max_workers` (default: 4).
 - **JSONL-boundary windowing** — transcript windows split on line boundaries instead of mid-JSON.
 - **`max_explorers` config** — controls parallel explorer subagents per lead turn (default: 4).
 - **`max_workers` config** — controls parallel window processing threads (default: 4).
 - **`thinking` config** — controls model reasoning mode on all four roles (default: true).
-- Fallback model support in DSPy pipelines (e.g. MiniMax -> Z.AI on rate limits).
+- Fallback model support in extraction/summarization pipelines (e.g. MiniMax -> Z.AI on rate limits).
 - 455 unit tests, all passing.
 
 ### Changed
 
 - **Pipeline optimization** — switched from `ChainOfThought` to `Predict` for fewer failures and lower latency. `XMLAdapter` hardcoded (94% success rate).
-- **Simplified DSPy signatures** — removed metadata/metrics from LLM inputs, slimmed output schemas.
+- **Simplified extraction signatures** — removed metadata/metrics from LLM inputs, slimmed output schemas.
 - **ID-based session skip** — run ID membership check instead of SHA-256 content hashing.
-- DSPy pipelines use `Refine(N=2)` for retry on validation failure.
+- Extraction pipelines use `Refine(N=2)` for retry on validation failure.
 - Fixed conftest skip scoping, `_toml_value` list serialization, integration test provider config.
 - Reduced xdist workers from auto(16) to 4 for API rate limit safety.
 
@@ -107,7 +125,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- **Per-run LLM cost tracking** via OpenRouter's `usage.cost` response field. PydanticAI calls captured via httpx response hook; DSPy calls captured from LM history. Cost logged in `activity.log` and returned in API responses.
+- **Per-run LLM cost tracking** via OpenRouter's `usage.cost` response field. Model calls were captured from both HTTP hooks and provider histories. Cost logged in `activity.log` and returned in API responses.
 - Activity log format: `timestamp | op | project | stats | $cost | duration`.
 - Multi-project maintain (iterates all registered projects).
 
@@ -182,8 +200,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Continual learning layer for coding agents and projects.
 - Platform adapters for Claude Code, Codex CLI, Cursor, and OpenCode.
-- Memory extraction pipeline using DSPy with transcript windowing.
-- Trace summarization pipeline using DSPy with transcript windowing.
+- Memory extraction pipeline with transcript windowing.
+- Trace summarization pipeline with transcript windowing.
 - PydanticAI lead agent with read-only explorer subagent.
 - Three CLI flows: `sync`, `maintain`, and `ask`.
 - Daemon mode for continuous sync and maintain loop.

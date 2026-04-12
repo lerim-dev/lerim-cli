@@ -1,6 +1,6 @@
 # lerim serve
 
-Start the HTTP API server and daemon loop in a single process. The **web UI** is **[Lerim Cloud](https://lerim.dev)** (separate repo), not bundled here.
+Start the HTTP API server and daemon loop in a single process. Dashboard UI is not bundled and is not released yet.
 
 ## Overview
 
@@ -9,7 +9,7 @@ Start the HTTP API server and daemon loop in a single process. The **web UI** is
 1. **HTTP API** — JSON endpoints used by CLI commands (`ask`, `sync`, `maintain`, `status`)
 2. **Daemon loop** — Background sync and maintain cycles on configured intervals
 
-GET `/` may return a minimal HTML stub linking to Lerim Cloud when no bundled static assets are present.
+GET `/` may return a minimal HTML stub when no bundled static assets are present.
 
 This is the Docker container entrypoint (`lerim up` runs `lerim serve` inside the container), but it can also be run directly for development without Docker.
 
@@ -28,9 +28,9 @@ lerim serve [--host HOST] [--port PORT]
   <div class="param-header">
     <span class="param-name">--host</span>
     <span class="param-type">string</span>
-    <span class="param-badge default">default: 0.0.0.0</span>
+    <span class="param-badge default">default: from [server].host (shipped: 127.0.0.1)</span>
   </div>
-  <p class="param-desc">Network interface to bind to. Use <code>0.0.0.0</code> to listen on all interfaces (required for Docker), or <code>127.0.0.1</code> for local-only access.</p>
+  <p class="param-desc">Network interface to bind to. Docker path (<code>lerim up</code>) injects <code>--host 0.0.0.0</code>. Direct <code>lerim serve</code> uses config default unless overridden.</p>
 </div>
 
 <div class="param-field">
@@ -74,7 +74,7 @@ lerim serve
 
 | Component | Description | Endpoint |
 |-----------|-------------|----------|
-| HTTP API | JSON API for CLI and Cloud | `http://<host>:<port>/api/` |
+| HTTP API | JSON API for CLI commands | `http://<host>:<port>/api/` |
 | Root | Stub HTML or optional assets | `http://<host>:<port>/` |
 | Daemon loop | Background sync/maintain on intervals | — (internal) |
 
@@ -111,7 +111,7 @@ The daemon loop uses `sync_interval_minutes` and `maintain_interval_minutes` fro
 
     ---
 
-    Print API URL + Lerim Cloud link
+    Print temporary dashboard notice + CLI alternatives
 
     [:octicons-arrow-right-24: lerim dashboard](dashboard.md)
 

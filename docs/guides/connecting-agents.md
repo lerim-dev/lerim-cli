@@ -50,7 +50,7 @@ the auto-detected default for that platform.
 lerim connect list
 ```
 
-Shows each connected platform with its path, session count, and connection timestamp.
+Shows each connected platform with its path, discovered session count, and whether the path exists.
 
 ## Disconnect a platform
 
@@ -68,7 +68,7 @@ Each platform adapter implements a 5-step protocol defined in
 |------|--------|-------------|
 | 1 | `default_path()` | Returns the default traces directory for the platform |
 | 2 | `count_sessions(path)` | Returns total session count under a path |
-| 3 | `iter_sessions(traces_dir, start, end, known_run_hashes)` | Lists normalized session summaries in a time window |
+| 3 | `iter_sessions(traces_dir, start, end, known_run_ids)` | Lists normalized session summaries in a time window |
 | 4 | `find_session_path(session_id, traces_dir)` | Resolves a single session file path by ID |
 | 5 | `read_session(session_path, session_id)` | Reads one session and returns a normalized `ViewerSession` payload |
 
@@ -78,7 +78,7 @@ flowchart LR
     B -->|iter_sessions| C[SessionRecord list]
     C -->|enqueue| D[Session Catalog]
     D -->|read_session| E[Normalized ViewerSession]
-    E --> F[DSPy Extraction Pipeline]
+    E --> F[PydanticAI Extraction Pipeline]
 ```
 
 !!! tip "SQLite-based platforms"

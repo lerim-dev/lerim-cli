@@ -13,7 +13,7 @@ The `memory` command group provides direct access to the memory store. Memories 
 
 ## memory list
 
-List stored memories, ordered by recency. No server required.
+List stored memories as a sorted file list. No server required.
 
 ```bash
 lerim memory list [--project NAME] [--limit N] [--json]
@@ -21,7 +21,7 @@ lerim memory list [--project NAME] [--limit N] [--json]
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--project` | *(auto)* | Target project name |
+| `--project` | -- | Reserved for project filter (not yet implemented) |
 | `--limit` | `50` | Maximum items to display |
 | `--json` | off | Output structured JSON |
 

@@ -49,8 +49,6 @@ Lerim commands return standard exit codes:
 | `0` | Success | Command completed without errors |
 | `1` | Runtime failure | Server not reachable, LLM API error |
 | `2` | Usage error | Invalid arguments, missing required parameters |
-| `3` | Partial success | Some sessions processed, others failed |
-| `4` | Lock busy | Another process holds the sync/maintain lock |
 
 ## Command categories
 
@@ -65,7 +63,7 @@ Lerim commands return standard exit codes:
 
 - `lerim up` — Start Docker container
 - `lerim down` — Stop Docker container
-- `lerim logs` — View container logs
+- `lerim logs` — View local Lerim JSONL logs
 - `lerim serve` — Run HTTP server + daemon (Docker entrypoint)
 
 ### Memory operations
@@ -94,11 +92,11 @@ Lerim commands return standard exit codes:
 ### Runtime status
 
 - `lerim status` — Show runtime state (requires server)
-- `lerim dashboard` — Print local API URL + Lerim Cloud hint (host-only)
+- `lerim dashboard` — Print temporary dashboard notice + CLI alternatives (host-only)
 
-### Cloud
+### Auth
 
-- `lerim auth` — Lerim Cloud login, status, logout
+- `lerim auth` — Authentication login, status, logout
 
 ## Common patterns
 
@@ -181,8 +179,8 @@ API keys come from environment variables:
 
 Keys depend on `[roles.*]` (see shipped `src/lerim/config/default.toml`). Examples:
 
-- `OPENCODE_API_KEY` — OpenCode Go / Zen (common in current defaults)
-- `MINIMAX_API_KEY`, `ZAI_API_KEY` — when using those providers
+- `MINIMAX_API_KEY` — MiniMax (current shipped default provider)
+- `ZAI_API_KEY`, `OPENCODE_API_KEY` — when using those providers
 - `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, … — as configured
 
 Only the keys for providers you use are required.

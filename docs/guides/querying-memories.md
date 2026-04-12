@@ -1,7 +1,7 @@
 # Querying Memories
 
 Lerim provides several ways to search and retrieve memories. All queries are
-read-only and project-scoped.
+read-only.
 
 ## Reading memory files directly
 
@@ -44,7 +44,7 @@ For detailed usage, invoke the `/lerim` skill.
 
 ## `lerim ask` -- LLM-powered Q&A
 
-The primary query interface. Sends your question to the lead agent with memory
+The primary query interface. Sends your question to the PydanticAI ask flow with memory
 context.
 
 !!! note "Requires running server"
@@ -57,12 +57,12 @@ context.
 lerim ask "Why did we choose Postgres over SQLite?"
 ```
 
-The lead agent retrieves relevant memories, uses them as context, and returns
+The ask flow retrieves relevant memories, uses them as context, and returns
 a natural language answer with evidence of which memories were consulted.
 
 ### Limit context
 
-Control how many memory items are included as context:
+The flag is accepted for compatibility, but retrieval capping is not enforced yet:
 
 ```bash
 lerim ask "What auth pattern do we use?" --limit 5
@@ -72,7 +72,7 @@ lerim ask "What auth pattern do we use?" --limit 5
 |------|---------|-------------|
 | `question` | required | Your question (quote if it contains spaces) |
 | `--project` | -- | Scope to a specific project (not yet implemented) |
-| `--limit` | `12` | Max memory items provided as context |
+| `--limit` | `12` | Accepted flag; retrieval cap behavior is not enforced yet |
 
 ### JSON output
 
@@ -82,11 +82,12 @@ Get structured output for scripting or agent integration:
 lerim ask "How is the database configured?" --json
 ```
 
-Returns JSON with the answer, sources, and metadata.
+Returns JSON with answer metadata (for example: `agent_session_id`, `error`,
+and `cost_usd`).
 
 ## `lerim memory list` -- browse all memories
 
-List stored memories (decisions and learnings), ordered by recency:
+List stored memories (decisions and learnings) as a sorted file list:
 
 ```bash
 lerim memory list
