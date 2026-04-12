@@ -434,6 +434,10 @@ def _build_pydantic_model_for_provider(
 
 	# All other providers: OpenAI-compat path
 	base_url = api_base or _default_api_base(provider, cfg)
+	# Ollama's OpenAI-compat endpoint lives at /v1; DSPy/litellm appends
+	# this internally but pydantic_ai's OpenAIProvider does not.
+	if provider == "ollama" and base_url and not base_url.rstrip("/").endswith("/v1"):
+		base_url = base_url.rstrip("/") + "/v1"
 	if not base_url:
 		raise RuntimeError(
 			f"missing_api_base:no default base URL configured for "
