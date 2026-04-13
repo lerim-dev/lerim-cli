@@ -179,16 +179,17 @@ Now you can query your agent memories. Try these commands:
 
     ```bash
     lerim status
+    lerim status --live
     ```
 
 Example output from `lerim status`:
 
 ```
-Lerim status:
-- connected_agents: 2
-- memory_count: 0
-- sessions_indexed_count: 0
-- queue: {'pending': 0, 'processing': 0, 'failed': 0}
+Lerim Status (2026-04-13 10:52:53Z)
+Summary: connected agents, memory files, indexed sessions, queue
+Project Streams: per-project state (blocked/running/queued/healthy)
+Activity (Sync + Maintain): latest runs and outcomes
+What To Do Next: actionable commands like `lerim queue --failed`
 ```
 
 !!! tip

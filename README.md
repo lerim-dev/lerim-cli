@@ -106,8 +106,11 @@ Most-used commands:
 
 ```bash
 lerim status
+lerim status --live
 lerim logs --follow
 lerim queue
+lerim queue --failed
+lerim unscoped --limit 20
 lerim memory list --limit 20
 ```
 

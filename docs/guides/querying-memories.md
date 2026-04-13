@@ -63,7 +63,8 @@ a natural language answer with evidence of which memories were consulted.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `question` | required | Your question (quote if it contains spaces) |
-| `--project` | -- | Scope to a specific project (not yet implemented) |
+| `--scope` | `all` | Read scope: `all` projects or one `project` |
+| `--project` | -- | Project name/path when `--scope=project` |
 
 ### JSON output
 
@@ -94,7 +95,8 @@ lerim memory list --json
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--project` | -- | Filter to project (not yet implemented) |
+| `--scope` | `all` | Read scope: `all` projects or one `project` |
+| `--project` | -- | Project name/path when `--scope=project` |
 | `--limit` | `50` | Max items |
 
 ## Tips for effective queries

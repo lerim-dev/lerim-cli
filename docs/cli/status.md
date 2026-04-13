@@ -1,10 +1,19 @@
 # lerim status
 
-Print runtime state: connected platforms, memory count, queue stats, and latest run timestamps.
+Show runtime health, per-project stream state, and recent sync/maintain activity.
 
 ## Overview
 
-A quick health-check for your Lerim instance. Human-readable output shows key counts (connected agents, memory files, indexed sessions, queue summary). Use `--json` for full platform and latest-run metadata.
+`lerim status` is the main operational dashboard for Lerim.
+
+It shows:
+
+- global summary (agents, memory files, indexed sessions, queue)
+- per-project stream state (`blocked`, `running`, `queued`, `healthy`, `idle`)
+- recent activity timeline (sync + maintain)
+- guidance on what to do next
+
+`lerim status --live` renders the same dashboard and refreshes it on an interval.
 
 !!! note
     This command requires a running server. Start it with `lerim up` (Docker) or `lerim serve` (direct).
@@ -12,119 +21,99 @@ A quick health-check for your Lerim instance. Human-readable output shows key co
 ## Syntax
 
 ```bash
-lerim status [--json]
+lerim status [--scope all|project] [--project NAME] [--live] [--interval SECONDS] [--json]
 ```
 
 ## Parameters
 
-<div class="param-field">
-  <div class="param-header">
-    <span class="param-name">--json</span>
-    <span class="param-type">boolean</span>
-    <span class="param-badge default">default: false</span>
-  </div>
-  <p class="param-desc">Output structured JSON instead of human-readable text.</p>
-</div>
+| Parameter | Default | Description |
+|---|---|---|
+| `--scope` | `all` | Read scope for status: all registered projects, or one project |
+| `--project` | -- | Project name/path when `--scope=project` |
+| `--live` | off | Live mode; refreshes the same dashboard repeatedly |
+| `--interval` | `3.0` | Refresh interval in seconds for `--live` |
+| `--json` | off | Emit JSON payload instead of rich terminal output |
 
 ## Examples
 
-### Default output
+### Snapshot status
 
 ```bash
 lerim status
 ```
 
-**Output (shape):**
+### Live status
 
-```
-Lerim status:
-- connected_agents: 2
-- memory_count: 59
-- sessions_indexed_count: 134
-- queue: 3 pending, 128 done, 3 failed
+```bash
+lerim status --live
+lerim status --live --interval 1.5
 ```
 
-### JSON output
+### One project only
 
-=== "Human-readable"
+```bash
+lerim status --scope project --project lerim-cli
+```
 
-    ```bash
-    lerim status
-    ```
+### JSON payload
 
-=== "JSON"
+```bash
+lerim status --json
+```
 
-    ```bash
-    lerim status --json
-    ```
+JSON includes `projects[]`, `recent_activity[]`, `queue`, `queue_health`, `unscoped_sessions`, and latest run metadata.
 
-    ```json
-    {
-      "timestamp": "2026-04-12T08:24:00.000000+00:00",
-      "connected_agents": ["claude", "codex"],
-      "platforms": [
-        {
-          "name": "claude",
-          "path": "/Users/me/.claude/projects",
-          "exists": true,
-          "session_count": 120
-        }
-      ],
-      "memory_count": 59,
-      "sessions_indexed_count": 134,
-      "queue": {
-        "pending": 3,
-        "running": 0,
-        "done": 128,
-        "failed": 3
-      },
-      "latest_sync": null,
-      "latest_maintain": null
-    }
-    ```
+## Status states
+
+- `blocked`: oldest project job is `dead_letter`; stream is paused until retry/skip
+- `running`: at least one job is currently processing
+- `queued`: jobs are waiting and stream is not blocked
+- `healthy`: queue empty and project has extracted memory
+- `idle`: queue empty and no extracted memory yet
+
+## Typical unblock flow
+
+```bash
+lerim queue --failed
+lerim retry <run_id>
+# or
+lerim skip <run_id>
+```
 
 ## Exit codes
 
 | Code | Meaning |
-|------|---------|
+|---|---|
 | `0` | Success |
-| `1` | Server not running or unreachable |
+| `1` | Server not running/unreachable, or invalid project selection |
 | `2` | Usage error |
 
 ## Related commands
 
 <div class="grid cards" markdown>
 
+-   :material-format-list-bulleted: **lerim queue**
+
+    ---
+
+    Inspect queue jobs and failures
+
+    [:octicons-arrow-right-24: lerim queue](overview.md)
+
+-   :material-alert-circle-outline: **lerim unscoped**
+
+    ---
+
+    Show indexed sessions without project mapping
+
+    [:octicons-arrow-right-24: CLI overview](overview.md)
+
 -   :material-sync: **lerim sync**
 
     ---
 
-    Index and extract new memories
+    Trigger sync/extraction
 
     [:octicons-arrow-right-24: lerim sync](sync.md)
-
--   :material-wrench: **lerim maintain**
-
-    ---
-
-    Offline memory refinement
-
-    [:octicons-arrow-right-24: lerim maintain](maintain.md)
-
--   :material-monitor-dashboard: **lerim dashboard**
-
-    ---
-
-    Print temporary dashboard notice
-
-    [:octicons-arrow-right-24: lerim dashboard](dashboard.md)
-
--   :material-brain: **lerim memory**
-
-    ---
-
-    Search, list, and manage memories
-
-    [:octicons-arrow-right-24: lerim memory](memory.md)
 
 </div>

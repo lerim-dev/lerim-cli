@@ -590,6 +590,13 @@ def _cmd_status_live(args: argparse.Namespace) -> int:
 		return 0
 
 
+def _render_status_output(payload: dict[str, Any], *, refreshed_at: str):
+	"""Compatibility wrapper for tests and callers expecting CLI renderer symbol."""
+	from lerim.server.status_tui import render_status_output
+
+	return render_status_output(payload, refreshed_at=refreshed_at)
+
+
 def _dead_letter_action(
 	args: argparse.Namespace,
 	*,

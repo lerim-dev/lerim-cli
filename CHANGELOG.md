@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.71] - 2026-04-13
+
+### Added
+- `lerim status --live` now uses the same data and renderer as snapshot mode, with periodic refresh only as the difference.
+- New status payload fields for richer operations visibility:
+  - `projects[]` per-project memory/queue/blocker summary
+  - `recent_activity[]` timeline including `sync` and `maintain`
+  - `unscoped_sessions` totals by agent
+- New `lerim unscoped` command to inspect indexed sessions that do not map to a registered project.
+- Queue filters now support exact project matching (`--project`) and explicit substring matching (`--project-like`).
+
+### Changed
+- Status UI redesigned for clarity:
+  - project stream table (`blocked` / `running` / `queued` / `healthy`)
+  - explicit “What These Terms Mean” section
+  - actionable “What To Do Next” section with full `lerim ...` commands
+  - activity panel (sync + maintain)
+- Read/query defaults now use all registered projects unless explicitly narrowed:
+  - `lerim status --scope all|project --project ...`
+  - `lerim ask --scope all|project --project ...`
+  - `lerim memory list --scope all|project --project ...`
+- Canonical run telemetry is now written in `service_runs.details_json` with normalized keys (`metrics_version=1`, sync/maintain totals, per-project metrics, events) while preserving legacy compatibility fields.
+
+### Fixed
+- Live status activity no longer appears stale during long in-flight sync runs; running queue jobs are now surfaced in `recent_activity`.
+- Fixed maintain runtime error (`name 'index_path' is not defined`) that caused maintain runs to fail.
+
 ## [0.1.70] - 2026-03-28
 
 ### Quality Improvements

@@ -72,6 +72,7 @@ Lerim commands return standard exit codes:
 - `lerim maintain` — Refine existing memories (cold path)
 - `lerim ask` — Query memories with natural language
 - `lerim queue` — Show session extraction queue (host-only, SQLite)
+- `lerim unscoped` — Show indexed sessions with no project match (host-only)
 - `lerim retry` / `lerim skip` — Manage dead-letter jobs (host-only)
 
 ### Platform connections
@@ -82,7 +83,7 @@ Lerim commands return standard exit codes:
 
 ### Direct memory access
 
-- `lerim memory list` — List stored memory files
+- `lerim memory list` — List memory files (`--scope all|project`)
 - `lerim memory reset` — Destructive wipe of memory data
 
 ### Skills
@@ -91,7 +92,7 @@ Lerim commands return standard exit codes:
 
 ### Runtime status
 
-- `lerim status` — Show runtime state (requires server)
+- `lerim status` — Show runtime state (`--live` available; requires server)
 - `lerim dashboard` — Print temporary dashboard notice + CLI alternatives (host-only)
 
 ### Auth
@@ -120,6 +121,10 @@ lerim sync --max-sessions 10
 
 # View status
 lerim status
+lerim status --live
+
+# Project-scoped status
+lerim status --scope project --project lerim-cli
 ```
 
 ### Troubleshooting
@@ -130,6 +135,10 @@ lerim status
 
 # View logs
 lerim logs --follow
+
+# Inspect queue/unmapped sessions
+lerim queue --failed
+lerim unscoped --limit 20
 
 # Restart service
 lerim down && lerim up

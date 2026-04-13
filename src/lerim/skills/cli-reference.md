@@ -215,17 +215,19 @@ Memories are stored as markdown files in `.lerim/memory/`.
 
 #### `lerim memory list`
 
-List stored memories, ordered by recency.
+List memory files for all registered projects (default) or one selected project.
 
 ```bash
 lerim memory list
+lerim memory list --scope project --project lerim-cli
 lerim memory list --limit 10
 lerim memory list --json       # structured JSON output
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--project` | -- | Filter to project (not yet implemented) |
+| `--scope` | `all` | Read scope: `all` or `project` |
+| `--project` | -- | Project name/path when `--scope=project` |
 | `--limit` | `50` | Max items |
 
 #### `lerim memory reset`
@@ -263,7 +265,8 @@ lerim ask "How is the database configured?"
 | Flag | Default | Description |
 |------|---------|-------------|
 | `question` | required | Your question (quote if spaces) |
-| `--project` | -- | Scope to project (not yet implemented) |
+| `--scope` | `all` | Read scope: `all` or `project` |
+| `--project` | -- | Project name/path when `--scope=project` |
 
 Notes:
 - Ask uses memory retrieval evidence.
@@ -277,6 +280,8 @@ Requires a running server (`lerim up` or `lerim serve`).
 
 ```bash
 lerim status
+lerim status --scope project --project lerim-cli
+lerim status --live
 lerim status --json    # structured JSON output
 ```
 
@@ -296,7 +301,17 @@ lerim queue --json
 |------|-------------|
 | `--failed` | Only failed + dead_letter jobs |
 | `--status` | Filter by status (`pending`, `running`, `failed`, `dead_letter`, `done`) |
-| `--project` | Substring match on repo path |
+| `--project` | Exact project name/path match |
+| `--project-like` | Substring match on repo path (legacy behavior) |
+
+### `lerim unscoped`
+
+Host-only: list indexed sessions that do not match any registered project.
+
+```bash
+lerim unscoped
+lerim unscoped --limit 100
+```
 
 ### `lerim retry`
 

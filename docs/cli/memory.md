@@ -1,60 +1,68 @@
 # lerim memory
 
-Manage the memory store directly — list and reset memories.
+Manage memory files directly.
 
 ## Overview
 
-The `memory` command group provides direct access to the memory store. Memories are stored as markdown files in `.lerim/memory/` within each registered project. Use these subcommands to browse or wipe memories.
+The `memory` command group provides local memory operations:
 
-!!! tip "Direct file access"
-    You can also read `.lerim/memory/index.md` directly — it lists all memory files by category with one-line descriptions and links. No server or CLI needed.
+- `memory list` to browse memory markdown files
+- `memory reset` to wipe selected memory/index roots
+
+`memory list` is local and does not require the server.
 
 ---
 
 ## memory list
 
-List stored memories as a sorted file list. No server required.
+List memory files from all projects (default) or one project.
 
 ```bash
-lerim memory list [--project NAME] [--limit N] [--json]
+lerim memory list [--scope all|project] [--project NAME] [--limit N] [--json]
 ```
 
 | Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--project` | -- | Reserved for project filter (not yet implemented) |
-| `--limit` | `50` | Maximum items to display |
-| `--json` | off | Output structured JSON |
+|---|---|---|
+| `--scope` | `all` | Read from all registered projects, or one project |
+| `--project` | -- | Project name/path when `--scope=project` |
+| `--limit` | `50` | Maximum number of files to print |
+| `--json` | off | Print JSON array instead of plain text |
+
+Examples:
 
 ```bash
 lerim memory list
-lerim memory list --limit 10 --json
+lerim memory list --scope project --project lerim-cli --limit 20
+lerim memory list --json
 ```
 
 ---
 
 ## memory reset
 
-Irreversibly delete `memory/`, `workspace/`, and `index/` under the selected scope.
+Irreversibly delete memory/workspace/index data in selected scope.
 
 ```bash
-lerim memory reset --yes [--scope SCOPE]
+lerim memory reset --yes [--scope project|global|both]
 ```
 
 | Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--yes` | *(required)* | Safety flag -- command refuses to run without it |
-| `--scope` | `both` | What to reset: `project`, `global`, or `both` |
+|---|---|---|
+| `--yes` | required | Safety confirmation flag |
+| `--scope` | `both` | Reset `project`, `global`, or `both` |
 
 !!! danger
-    This operation is **irreversible**. All memories, workspace artifacts, and index data within the selected scope will be permanently deleted.
+    This is permanent. Deleted data cannot be recovered.
 
 !!! warning
-    `--scope project` alone does **not** reset the session queue. The sessions DB lives in `~/.lerim/index/sessions.sqlite3`. Use `--scope global` or `--scope both` to fully reset.
+    `--scope project` does **not** reset the session queue DB. Queue state lives in global `~/.lerim/index/sessions.sqlite3`. Use `--scope global` or `--scope both` for full queue/index reset.
+
+Examples:
 
 ```bash
-lerim memory reset --yes                          # wipe everything
-lerim memory reset --scope project --yes          # project data only
-lerim memory reset --yes && lerim sync --max-sessions 5  # fresh start
+lerim memory reset --yes
+lerim memory reset --scope project --yes
+lerim memory reset --scope global --yes
 ```
 
 ---
@@ -62,10 +70,10 @@ lerim memory reset --yes && lerim sync --max-sessions 5  # fresh start
 ## Exit codes
 
 | Code | Meaning |
-|------|---------|
+|---|---|
 | `0` | Success |
-| `1` | Runtime failure (server not running, write error) |
-| `2` | Usage error (missing required flags) |
+| `1` | Runtime failure |
+| `2` | Usage error |
 
 ---
 
@@ -73,11 +81,11 @@ lerim memory reset --yes && lerim sync --max-sessions 5  # fresh start
 
 <div class="grid cards" markdown>
 
--   :material-magnify: **lerim ask**
+-   :material-brain: **lerim ask**
 
     ---
 
-    Query memories with natural language
+    Query memories in natural language
 
     [:octicons-arrow-right-24: lerim ask](ask.md)
 
@@ -85,23 +93,15 @@ lerim memory reset --yes && lerim sync --max-sessions 5  # fresh start
 
     ---
 
-    Extract memories from agent sessions
+    Extract new memories from sessions
 
     [:octicons-arrow-right-24: lerim sync](sync.md)
-
--   :material-wrench: **lerim maintain**
-
-    ---
-
-    Offline memory refinement and deduplication
-
-    [:octicons-arrow-right-24: lerim maintain](maintain.md)
 
 -   :material-chart-box: **lerim status**
 
     ---
 
-    Check memory counts and server state
+    Check memory counts and queue state
 
     [:octicons-arrow-right-24: lerim status](status.md)
 

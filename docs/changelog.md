@@ -8,17 +8,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+- No entries yet.
+
+## [0.1.71] - 2026-04-13
+
+### Added
+
+- Unified status dashboard output for `lerim status` and `lerim status --live` (same sections, live mode only refreshes).
+- Per-project stream visibility in status (`projects[]`) plus timeline activity (`recent_activity[]`) from sync + maintain runs.
+- New `lerim unscoped` command to inspect indexed sessions without project mapping.
+- Queue filtering split into exact project match (`--project`) and substring match (`--project-like`).
+
 ### Changed
 
-- Migrated `maintain` and `ask` to PydanticAI agents, aligned with the existing PydanticAI extraction flow.
-- Simplified runtime orchestration to a single PydanticAI execution path (sync, maintain, ask).
-- Updated tracing integration to `mlflow.pydantic_ai.autolog()`.
-- Updated docs to describe the current PydanticAI-only runtime and request-turn limits.
+- Default read scope for `ask`, `status`, and `memory list` is now all registered projects, with explicit `--scope project --project ...` for narrowing.
+- Status output now includes stronger action hints with full commands (`lerim retry ...`, `lerim skip ...`, `lerim queue --project ...`).
+- Canonical run telemetry now stored in `service_runs.details_json` with normalized metrics (`metrics_version=1`, sync/maintain totals, per-project metrics, events), while keeping compatibility fields for older consumers.
 
-### Removed
+### Fixed
 
-- Removed prior runtime branches and prior runtime-specific config surface from active runtime paths.
-- Removed prior runtime and proxy-bridge runtime dependencies from active package/lock state.
+- Live status activity now surfaces currently running sync work so the activity panel no longer appears frozen during long cycles.
+- Fixed maintain runtime failure caused by undefined `index_path`.
 
 ## [0.2.0] - 2026-03-25
 
