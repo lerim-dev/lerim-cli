@@ -94,7 +94,7 @@ def test_maintain_archives_stale(tmp_lerim_root):
 		content = stale_path.read_text(encoding="utf-8").lower()
 		has_stale_note = any(
 			marker in content
-			for marker in ("stale", "outdated", "deprecated", "no longer", "obsolete", "ie11")
+			for marker in ("stale", "outdated", "no longer", "replaced", "ie11")
 		)
 		assert has_stale_note, "learning_stale.md was neither archived nor annotated as stale"
 		return

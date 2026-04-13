@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
+
 import lerim.server.api as api_mod
 from lerim.server.api import api_queue_jobs, api_retry_job, api_skip_job
+from tests.helpers import make_config
 
 
 QUEUE_COUNTS = {"pending": 2, "running": 0, "done": 5, "failed": 1, "dead_letter": 0}
@@ -136,3 +140,25 @@ def test_api_queue_jobs_dead_letter_filter(monkeypatch):
 	assert captured["status_filter"] == "dead_letter"
 	assert captured["failed_only"] is False
 	assert result["total"] == 1
+
+
+def test_api_queue_jobs_resolves_exact_project_path(monkeypatch):
+	"""project name resolves to exact repo_path filter for queue reads."""
+	captured = {}
+	cfg = replace(
+		make_config(Path("/tmp/test-api-queue")),
+		projects={"myproj": "/tmp/repos/myproj"},
+	)
+
+	def fake_list(**kwargs):
+		captured.update(kwargs)
+		return []
+
+	monkeypatch.setattr(api_mod, "get_config", lambda: cfg)
+	monkeypatch.setattr(api_mod, "list_queue_jobs", fake_list)
+	monkeypatch.setattr(api_mod, "count_session_jobs_by_status", lambda: QUEUE_COUNTS)
+
+	api_queue_jobs(project="myproj")
+
+	assert Path(str(captured["project_filter"])).resolve() == Path("/tmp/repos/myproj").resolve()
+	assert captured["project_exact"] is True

@@ -33,7 +33,7 @@ owns only:
   and 3 history processors wired in
 - ``run_extraction`` — the synchronous runner with auto-scaled request budget
 
-Training compatibility: every agent action (``read``, ``note``, ``prune``,
+Training readiness: every agent action (``read``, ``note``, ``prune``,
 ``write``, ``edit``, ``verify_index``) is a discrete tool call that can serve
 as an RL action. History processors observe state but never take actions, so
 no hidden framework rule competes with the agent for context management.
@@ -360,7 +360,7 @@ def run_extraction(
 		run_folder: Optional run workspace folder for artifact output.
 		return_messages: If True, return
 			``(ExtractionResult, list[ModelMessage])``. Default False for
-			backward compatibility with single-return callers.
+			single-return callers.
 
 	Returns:
 		``ExtractionResult``, or ``(ExtractionResult, list[ModelMessage])``

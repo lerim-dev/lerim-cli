@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Quality Improvements
 - **+41% composite quality score** via Layer 1 AutoResearch optimization
-- ChainOfThought for DSPy extraction pipeline (biggest single improvement)
+- ChainOfThought for the prior extraction pipeline (biggest single improvement)
 - Explicit dedup classification thresholds (0.7/0.4) in sync prompt
 - Improved MemoryCandidate schema field descriptions for better output consistency
 - Tighter post-extraction body filter (30→50 chars minimum)
@@ -34,16 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
-- Removed PydanticAI dependency -- all agent operations now use DSPy ReAct.
+- Removed PydanticAI dependency -- all agent operations now use a ReAct runtime.
 - Removed explorer subagent — replaced by Codex filesystem sub-agent.
 - Removed custom filesystem tools (read, write, edit, glob, grep) — Codex handles all filesystem ops.
 - Removed `[roles.explorer]` config section (kept in default.toml for compatibility but unused).
 
 ### Added
 
-- DSPy ReAct with `dspy.LM` for multi-provider support (MiniMax, ZAI, OpenRouter, OpenAI, Ollama, MLX).
+- ReAct runtime with a provider-agnostic LM wrapper for multi-provider support (MiniMax, ZAI, OpenRouter, OpenAI, Ollama, MLX).
 - Codex tool as intelligent filesystem sub-agent with kernel-level sandboxing.
-- Unified `providers.py` -- all providers use `dspy.LM` natively (no proxy layer needed).
+- Unified `providers.py` -- all providers use the same LM wrapper path (no proxy layer needed).
 - Cross-session intelligence in maintain: signal amplification, contradiction detection, gap detection.
 - Cross-agent knowledge synthesis: detects patterns across Claude, Cursor, Codex, OpenCode sessions.
 - Hot-memory curation: auto-generated `.lerim/hot-memory.md` (~2000 tokens) with Active Decisions, Key Learnings, Recent Context, Watch Out.
@@ -70,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Parallelism support**: three config knobs control concurrent execution:
-  - `max_workers` in `[roles.extract]`: parallel extraction window processing via ThreadPoolExecutor (each thread gets its own DSPy LM instances for thread safety).
+  - `max_workers` in `[roles.extract]`: parallel extraction window processing via ThreadPoolExecutor (each thread gets its own LM instance for thread safety).
   - `max_explorers` in `[roles.explorer]`: concurrent explorer subagent calls per lead turn.
   - `parallel_pipelines` in `[server]`: run extract + summarize pipelines in the same tool turn.
 - **Async explore tool**: explorer subagent changed from sync (`run_sync`) to async (`await agent.run`), enabling true concurrent dispatch via PydanticAI's `asyncio.create_task`.
@@ -85,7 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Ollama lifecycle management**: automatic model load/unload around sync and maintain cycles. Models are warm-loaded into GPU/RAM before each cycle and unloaded after (`keep_alive: 0`) to free 5-10 GB of memory between runs. Controlled by `auto_unload = true` in `[providers]`.
-- **LiteLLM proxy support**: new `litellm_proxy` provider base URL in `[providers]` for routing PydanticAI OpenAI-format calls through LiteLLM to Ollama's native API (enables thinking mode control).
+- **Proxy bridge support**: new proxy provider base URL in `[providers]` for routing PydanticAI OpenAI-format calls to Ollama's native API (enables thinking mode control).
 - **Eval framework**: four eval pipelines (`extraction`, `summarization`, `sync`, `maintain`) with LLM-as-judge scoring, config-driven model comparison, and `bench_models.sh` multi-model benchmarking script.
 - Eval configs for Ollama models (Qwen3.5 4B/9B, thinking/non-thinking) and MiniMax-M2.5 cloud baseline.
 - Synthetic eval traces and judge prompt templates for all four pipelines.
@@ -144,8 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Same-path volume mounting for zero path translation between host and container.
 - Continual learning layer for coding agents and projects.
 - Platform adapters for Claude Code, Codex CLI, Cursor, and OpenCode.
-- Memory extraction pipeline using DSPy ChainOfThought with transcript windowing to extract decisions and learnings from coding session traces.
-- Trace summarization pipeline using DSPy ChainOfThought with transcript windowing to produce structured summaries with YAML frontmatter.
+- Memory extraction pipeline using ChainOfThought with transcript windowing to extract decisions and learnings from coding session traces.
+- Trace summarization pipeline using ChainOfThought with transcript windowing to produce structured summaries with YAML frontmatter.
 - PydanticAI lead agent with a read-only explorer subagent for memory operations.
 - Three CLI flows: `sync` (extract, summarize, write memories), `maintain` (merge, archive, decay), and `ask` (query memories).
 - Daemon mode for continuous sync and maintain loop.
@@ -153,7 +153,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Session catalog with SQLite FTS5 for session search.
 - Job queue with stale job reclamation.
 - TOML-layered configuration: shipped defaults, global, project, and env var override.
-- OpenTelemetry tracing via Logfire with PydanticAI and DSPy instrumentation.
+- OpenTelemetry tracing via Logfire with PydanticAI and runtime instrumentation.
 - Multi-provider LLM support: OpenRouter (with Nebius routing), Ollama, ZAI, OpenAI, Anthropic.
 - File-first memory model using markdown files with YAML frontmatter.
 - Project-first memory scope with global fallback.

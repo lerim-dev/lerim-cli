@@ -19,6 +19,7 @@ from lerim.agents.extract import ExtractionResult, run_extraction
 from lerim.agents.maintain import run_maintain
 from lerim.config.providers import build_pydantic_model
 from lerim.config.settings import Config, get_config
+from lerim.memory.repo import build_memory_paths, ensure_project_memory
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 
 logger = logging.getLogger("lerim.runtime")
@@ -68,6 +69,14 @@ def _resolve_runtime_roots(
 		else (config.global_data_dir / "workspace")
 	)
 	return resolved_memory_root, resolved_workspace_root
+
+
+def _ensure_memory_root_layout(memory_root: Path) -> None:
+	"""Ensure memory root has canonical folders + index file."""
+	ensure_project_memory(build_memory_paths(memory_root.parent))
+	index_path = memory_root / "index.md"
+	if not index_path.exists():
+		index_path.write_text("# Memory Index\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -246,9 +255,7 @@ class LerimRuntime:
 		_write_json_artifact(artifact_paths["session_log"], metadata)
 		artifact_paths["subagents_log"].write_text("", encoding="utf-8")
 
-		index_path = resolved_memory_root / "index.md"
-		if not index_path.exists():
-			index_path.write_text("# Memory Index\n", encoding="utf-8")
+		_ensure_memory_root_layout(resolved_memory_root)
 
 		def _primary_builder() -> Any:
 			return build_pydantic_model("agent", config=self.config)
@@ -314,9 +321,7 @@ class LerimRuntime:
 		run_folder.mkdir(parents=True, exist_ok=True)
 		artifact_paths = build_maintain_artifact_paths(run_folder)
 
-		index_path = resolved_memory_root / "index.md"
-		if not index_path.exists():
-			index_path.write_text("# Memory Index\n", encoding="utf-8")
+		_ensure_memory_root_layout(resolved_memory_root)
 
 		def _primary_builder() -> Any:
 			return build_pydantic_model("agent", config=self.config)

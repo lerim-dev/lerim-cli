@@ -7,7 +7,10 @@ management so both the argparse CLI and the HTTP API call the same code.
 from __future__ import annotations
 
 import os
+import shutil
+import sqlite3
 import subprocess
+import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -24,6 +27,7 @@ from lerim.adapters.registry import (
     connect_platform,
     list_platforms,
 )
+from lerim.memory.repo import build_memory_paths, ensure_project_memory
 from lerim.server.daemon import (
     resolve_window_bounds,
     run_maintain_once,
@@ -42,8 +46,10 @@ from lerim.server.runtime import LerimRuntime
 from lerim.sessions.catalog import (
     count_fts_indexed,
     count_session_jobs_by_status,
+    count_unscoped_sessions_by_agent,
     latest_service_run,
     list_queue_jobs,
+    list_unscoped_sessions,
     queue_health_snapshot,
     retry_session_job,
     skip_session_job,
@@ -218,21 +224,233 @@ def api_health() -> dict[str, Any]:
     return {"status": "ok", "version": __version__}
 
 
-def api_ask(question: str) -> dict[str, Any]:
+def _registered_projects(config: Config) -> list[tuple[str, Path]]:
+    """Return registered projects as resolved (name, path) pairs."""
+    items: list[tuple[str, Path]] = []
+    for name, path_str in config.projects.items():
+        items.append((name, Path(path_str).expanduser().resolve()))
+    return items
+
+
+def _project_memory_root(project_path: Path) -> Path:
+    """Return per-project memory root path."""
+    return project_path / ".lerim" / "memory"
+
+
+def _ensure_memory_root_layout(memory_root: Path) -> None:
+    """Ensure memory root has canonical folders + index file."""
+    ensure_project_memory(build_memory_paths(memory_root.parent))
+    index_path = memory_root / "index.md"
+    if not index_path.exists():
+        index_path.write_text("# Memory Index\n", encoding="utf-8")
+
+
+def _resolve_selected_projects(
+    *,
+    config: Config,
+    scope: str,
+    project: str | None,
+) -> list[tuple[str, Path]]:
+    """Resolve target projects for scoped read/query APIs."""
+    all_projects = _registered_projects(config)
+    if scope != "project":
+        return all_projects
+
+    if project:
+        token = project.strip()
+        if token in config.projects:
+            return [(token, Path(config.projects[token]).expanduser().resolve())]
+        try:
+            project_path = Path(token).expanduser().resolve()
+        except Exception:
+            project_path = None
+        if project_path is not None:
+            for name, path in all_projects:
+                if path == project_path:
+                    return [(name, path)]
+        raise ValueError(f"Project not found: {project}")
+
+    if len(all_projects) == 1:
+        return [all_projects[0]]
+    if not all_projects:
+        return []
+    raise ValueError("scope=project requires a project name when multiple projects are registered.")
+
+
+def _copy_memory_file(src: Path, dst_dir: Path, *, prefix: str) -> str:
+    """Copy one memory markdown file into merged ask memory root."""
+    safe_prefix = prefix.replace("/", "_").replace("\\", "_")
+    target_name = f"{safe_prefix}__{src.name}"
+    target = dst_dir / target_name
+    if target.exists():
+        stem = src.stem
+        suffix = src.suffix
+        counter = 2
+        while True:
+            candidate = dst_dir / f"{safe_prefix}__{stem}_{counter}{suffix}"
+            if not candidate.exists():
+                target = candidate
+                target_name = candidate.name
+                break
+            counter += 1
+    shutil.copy2(src, target)
+    return target_name
+
+
+def _build_merged_ask_memory_root(
+    selected_projects: list[tuple[str, Path]],
+) -> tuple[Path, str]:
+    """Build temporary merged memory root for ask scope=all."""
+    temp_root = Path(tempfile.mkdtemp(prefix="lerim-ask-"))
+    memory_root = temp_root / "memory"
+    _ensure_memory_root_layout(memory_root)
+    index_lines = ["# Memory Index", ""]
+    copied_any = False
+
+    for name, project_path in selected_projects:
+        src_root = _project_memory_root(project_path)
+        if not src_root.exists():
+            continue
+        copied_names: list[str] = []
+        for src in sorted(src_root.glob("*.md")):
+            if src.name == "index.md":
+                continue
+            copied_names.append(_copy_memory_file(src, memory_root, prefix=name))
+        if not copied_names:
+            continue
+        copied_any = True
+        index_lines.append(f"## {name}")
+        for copied in copied_names:
+            index_lines.append(f"- [{copied}]({copied})")
+        index_lines.append("")
+
+    if not copied_any:
+        index_lines.extend(["## No Memories Yet", "- No project memories found.", ""])
+    (memory_root / "index.md").write_text("\n".join(index_lines), encoding="utf-8")
+    return memory_root, str(temp_root)
+
+
+def _count_memory_files(memory_root: Path) -> int:
+    """Count markdown memory files under one memory root."""
+    if not memory_root.exists():
+        return 0
+    return sum(1 for _ in memory_root.rglob("*.md"))
+
+
+def _queue_counts_for_repo(
+    *,
+    sessions_db_path: Path,
+    repo_path: str,
+) -> tuple[dict[str, int], str | None, str | None]:
+    """Return queue counts + oldest dead-letter blocker + latest error for repo."""
+    counts: dict[str, int] = {}
+    blocked_run_id: str | None = None
+    last_error: str | None = None
+    if not sessions_db_path.exists():
+        return counts, blocked_run_id, last_error
+
+    try:
+        with sqlite3.connect(sessions_db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT status, COUNT(1) AS total
+                FROM session_jobs
+                WHERE repo_path = ?
+                GROUP BY status
+                """,
+                (repo_path,),
+            ).fetchall()
+            counts = {str(row["status"]): int(row["total"]) for row in rows}
+
+            oldest = conn.execute(
+                """
+                SELECT run_id, status
+                FROM session_jobs
+                WHERE repo_path = ?
+                  AND status IN ('pending', 'failed', 'dead_letter')
+                ORDER BY start_time ASC, available_at ASC, id ASC
+                LIMIT 1
+                """,
+                (repo_path,),
+            ).fetchone()
+            if oldest and str(oldest["status"]) == "dead_letter":
+                blocked_run_id = str(oldest["run_id"])
+
+            latest_err = conn.execute(
+                """
+                SELECT error
+                FROM session_jobs
+                WHERE repo_path = ?
+                  AND status IN ('failed', 'dead_letter')
+                  AND error IS NOT NULL
+                  AND error != ''
+                ORDER BY updated_at DESC, id DESC
+                LIMIT 1
+                """,
+                (repo_path,),
+            ).fetchone()
+            if latest_err:
+                last_error = str(latest_err["error"])
+    except sqlite3.Error:
+        return {}, None, None
+
+    for status in ("pending", "running", "done", "failed", "dead_letter"):
+        counts.setdefault(status, 0)
+    return counts, blocked_run_id, last_error
+
+
+def api_ask(
+    question: str,
+    *,
+    scope: str = "all",
+    project: str | None = None,
+) -> dict[str, Any]:
     """Run one ask query against the runtime agent and return result dict."""
     config = get_config()
-    memory_root = str(config.memory_dir)
+    selected_projects: list[tuple[str, Path]] = []
+    normalized_scope = "project" if str(scope).strip().lower() == "project" else "all"
+    try:
+        selected_projects = _resolve_selected_projects(
+            config=config,
+            scope=normalized_scope,
+            project=project,
+        )
+    except ValueError as exc:
+        return {
+            "answer": str(exc),
+            "agent_session_id": "",
+            "memories_used": [],
+            "error": True,
+            "cost_usd": 0.0,
+        }
+
+    cleanup_root: str | None = None
+    if normalized_scope == "all" and len(selected_projects) > 1:
+        memory_root_path, cleanup_root = _build_merged_ask_memory_root(selected_projects)
+    elif selected_projects:
+        memory_root_path = _project_memory_root(selected_projects[0][1])
+        _ensure_memory_root_layout(memory_root_path)
+    else:
+        memory_root_path = config.global_data_dir / "memory"
+        _ensure_memory_root_layout(memory_root_path)
+
     agent = LerimRuntime()
-    response, session_id, cost_usd = agent.ask(
-        question, cwd=str(Path.cwd()), memory_root=memory_root
-    )
+    try:
+        response, session_id, cost_usd = agent.ask(
+            question, cwd=str(config.global_data_dir), memory_root=str(memory_root_path)
+        )
+    finally:
+        if cleanup_root:
+            shutil.rmtree(cleanup_root, ignore_errors=True)
     error = looks_like_auth_error(response)
     return {
         "answer": response,
         "agent_session_id": session_id,
-        "memories_used": [],
+        "memories_used": [name for name, _ in selected_projects],
         "error": bool(error),
         "cost_usd": cost_usd,
+        "scope": normalized_scope,
     }
 
 
@@ -294,35 +512,81 @@ def api_maintain(force: bool = False, dry_run: bool = False) -> dict[str, Any]:
     return result
 
 
-def api_status() -> dict[str, Any]:
+def api_status(
+    *,
+    scope: str = "all",
+    project: str | None = None,
+) -> dict[str, Any]:
     """Return runtime status summary."""
     config = get_config()
-    memory_count = (
-        sum(1 for _ in config.memory_dir.rglob("*.md"))
-        if config.memory_dir.exists()
-        else 0
-    )
+    normalized_scope = "project" if str(scope).strip().lower() == "project" else "all"
+    selection_error: str | None = None
+    try:
+        selected_projects = _resolve_selected_projects(
+            config=config,
+            scope=normalized_scope,
+            project=project,
+        )
+    except ValueError as exc:
+        selection_error = str(exc)
+        selected_projects = []
+
+    projects_payload: list[dict[str, Any]] = []
+    total_memory = 0
+    for name, path in selected_projects:
+        memory_root = _project_memory_root(path)
+        memory_count = _count_memory_files(memory_root)
+        total_memory += memory_count
+        queue_counts, blocked_run_id, last_error = _queue_counts_for_repo(
+            sessions_db_path=config.sessions_db_path,
+            repo_path=str(path),
+        )
+        projects_payload.append(
+            {
+                "name": name,
+                "path": str(path),
+                "exists": path.exists(),
+                "memory_dir": str(memory_root),
+                "memory_count": memory_count,
+                "queue": queue_counts,
+                "oldest_blocked_run_id": blocked_run_id,
+                "last_error": last_error,
+            }
+        )
+    if not projects_payload and normalized_scope == "all":
+        total_memory = _count_memory_files(config.global_data_dir / "memory")
+
     latest_sync = latest_service_run("sync")
     latest_maintain = latest_service_run("maintain")
     queue = count_session_jobs_by_status()
     queue_health = queue_health_snapshot()
     latest_sync_details = (latest_sync or {}).get("details") or {}
+    unscoped_by_agent = count_unscoped_sessions_by_agent(projects=config.projects)
 
-    return {
+    payload: dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "connected_agents": list(config.agents.keys()),
         "platforms": list_platforms(config.platforms_path),
-        "memory_count": memory_count,
+        "memory_count": total_memory,
         "sessions_indexed_count": count_fts_indexed(),
         "queue": queue,
         "queue_health": queue_health,
+        "projects": projects_payload,
+        "unscoped_sessions": {
+            "total": sum(unscoped_by_agent.values()),
+            "by_agent": unscoped_by_agent,
+        },
         "scope": {
             "strict_project_only": True,
+            "mode": normalized_scope,
             "skipped_unscoped": int(latest_sync_details.get("skipped_unscoped") or 0),
         },
         "latest_sync": latest_sync,
         "latest_maintain": latest_maintain,
     }
+    if selection_error:
+        payload["error"] = selection_error
+    return payload
 
 
 def api_connect_list() -> list[dict[str, Any]]:
@@ -375,15 +639,51 @@ def api_skip_all_dead_letter() -> dict[str, Any]:
 
 
 def api_queue_jobs(
-    status: str | None = None, project: str | None = None,
+    status: str | None = None,
+    project: str | None = None,
+    project_like: str | None = None,
 ) -> dict[str, Any]:
     """List queue jobs with optional filters."""
+    project_filter: str | None = None
+    project_exact = False
+    if project:
+        config = get_config()
+        try:
+            selected = _resolve_selected_projects(
+                config=config, scope="project", project=project
+            )
+        except ValueError as exc:
+            # Backward-compatible fallback for HTTP/API callers that still
+            # pass free-form project substrings.
+            selected = []
+            project_filter = str(project)
+            project_exact = False
+        if selected:
+            _name, project_path = selected[0]
+            project_filter = str(project_path)
+            project_exact = True
+    elif project_like:
+        project_filter = project_like
+
     jobs = list_queue_jobs(
         status_filter=status,
-        project_filter=project,
+        project_filter=project_filter,
+        project_exact=project_exact,
         failed_only=(status == "failed"),
     )
     return {"jobs": jobs, "total": len(jobs), "queue": count_session_jobs_by_status()}
+
+
+def api_unscoped(*, limit: int = 50) -> dict[str, Any]:
+    """List unscoped indexed sessions and aggregate counts."""
+    config = get_config()
+    items = list_unscoped_sessions(projects=config.projects, limit=limit)
+    counts = count_unscoped_sessions_by_agent(projects=config.projects)
+    return {
+        "items": items,
+        "total": len(items),
+        "count_by_agent": counts,
+    }
 
 
 # ── Project management ───────────────────────────────────────────────
@@ -413,14 +713,21 @@ def api_project_add(path_str: str) -> dict[str, Any]:
         return {"error": f"Not a directory: {resolved}", "name": None}
 
     name = resolved.name
-    # Create .lerim/ in project
+    # Create canonical project memory layout under .lerim/
     lerim_dir = resolved / ".lerim"
     lerim_dir.mkdir(parents=True, exist_ok=True)
+    memory_root = lerim_dir / "memory"
+    _ensure_memory_root_layout(memory_root)
 
     # Update config
     save_config_patch({"projects": {name: str(resolved)}})
 
-    return {"name": name, "path": str(resolved), "created_lerim_dir": True}
+    return {
+        "name": name,
+        "path": str(resolved),
+        "created_lerim_dir": True,
+        "memory_dir": str(memory_root),
+    }
 
 
 def api_project_remove(name: str) -> dict[str, Any]:

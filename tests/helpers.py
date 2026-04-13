@@ -64,13 +64,13 @@ def write_test_config(tmp_path: Path, **sections: dict[str, Any]) -> Path:
         "data": {"dir": str(tmp_path)},
     }
 
-    legacy_agent = sections.pop("agent", None)
-    if isinstance(legacy_agent, dict):
+    agent_section = sections.pop("agent", None)
+    if isinstance(agent_section, dict):
         lead = all_sections.setdefault("roles.agent", {})
-        if "provider" in legacy_agent:
-            lead["provider"] = legacy_agent["provider"]
-        if "model" in legacy_agent:
-            lead["model"] = legacy_agent["model"]
+        if "provider" in agent_section:
+            lead["provider"] = agent_section["provider"]
+        if "model" in agent_section:
+            lead["model"] = agent_section["model"]
     for name, payload in sections.items():
         if isinstance(payload, dict):
             all_sections[name] = payload

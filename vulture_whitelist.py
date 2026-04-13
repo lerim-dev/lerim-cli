@@ -1,11 +1,11 @@
 """Vulture whitelist — false positives from framework/protocol methods.
 
-Vulture cannot trace dynamic dispatch (getattr), framework protocols (DSPy
-forward, HTTP do_GET), or sqlite3 attributes (row_factory). List them here
+Vulture cannot trace dynamic dispatch (getattr), protocol-style dispatch
+(`forward`, HTTP `do_GET`), or sqlite3 attributes (`row_factory`). List them here
 so CI passes cleanly.
 """
 
-# DSPy Module protocol — called internally by dspy.ReAct
+# Module protocol method — invoked by runtime dispatch
 forward  # noqa
 
 # HTTP handler methods — called by BaseHTTPRequestHandler dispatch

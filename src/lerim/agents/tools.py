@@ -6,8 +6,11 @@ takes `RunContext[ExtractDeps]` as its first argument; docstrings follow
 Google style (Args: section) and are parsed by PydanticAI via griffe into
 the JSON schema the model sees as tool metadata.
 
-This module is the **single source of truth** for memory operations. All
-agents use the module-level functions directly.
+This module is the **single source of truth** for memory operations. The
+`MemoryTools` class at the bottom is a thin compatibility adapter kept
+only so the legacy DSPy maintain/ask agents can continue binding methods
+to `dspy.ReAct(tools=[...])` without modification. New code should use
+the module-level functions directly.
 """
 
 from __future__ import annotations
@@ -82,7 +85,7 @@ class Finding(BaseModel):
 	"""
 
 	theme: str = Field(
-		description="Short theme label, e.g. 'runtime migration' or 'config refactor'"
+		description="Short theme label, e.g. 'DSPy migration' or 'config refactor'"
 	)
 	offset: int = Field(description="Trace line where the supporting evidence appears")
 	quote: str = Field(
@@ -187,26 +190,6 @@ def _normalize_whitespace(text: str) -> str:
 		re.sub(r"^[ \t]+", lambda m: " " * len(m.group().replace("\t", "    ")), line).rstrip()
 		for line in lines
 	)
-
-
-def build_test_ctx(
-	*,
-	memory_root: Path,
-	trace_path: Path | None = None,
-	run_folder: Path | None = None,
-) -> Any:
-	"""Build a minimal RunContext-like object for direct tool unit tests.
-
-	PydanticAI constructs a full RunContext during real agent runs. Tests that
-	call module-level tool functions directly only need `ctx.deps`, so we return
-	a tiny object with that attribute.
-	"""
-	deps = ExtractDeps(
-		memory_root=Path(memory_root),
-		trace_path=Path(trace_path) if trace_path else None,
-		run_folder=Path(run_folder) if run_folder else None,
-	)
-	return SimpleNamespace(deps=deps)
 
 
 # ── Tool functions (single source of truth) ─────────────────────────────
@@ -528,7 +511,7 @@ def note(ctx: RunContext[ExtractDeps], findings: list[Finding]) -> str:
 
 	Args:
 		findings: List of Finding(theme, offset, quote) objects. `theme` is
-			a short label like 'runtime migration' or 'config refactor' that
+			a short label like 'DSPy migration' or 'config refactor' that
 			groups related findings. `offset` is the trace line where the
 			evidence appears (use the offset you just read from).  `quote`
 			is a short verbatim snippet from the trace (under ~200 chars)
@@ -637,19 +620,6 @@ def write(ctx: RunContext[ExtractDeps], type: str, name: str, description: str, 
 				f"and preferences at a conceptual level, not reference specific files "
 				f"or functions. Rewrite the body without file paths, or skip this "
 				f"memory if the content is code-derivable."
-			)
-		command_markers = re.findall(
-			r"(?im)(?:^|\\n)\\s*(?:uv|pytest|docker|git|python|pip|lerim|curl|npm|pnpm|yarn|make)\\b",
-			body,
-		)
-		cli_flags = re.findall(r"(?i)(?<!\\w)--[a-z0-9][a-z0-9-]*", body)
-		if (len(command_markers) + len(cli_flags)) >= 3:
-			return (
-				"Warning: body looks like command/runbook notes "
-				"(multiple CLI commands or flags detected). "
-				"Memories should capture durable decisions/preferences, "
-				"not operational command sequences. Rewrite at decision level "
-				"or skip this memory."
 			)
 
 	# --- Require Why/How sections in feedback and project memories ---
@@ -1094,3 +1064,80 @@ def prune_history_processor(
 
 	return messages
 
+
+# ── Legacy compatibility shim (DSPy maintain/ask agents only) ────────────
+
+
+class MemoryTools:
+	"""Thin compatibility adapter for legacy DSPy agents (maintain, ask).
+
+	The class exists solely so `MaintainAgent` and `AskAgent` can continue
+	passing bound methods to `dspy.ReAct(tools=[self.tools.read, ...])`
+	without being rewritten for the PydanticAI tool signature. Each method
+	forwards to the module-level function with a synthetic `RunContext`.
+
+	Deprecated: will be removed when maintain and ask migrate to PydanticAI.
+	New PydanticAI code must use the module-level functions directly via
+	`Agent(tools=[read, grep, scan, write, edit, verify_index])`.
+	"""
+
+	def __init__(
+		self,
+		memory_root: Path,
+		trace_path: Path | None = None,
+		run_folder: Path | None = None,
+	):
+		self._deps = ExtractDeps(
+			memory_root=Path(memory_root),
+			trace_path=Path(trace_path) if trace_path else None,
+			run_folder=Path(run_folder) if run_folder else None,
+		)
+		# Synthetic RunContext-like object so the module functions can be
+		# called with ctx.deps access. PydanticAI's RunContext has more
+		# attributes but our tools only read ctx.deps, so SimpleNamespace
+		# is sufficient.
+		self._ctx = SimpleNamespace(deps=self._deps)
+
+	# Path accessors for callers that still need raw paths.
+	@property
+	def memory_root(self) -> Path:
+		return self._deps.memory_root
+
+	@property
+	def trace_path(self) -> Path | None:
+		return self._deps.trace_path
+
+	@property
+	def run_folder(self) -> Path | None:
+		return self._deps.run_folder
+
+	# Tool method forwarders — each is a one-line delegation to the module
+	# function. Method signature matches the module function signature
+	# minus the ctx parameter (which is supplied from self._ctx).
+
+	def read(self, filename: str, offset: int = 0, limit: int = 0) -> str:
+		return read(self._ctx, filename, offset, limit)
+
+	def grep(self, filename: str, pattern: str, context_lines: int = 2) -> str:
+		return grep(self._ctx, filename, pattern, context_lines)
+
+	def scan(self, directory: str = "", pattern: str = "*.md") -> str:
+		return scan(self._ctx, directory, pattern)
+
+	def verify_index(self, filename: str = "index.md") -> str:
+		return verify_index(self._ctx, filename)
+
+	def write(self, type: str, name: str, description: str, body: str) -> str:
+		return write(self._ctx, type, name, description, body)
+
+	def edit(
+		self,
+		filename: str,
+		old_string: str,
+		new_string: str,
+		near_line: int = 0,
+	) -> str:
+		return edit(self._ctx, filename, old_string, new_string, near_line)
+
+	def archive(self, filename: str) -> str:
+		return archive(self._ctx, filename)

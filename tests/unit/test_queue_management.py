@@ -368,6 +368,17 @@ def test_list_queue_jobs_project_filter():
 	assert "o-other" not in run_ids
 
 
+def test_list_queue_jobs_project_exact():
+	"""project_exact=True matches only exact repo_path."""
+	_seed_and_enqueue("o2-match", "/tmp/exact-proj", start_time="2026-03-01T10:00:00Z")
+	_seed_and_enqueue("o2-other", "/tmp/exact-proj-sub", start_time="2026-03-01T10:00:00Z")
+
+	rows = list_queue_jobs(project_filter="/tmp/exact-proj", project_exact=True)
+	run_ids = {r["run_id"] for r in rows}
+	assert "o2-match" in run_ids
+	assert "o2-other" not in run_ids
+
+
 # ── Full lifecycle integration tests ─────────────────────────────────
 
 

@@ -295,10 +295,15 @@ def test_server(tmp_path, monkeypatch):
 	monkeypatch.setattr("lerim.server.httpd.api_project_list", lambda: [
 		{"name": "myproject", "path": "/tmp/myproject", "exists": True, "has_lerim": True},
 	])
-	monkeypatch.setattr("lerim.server.httpd.api_queue_jobs", lambda status=None, project=None: {
+	monkeypatch.setattr("lerim.server.httpd.api_queue_jobs", lambda status=None, project=None, project_like=None: {
 		"jobs": [{"run_id": "run-0000", "status": "pending"}],
 		"total": 1,
 		"queue": {"pending": 1, "dead_letter": 1},
+	})
+	monkeypatch.setattr("lerim.server.httpd.api_unscoped", lambda limit=50: {
+		"items": [{"run_id": "u-1", "agent_type": "cursor", "repo_path": None}],
+		"total": 1,
+		"count_by_agent": {"cursor": 1},
 	})
 
 	# Catalog functions used directly by handler methods
@@ -380,6 +385,15 @@ def test_get_status(test_server):
 	assert "connected_agents" in body
 	assert "memory_count" in body
 	assert "queue" in body
+
+
+def test_get_unscoped(test_server):
+	"""GET /api/unscoped returns unscoped session summary."""
+	port, _, _ = test_server
+	status, body = _api_get(port, "/api/unscoped?limit=10")
+	assert status == 200
+	assert "items" in body
+	assert "count_by_agent" in body
 
 
 def test_get_memories(test_server):

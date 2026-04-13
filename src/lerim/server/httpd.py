@@ -37,6 +37,7 @@ from lerim.server.api import (
     api_skip_job,
     api_status,
     api_sync,
+    api_unscoped,
 )
 from lerim.config.settings import (
     Config,
@@ -1276,11 +1277,34 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
         if path == "/api/jobs/queue":
             status_f = _query_param(query, "status") or None
             project_f = _query_param(query, "project") or None
-            self._json(api_queue_jobs(status=status_f, project=project_f))
+            project_like_f = _query_param(query, "project_like") or None
+            queue_kwargs: dict[str, Any] = {"status": status_f, "project": project_f}
+            if project_like_f:
+                queue_kwargs["project_like"] = project_like_f
+            self._json(api_queue_jobs(**queue_kwargs))
+            return
+        if path == "/api/status":
+            scope = _query_param(query, "scope", "all")
+            project = _query_param(query, "project") or None
+            try:
+                if scope == "all" and not project:
+                    self._json(api_status())
+                else:
+                    self._json(api_status(scope=scope, project=project))
+            except ValueError as exc:
+                self._error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        if path == "/api/unscoped":
+            raw_limit = _query_param(query, "limit", "50")
+            try:
+                limit = max(1, int(raw_limit))
+            except ValueError:
+                self._error(HTTPStatus.BAD_REQUEST, "limit must be an integer")
+                return
+            self._json(api_unscoped(limit=limit))
             return
         no_query_handlers = {
             "/api/health": lambda: self._json(api_health()),
-            "/api/status": lambda: self._json(api_status()),
             "/api/live": self._api_live,
             "/api/connect": lambda: self._json({"platforms": api_connect_list()}),
             "/api/project/list": lambda: self._json({"projects": api_project_list()}),
@@ -1342,10 +1366,18 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
             import threading
 
             result_holder: list[dict[str, Any]] = []
+            scope = str(body.get("scope") or "all")
+            project = body.get("project")
+            project_name = str(project).strip() if isinstance(project, str) else None
 
             def _run_ask() -> None:
                 """Execute ask in background thread."""
-                result_holder.append(api_ask(question))
+                if scope == "all" and not project_name:
+                    result_holder.append(api_ask(question))
+                else:
+                    result_holder.append(
+                        api_ask(question, scope=scope, project=project_name)
+                    )
 
             thread = threading.Thread(target=_run_ask)
             thread.start()

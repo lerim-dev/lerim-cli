@@ -13,6 +13,7 @@ import json
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -256,15 +257,74 @@ def _cmd_dashboard(args: argparse.Namespace) -> int:
 	return 0
 
 
-def _cmd_memory_list(args: argparse.Namespace) -> int:
-    """List memory files in the memory directory."""
+def _normalize_scope(raw: str | None) -> str:
+    """Normalize CLI scope flag to all|project."""
+    return "project" if str(raw or "").strip().lower() == "project" else "all"
+
+
+def _project_memory_roots_for_scope(
+    *,
+    scope: str,
+    project: str | None,
+) -> list[tuple[str, Path]]:
+    """Resolve selected project memory roots for local CLI reads."""
     config = get_config()
-    memory_dir = config.memory_dir
-    if not memory_dir.exists():
+    projects = {
+        name: Path(path).expanduser().resolve() for name, path in config.projects.items()
+    }
+
+    if scope == "all":
+        roots = [
+            (name, path / ".lerim" / "memory")
+            for name, path in projects.items()
+        ]
+        if roots:
+            return roots
+        return [("global", config.global_data_dir / "memory")]
+
+    if not project and len(projects) == 1:
+        only_name = next(iter(projects))
+        return [(only_name, projects[only_name] / ".lerim" / "memory")]
+    if not project:
+        return []
+
+    resolved_repo = _resolve_project_repo_path(project)
+    if not resolved_repo:
+        return []
+    repo_path = Path(resolved_repo).expanduser().resolve()
+    for name, path in projects.items():
+        if path == repo_path:
+            return [(name, path / ".lerim" / "memory")]
+    return []
+
+
+def _cmd_memory_list(args: argparse.Namespace) -> int:
+    """List memory files for all projects (default) or one project."""
+    scope = _normalize_scope(getattr(args, "scope", None))
+    selected = _project_memory_roots_for_scope(
+        scope=scope,
+        project=getattr(args, "project", None),
+    )
+    if scope == "project" and not selected:
+        _emit(
+            "Project not found. Provide --project <name> or register one with `lerim project add <path>`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    files: list[Path] = []
+    for _name, memory_dir in selected:
+        if memory_dir.exists():
+            files.extend(sorted(memory_dir.rglob("*.md")))
+    files = sorted(files)[: max(1, int(args.limit))]
+
+    if not files:
+        if args.json:
+            _emit("[]")
         return 0
-    files = sorted(memory_dir.rglob("*.md"))[: args.limit]
+
     if args.json:
-        _emit(json.dumps([str(f) for f in files], indent=2))
+        _emit(json.dumps([str(f) for f in files], indent=2, ensure_ascii=True))
         return 0
     for f in files:
         _emit(str(f))
@@ -273,7 +333,12 @@ def _cmd_memory_list(args: argparse.Namespace) -> int:
 
 def _cmd_ask(args: argparse.Namespace) -> int:
     """Forward ask query to the running Lerim server."""
-    data = _api_post("/api/ask", {"question": args.question})
+    scope = _normalize_scope(getattr(args, "scope", None))
+    payload: dict[str, Any] = {"question": args.question, "scope": scope}
+    project = getattr(args, "project", None)
+    if project:
+        payload["project"] = str(project)
+    data = _api_post("/api/ask", payload)
     if data is None:
         return _not_running()
     if data.get("error"):
@@ -370,15 +435,20 @@ def _format_queue_counts(counts: dict[str, int]) -> str:
 
 
 def _resolve_project_repo_path(name: str) -> str | None:
-	"""Resolve a project name to its repo_path."""
+	"""Resolve an exact project name/path to repo_path."""
 	config = get_config()
-	# Exact match first
 	if name in config.projects:
 		return str(Path(config.projects[name]).expanduser().resolve())
-	# Substring match
-	for pname, ppath in config.projects.items():
-		if name in pname:
-			return str(Path(ppath).expanduser().resolve())
+	token = str(name).strip()
+	try:
+		raw_path = Path(token).expanduser().resolve()
+	except Exception:
+		raw_path = None
+	if raw_path is not None:
+		for ppath in config.projects.values():
+			resolved = Path(ppath).expanduser().resolve()
+			if resolved == raw_path:
+				return str(resolved)
 	return None
 
 
@@ -386,9 +456,27 @@ def _cmd_queue(args: argparse.Namespace) -> int:
 	"""Display the session extraction queue."""
 	from lerim.sessions.catalog import list_queue_jobs, count_session_jobs_by_status
 
+	project_filter: str | None = None
+	project_exact = False
+	project = getattr(args, "project", None)
+	project_like = getattr(args, "project_like", None)
+	if project and project_like:
+		_emit("Use either --project or --project-like, not both.", file=sys.stderr)
+		return 2
+	if project:
+		repo_path = _resolve_project_repo_path(str(project))
+		if not repo_path:
+			_emit(f"Project not found: {project}", file=sys.stderr)
+			return 1
+		project_filter = repo_path
+		project_exact = True
+	elif project_like:
+		project_filter = str(project_like)
+
 	jobs = list_queue_jobs(
 		status_filter=getattr(args, "status", None),
-		project_filter=getattr(args, "project", None),
+		project_filter=project_filter,
+		project_exact=project_exact,
 		failed_only=getattr(args, "failed", False),
 	)
 	counts = count_session_jobs_by_status()
@@ -435,6 +523,231 @@ def _cmd_queue(args: argparse.Namespace) -> int:
 	if counts.get("dead_letter", 0) > 0:
 		_emit("Retry: lerim retry <run_id>  |  Retry all: lerim retry --all")
 	return 0
+
+
+def _cmd_unscoped(args: argparse.Namespace) -> int:
+	"""Show indexed sessions that are currently unscoped (no project match)."""
+	query_path = f"/api/unscoped?limit={max(1, int(args.limit))}"
+	data = _api_get(query_path)
+	if data is None:
+		return _not_running()
+	items = data.get("items") or []
+	if args.json:
+		_emit(json.dumps(data, indent=2, ensure_ascii=True))
+		return 0
+	count_by_agent = data.get("count_by_agent") or {}
+	if not items:
+		_emit("No unscoped sessions.")
+		if count_by_agent:
+			_emit(f"by_agent: {json.dumps(count_by_agent, ensure_ascii=True)}")
+		return 0
+	_emit(f"Unscoped sessions ({len(items)} shown):")
+	for item in items:
+		run_id = str(item.get("run_id") or "")[:8]
+		agent = str(item.get("agent_type") or "unknown")
+		repo_path = str(item.get("repo_path") or "(missing cwd)")
+		_emit(f"- {run_id}  {agent}  {repo_path}")
+	if count_by_agent:
+		_emit(f"by_agent: {json.dumps(count_by_agent, ensure_ascii=True)}")
+	return 0
+
+
+def _project_state(project: dict[str, Any]) -> str:
+	"""Classify one project status row for snapshot/live status views."""
+	queue = project.get("queue") or {}
+	dead = int(queue.get("dead_letter") or 0)
+	running = int(queue.get("running") or 0)
+	pending = int(queue.get("pending") or 0)
+	memory = int(project.get("memory_count") or 0)
+	if dead > 0 and str(project.get("oldest_blocked_run_id") or "").strip():
+		return "blocked"
+	if running > 0:
+		return "running"
+	if pending > 0:
+		return "queued"
+	if memory > 0:
+		return "healthy"
+	return "idle"
+
+
+def _project_next_action(project: dict[str, Any]) -> str:
+	"""Return concise next action guidance for one project row."""
+	name = str(project.get("name") or "").strip()
+	queue = project.get("queue") or {}
+	dead = int(queue.get("dead_letter") or 0)
+	if dead > 0:
+		blocked = str(project.get("oldest_blocked_run_id") or "").strip()
+		if blocked:
+			return f"retry {blocked[:12]} / skip {blocked[:12]}"
+		return f"retry --project {name}"
+	if int(queue.get("running") or 0) > 0:
+		return f"queue --project {name}"
+	if int(queue.get("pending") or 0) > 0:
+		return f"queue --project {name}"
+	return "-"
+
+
+def _render_status_output(payload: dict[str, Any], *, refreshed_at: str) -> Any:
+	"""Build the shared rich renderable for both status snapshot and --live."""
+	from rich.console import Group
+	from rich.panel import Panel
+	from rich.table import Table
+	from rich.text import Text
+
+	queue = payload.get("queue") or {}
+	scope_data = payload.get("scope") or {}
+	projects = payload.get("projects") or []
+	unscoped = payload.get("unscoped_sessions") or {}
+	queue_health = payload.get("queue_health") or {}
+	blocked_projects = [p for p in projects if _project_state(p) == "blocked"]
+
+	summary = Table.grid(expand=True, padding=(0, 2))
+	summary.add_column(justify="left", style="bold")
+	summary.add_column(justify="left")
+	summary.add_row("Connected agents", str(len(payload.get("connected_agents", []))))
+	summary.add_row("Memory files", str(int(payload.get("memory_count") or 0)))
+	summary.add_row("Indexed sessions", str(int(payload.get("sessions_indexed_count") or 0)))
+	summary.add_row("Queue", _format_queue_counts(queue))
+	summary.add_row(
+		"Unscoped sessions",
+		f"{int(unscoped.get('total') or 0)} ({json.dumps(unscoped.get('by_agent') or {}, ensure_ascii=True)})",
+	)
+	summary.add_row(
+		"Skipped unscoped (last sync)",
+		str(int(scope_data.get("skipped_unscoped") or 0)),
+	)
+	summary.add_row(
+		"Streams",
+		"Independent per project (one blocked stream does not stop others)",
+	)
+
+	project_table = Table(title="Project Streams", expand=True)
+	project_table.add_column("Project", no_wrap=True)
+	project_table.add_column("State", no_wrap=True)
+	project_table.add_column("Queue")
+	project_table.add_column("Memory", no_wrap=True)
+	project_table.add_column("Blocker", no_wrap=True)
+	project_table.add_column("Next Step")
+
+	state_style = {
+		"blocked": "red bold",
+		"running": "cyan",
+		"queued": "yellow",
+		"healthy": "green",
+		"idle": "dim",
+	}
+
+	for item in projects:
+		name = str(item.get("name") or "")
+		state = _project_state(item)
+		style = state_style.get(state, "white")
+		pqueue = item.get("queue") or {}
+		queue_text = _format_queue_counts(pqueue)
+		memory_count = str(int(item.get("memory_count") or 0))
+		blocked_by = str(item.get("oldest_blocked_run_id") or "").strip()
+		blocked_short = blocked_by[:16] if blocked_by else "-"
+		project_table.add_row(
+			name,
+			f"[{style}]{state}[/{style}]",
+			queue_text,
+			memory_count,
+			blocked_short,
+			_project_next_action(item),
+		)
+
+	meaning = Table.grid(expand=True, padding=(0, 2))
+	meaning.add_column(justify="left", style="bold")
+	meaning.add_column(justify="left")
+	meaning.add_row("project stream", "Queue + extraction flow for one registered project.")
+	meaning.add_row("blocked", "Oldest job is dead_letter; this project stream is paused.")
+	meaning.add_row("running", "A job is being processed now.")
+	meaning.add_row("queued", "Jobs are waiting; stream is not blocked.")
+	meaning.add_row("unscoped", "Indexed sessions with no registered project match (not extracted).")
+	meaning.add_row("dead_letter", "Failed max retries; needs retry or skip.")
+
+	action_lines: list[str] = []
+	if blocked_projects:
+		action_lines.append(
+			f"{len(blocked_projects)} project(s) blocked. Other projects continue independently."
+		)
+		action_lines.append("Inspect blockers: lerim queue --failed")
+		for item in blocked_projects[:3]:
+			name = str(item.get("name") or "")
+			blocked = str(item.get("oldest_blocked_run_id") or "").strip()
+			if blocked:
+				action_lines.append(f"Unblock {name}: lerim retry {blocked}")
+			else:
+				action_lines.append(f"Unblock {name}: lerim retry --project {name}")
+	else:
+		action_lines.append("No blocked projects.")
+
+	if queue_health.get("degraded"):
+		advice = str(queue_health.get("advice") or "").strip()
+		if advice:
+			action_lines.append(f"Queue health: {advice}")
+
+	header = Text(f"Lerim Status ({refreshed_at})", style="bold blue")
+	blocked_table: Table | None = None
+	if blocked_projects:
+		blocked_table = Table(title="Blocked Streams", expand=True)
+		blocked_table.add_column("Project", no_wrap=True)
+		blocked_table.add_column("Run ID", no_wrap=True)
+		blocked_table.add_column("Reason")
+		blocked_table.add_column("Fix", no_wrap=True)
+		for item in blocked_projects:
+			name = str(item.get("name") or "").strip()
+			run_id = str(item.get("oldest_blocked_run_id") or "").strip()
+			reason = str(item.get("last_error") or "").strip() or "dead_letter at queue head"
+			if len(reason) > 120:
+				reason = f"{reason[:117]}..."
+			fix = f"lerim retry {run_id}" if run_id else f"lerim retry --project {name}"
+			blocked_table.add_row(name, run_id or "-", reason, fix)
+
+	parts: list[Any] = [header, Panel(summary, title="Summary", border_style="blue")]
+	if projects:
+		parts.append(project_table)
+	if blocked_table is not None:
+		parts.append(blocked_table)
+	parts.append(Panel(meaning, title="What These Terms Mean", border_style="magenta"))
+	parts.append(Panel("\n".join(action_lines), title="What To Do Next", border_style="green"))
+	return Group(*parts)
+
+
+def _cmd_status_live(args: argparse.Namespace) -> int:
+	"""Live status dashboard for project stream health and queue state."""
+	from datetime import datetime, timezone
+	from rich.live import Live
+
+	interval = max(0.5, float(getattr(args, "interval", 3.0)))
+	scope = _normalize_scope(getattr(args, "scope", None))
+	project = getattr(args, "project", None)
+	query = f"/api/status?scope={scope}"
+	if project:
+		query += f"&project={urllib.parse.quote(str(project))}"
+
+	def _fetch() -> dict[str, Any] | None:
+		return _api_get(query)
+
+	if args.json:
+		payload = _fetch()
+		if payload is None:
+			return _not_running()
+		_emit(json.dumps(payload, indent=2, ensure_ascii=True))
+		return 0
+
+	try:
+		with Live(refresh_per_second=4, screen=False) as live:
+			while True:
+				payload = _fetch()
+				if payload is None:
+					live.stop()
+					return _not_running()
+				refreshed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+				live.update(_render_status_output(payload, refreshed_at=refreshed_at))
+				time.sleep(interval)
+	except KeyboardInterrupt:
+		_emit("")
+		return 0
 
 
 def _dead_letter_action(
@@ -523,36 +836,38 @@ def _cmd_skip(args: argparse.Namespace) -> int:
 
 def _cmd_status(args: argparse.Namespace) -> int:
     """Forward status request to the running Lerim server."""
-    data = _api_get("/api/status")
+    if getattr(args, "live", False):
+        live_args = argparse.Namespace(
+            command="status",
+            json=getattr(args, "json", False),
+            interval=float(getattr(args, "interval", 3.0)),
+            scope=getattr(args, "scope", "all"),
+            project=getattr(args, "project", None),
+        )
+        return _cmd_status_live(live_args)
+
+    scope = _normalize_scope(getattr(args, "scope", None))
+    query = f"/api/status?scope={scope}"
+    project = getattr(args, "project", None)
+    if project:
+        query += f"&project={urllib.parse.quote(str(project))}"
+    data = _api_get(query)
     if data is None:
         return _not_running()
+    if data.get("error"):
+        if args.json:
+            _emit(json.dumps(data, indent=2, ensure_ascii=True))
+        else:
+            _emit(str(data.get("error")), file=sys.stderr)
+        return 1
     if args.json:
         _emit(json.dumps(data, indent=2, ensure_ascii=True))
     else:
-        _emit("Lerim status:")
-        _emit(f"- connected_agents: {len(data.get('connected_agents', []))}")
-        _emit(f"- memory_count: {data.get('memory_count', 0)}")
-        _emit(f"- sessions_indexed_count: {data.get('sessions_indexed_count', 0)}")
-        queue = data.get("queue", {})
-        _emit(f"- queue: {_format_queue_counts(queue)}")
-        scope = data.get("scope", {})
-        skipped_unscoped = int(scope.get("skipped_unscoped") or 0)
-        _emit(f"- skipped_unscoped(last_sync): {skipped_unscoped}")
-        dl = queue.get("dead_letter", 0)
-        if dl > 0:
-            _emit(f"  ! {dl} dead_letter job(s). Run: lerim queue --failed")
-        queue_health = data.get("queue_health", {})
-        if queue_health.get("degraded"):
-            _emit("  ! Queue health degraded")
-            _emit(
-                "    stale_running="
-                f"{int(queue_health.get('stale_running_count') or 0)} "
-                "dead_letter="
-                f"{int(queue_health.get('dead_letter_count') or 0)}"
-            )
-            advice = str(queue_health.get("advice") or "").strip()
-            if advice:
-                _emit(f"    advice: {advice}")
+        from datetime import datetime, timezone
+        from rich.console import Console
+
+        refreshed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+        Console().print(_render_status_output(data, refreshed_at=refreshed_at))
     return 0
 
 
@@ -1315,7 +1630,13 @@ def build_parser() -> argparse.ArgumentParser:
         description="List stored memories as a sorted file list.",
     )
     memory_list.add_argument(
-        "--project", help="Filter to a specific project (not yet implemented)."
+        "--scope",
+        choices=["all", "project"],
+        default="all",
+        help="Read scope: all projects (default) or one project.",
+    )
+    memory_list.add_argument(
+        "--project", help="Project name/path when --scope=project."
     )
     memory_list.add_argument(
         "--limit", type=int, default=50, help="Maximum items to display. (default: 50)"
@@ -1360,7 +1681,13 @@ def build_parser() -> argparse.ArgumentParser:
         "question", help="Your question (use quotes if it contains spaces)."
     )
     ask.add_argument(
-        "--project", help="Scope to a specific project (not yet implemented)."
+        "--scope",
+        choices=["all", "project"],
+        default="all",
+        help="Read scope: all projects (default) or one project.",
+    )
+    ask.add_argument(
+        "--project", help="Project name/path when --scope=project."
     )
     ask.set_defaults(func=_cmd_ask)
 
@@ -1370,6 +1697,27 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=_F,
         help="Show runtime status (platforms, memory count, queue, last runs)",
         description="Runtime summary: platforms, memory count, queue stats, last runs.",
+    )
+    status.add_argument(
+        "--scope",
+        choices=["all", "project"],
+        default="all",
+        help="Status scope: all projects (default) or one project.",
+    )
+    status.add_argument(
+        "--project",
+        help="Project name/path when --scope=project.",
+    )
+    status.add_argument(
+        "--live",
+        action="store_true",
+        help="Live refresh mode for status output.",
+    )
+    status.add_argument(
+        "--interval",
+        type=float,
+        default=3.0,
+        help="Refresh interval in seconds for --live. (default: 3.0)",
     )
     status.set_defaults(func=_cmd_status)
 
@@ -1387,8 +1735,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     queue.add_argument("--failed", action="store_true", help="Show only failed + dead_letter jobs.")
     queue.add_argument("--status", help="Filter by specific status (pending, running, failed, dead_letter, done).")
-    queue.add_argument("--project", help="Filter by project name (substring match on repo_path).")
+    queue.add_argument("--project", help="Filter by exact project name/path.")
+    queue.add_argument("--project-like", help="Substring match on repo_path (legacy behavior).")
     queue.set_defaults(func=_cmd_queue)
+
+    # ── unscoped ─────────────────────────────────────────────────────
+    unscoped = sub.add_parser(
+        "unscoped",
+        formatter_class=_F,
+        help="List indexed sessions with no project match",
+        description=(
+            "Show sessions that were indexed but not mapped to registered projects.\n\n"
+            "Use this to debug why some sessions are skipped in strict project mode."
+        ),
+    )
+    unscoped.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum items to display. (default: 50)",
+    )
+    unscoped.set_defaults(func=_cmd_unscoped)
 
     # ── retry ─────────────────────────────────────────────────────────
     retry = sub.add_parser(

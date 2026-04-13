@@ -1115,6 +1115,7 @@ def list_queue_jobs(
 	*,
 	status_filter: str | None = None,
 	project_filter: str | None = None,
+	project_exact: bool = False,
 	failed_only: bool = False,
 	limit: int = 50,
 ) -> list[dict[str, Any]]:
@@ -1138,8 +1139,12 @@ def list_queue_jobs(
 		params.append(JOB_STATUS_DONE)
 
 	if project_filter:
-		where.append("repo_path LIKE ?")
-		params.append(f"%{project_filter}%")
+		if project_exact:
+			where.append("repo_path = ?")
+			params.append(project_filter)
+		else:
+			where.append("repo_path LIKE ?")
+			params.append(f"%{project_filter}%")
 
 	where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 	with _connect() as conn:
@@ -1155,6 +1160,67 @@ def list_queue_jobs(
 			[*params, max(1, limit)],
 		).fetchall()
 	return rows
+
+
+def count_unscoped_sessions_by_agent(
+	*,
+	projects: dict[str, str],
+) -> dict[str, int]:
+	"""Count indexed sessions that do not map to any registered project."""
+	_ensure_sessions_db_initialized()
+	with _connect() as conn:
+		rows = conn.execute(
+			"""
+			SELECT agent_type, repo_path
+			FROM session_docs
+			"""
+		).fetchall()
+
+	counts: dict[str, int] = {}
+	for row in rows:
+		repo_path = str(row.get("repo_path") or "").strip()
+		if match_session_project(repo_path, projects) is not None:
+			continue
+		agent = str(row.get("agent_type") or "unknown")
+		counts[agent] = counts.get(agent, 0) + 1
+	return counts
+
+
+def list_unscoped_sessions(
+	*,
+	projects: dict[str, str],
+	limit: int = 50,
+) -> list[dict[str, Any]]:
+	"""List indexed sessions that do not map to any registered project."""
+	_ensure_sessions_db_initialized()
+	with _connect() as conn:
+		rows = conn.execute(
+			"""
+			SELECT run_id, agent_type, repo_path, start_time, session_path
+			FROM session_docs
+			ORDER BY start_time DESC, indexed_at DESC
+			LIMIT ?
+			""",
+			(max(1, int(limit)) * 10,),
+		).fetchall()
+
+	items: list[dict[str, Any]] = []
+	for row in rows:
+		repo_path = str(row.get("repo_path") or "").strip()
+		if match_session_project(repo_path, projects) is not None:
+			continue
+		items.append(
+			{
+				"run_id": row.get("run_id"),
+				"agent_type": row.get("agent_type"),
+				"repo_path": repo_path or None,
+				"start_time": row.get("start_time"),
+				"session_path": row.get("session_path"),
+			}
+		)
+		if len(items) >= max(1, int(limit)):
+			break
+	return items
 
 
 def record_service_run(

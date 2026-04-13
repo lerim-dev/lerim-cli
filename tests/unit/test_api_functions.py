@@ -434,8 +434,8 @@ def test_api_project_list_with_projects(monkeypatch, tmp_path) -> None:
 	assert result[0]["has_lerim"] is True
 
 
-def test_api_project_add_creates_lerim_dir(monkeypatch, tmp_path) -> None:
-	"""api_project_add creates .lerim/ directory and saves config."""
+def test_api_project_add_creates_memory_layout(monkeypatch, tmp_path) -> None:
+	"""api_project_add creates canonical .lerim/memory layout and saves config."""
 	proj_dir = tmp_path / "newproject"
 	proj_dir.mkdir()
 
@@ -449,8 +449,50 @@ def test_api_project_add_creates_lerim_dir(monkeypatch, tmp_path) -> None:
 	assert result["name"] == "newproject"
 	assert result["created_lerim_dir"] is True
 	assert (proj_dir / ".lerim").is_dir()
+	assert (proj_dir / ".lerim" / "memory").is_dir()
+	assert (proj_dir / ".lerim" / "memory" / "summaries").is_dir()
+	assert (proj_dir / ".lerim" / "memory" / "archived").is_dir()
+	assert (proj_dir / ".lerim" / "memory" / "index.md").is_file()
 	assert len(saved) == 1
 	assert "newproject" in saved[0]["projects"]
+
+
+def test_api_status_reports_projects_and_unscoped(monkeypatch, tmp_path) -> None:
+	"""api_status includes per-project payloads and unscoped counts."""
+	project_a = tmp_path / "proj-a"
+	project_b = tmp_path / "proj-b"
+	for project in (project_a, project_b):
+		(project / ".lerim" / "memory").mkdir(parents=True)
+		(project / ".lerim" / "memory" / "index.md").write_text("# Memory Index\n", encoding="utf-8")
+	(project_a / ".lerim" / "memory" / "a.md").write_text("a", encoding="utf-8")
+	(project_b / ".lerim" / "memory" / "b.md").write_text("b", encoding="utf-8")
+
+	cfg = replace(
+		make_config(tmp_path),
+		projects={"proj-a": str(project_a), "proj-b": str(project_b)},
+	)
+	monkeypatch.setattr(api_mod, "get_config", lambda: cfg)
+	monkeypatch.setattr(api_mod, "list_platforms", lambda path: [])
+	monkeypatch.setattr(api_mod, "count_fts_indexed", lambda: 11)
+	monkeypatch.setattr(api_mod, "count_session_jobs_by_status", lambda: {"pending": 1})
+	monkeypatch.setattr(api_mod, "latest_service_run", lambda svc: None)
+	monkeypatch.setattr(api_mod, "queue_health_snapshot", lambda: {"degraded": False, "advice": ""})
+	monkeypatch.setattr(
+		api_mod,
+		"_queue_counts_for_repo",
+		lambda **kwargs: ({"pending": 1, "dead_letter": 0}, None, None),
+	)
+	monkeypatch.setattr(
+		api_mod,
+		"count_unscoped_sessions_by_agent",
+		lambda projects: {"cursor": 3, "codex": 1},
+	)
+
+	result = api_status()
+	assert result["memory_count"] == 4  # 2 index + 2 memory files
+	assert len(result["projects"]) == 2
+	assert result["unscoped_sessions"]["total"] == 4
+	assert result["unscoped_sessions"]["by_agent"]["cursor"] == 3
 
 
 def test_api_project_add_not_a_directory(tmp_path) -> None:

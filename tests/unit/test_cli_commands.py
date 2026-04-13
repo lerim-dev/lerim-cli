@@ -489,6 +489,30 @@ class TestCmdAsk:
 class TestCmdStatus:
 	"""Tests for the status command handler."""
 
+	def test_status_live_delegates_to_live_handler(self, monkeypatch: pytest.MonkeyPatch) -> None:
+		"""Status --live delegates to the internal live status handler."""
+		calls: list[argparse.Namespace] = []
+
+		def _fake_status_live(ns: argparse.Namespace) -> int:
+			calls.append(ns)
+			return 0
+
+		monkeypatch.setattr(cli, "_cmd_status_live", _fake_status_live)
+		args = _ns(
+			command="status",
+			json=False,
+			scope="project",
+			project="lerim-cli",
+			live=True,
+			interval=1.5,
+		)
+		code = cli._cmd_status(args)
+		assert code == 0
+		assert len(calls) == 1
+		assert calls[0].interval == 1.5
+		assert calls[0].scope == "project"
+		assert calls[0].project == "lerim-cli"
+
 	def test_status_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
 		"""Status with --json emits the full API payload as JSON."""
 		fake = {
@@ -521,8 +545,9 @@ class TestCmdStatus:
 			code = cli._cmd_status(args)
 		assert code == 0
 		text = buf.getvalue()
-		assert "connected_agents: 2" in text
-		assert "memory_count: 5" in text
+		assert "Connected agents" in text
+		assert "Memory files" in text
+		assert "What These Terms Mean" in text
 
 	def test_status_dead_letter_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
 		"""Status with dead_letter jobs prints a warning hint."""
@@ -562,15 +587,72 @@ class TestCmdStatus:
 			code = cli._cmd_status(args)
 		assert code == 0
 		text = buf.getvalue()
-		assert "Queue health degraded" in text
-		assert "skipped_unscoped" in text
-		assert "advice" in text
+		assert "Queue health" in text
+		assert "run `lerim queue --failed`" in text
+		assert "What To Do Next" in text
 
 	def test_status_not_running(self, monkeypatch: pytest.MonkeyPatch) -> None:
 		"""Status returns 1 when server is unreachable."""
 		monkeypatch.setattr(cli, "_api_get", lambda _p: None)
 		args = _ns(command="status", json=False)
 		code = cli._cmd_status(args)
+		assert code == 1
+
+
+# ===================================================================
+# _cmd_status_live
+# ===================================================================
+
+
+class TestCmdStatusLive:
+	"""Tests for the internal live status handler."""
+
+	def test_status_render_output_human(self) -> None:
+		"""Shared status renderer includes key human-facing sections."""
+		fake = {
+			"connected_agents": ["claude", "codex"],
+			"memory_count": 5,
+			"sessions_indexed_count": 10,
+			"queue": {"pending": 2, "dead_letter": 1},
+			"unscoped_sessions": {"total": 3, "by_agent": {"cursor": 3}},
+			"queue_health": {"degraded": True, "advice": "inspect failed queue"},
+			"projects": [
+				{
+					"name": "lerim-cli",
+					"memory_count": 5,
+					"queue": {"pending": 2, "dead_letter": 1},
+					"oldest_blocked_run_id": "agent-abc123456789",
+					}
+				],
+			}
+		from rich.console import Console
+		buf = io.StringIO()
+		Console(file=buf, width=120).print(
+			cli._render_status_output(fake, refreshed_at="2026-04-13 07:00:00Z")
+		)
+		text = buf.getvalue()
+		assert "Lerim Status (" in text
+		assert "Project Streams" in text
+		assert "What These Terms Mean" in text
+		assert "What To Do Next" in text
+
+	def test_status_live_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
+		"""Live status with --json emits a single status payload as JSON."""
+		fake = {"queue": {"pending": 1}, "projects": []}
+		monkeypatch.setattr(cli, "_api_get", lambda _p: fake)
+		args = _ns(command="status", json=True, interval=2.0, scope="all", project=None)
+		buf = io.StringIO()
+		with redirect_stdout(buf):
+			code = cli._cmd_status_live(args)
+		assert code == 0
+		parsed = json.loads(buf.getvalue())
+		assert parsed["queue"]["pending"] == 1
+
+	def test_status_live_not_running(self, monkeypatch: pytest.MonkeyPatch) -> None:
+		"""Live status returns 1 when server is unreachable."""
+		monkeypatch.setattr(cli, "_api_get", lambda _p: None)
+		args = _ns(command="status", json=False, interval=1.0, scope="all", project=None)
+		code = cli._cmd_status_live(args)
 		assert code == 1
 
 
@@ -1709,14 +1791,13 @@ class TestResolveProjectRepoPath:
 		assert result is not None
 		assert "myapp" in result
 
-	def test_substring_match(self, monkeypatch: pytest.MonkeyPatch) -> None:
-		"""Substring match on project name works."""
+	def test_substring_match_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+		"""Substring project lookup is rejected (exact match only)."""
 		cfg = make_config(Path("/tmp/fake"))
 		cfg = replace(cfg, projects={"my-cool-app": "/home/user/my-cool-app"})
 		monkeypatch.setattr(cli, "get_config", lambda: cfg)
 		result = cli._resolve_project_repo_path("cool")
-		assert result is not None
-		assert "cool" in result
+		assert result is None
 
 	def test_no_match(self, monkeypatch: pytest.MonkeyPatch) -> None:
 		"""No matching project returns None."""
@@ -1815,12 +1896,34 @@ class TestBuildParser:
 			parser.parse_args(["memory", "reset", "--scope", "invalid"])
 
 	def test_queue_flags(self) -> None:
-		"""Queue parser accepts --failed, --status, --project."""
+		"""Queue parser accepts --failed, --status, --project, --project-like."""
 		parser = cli.build_parser()
-		args = parser.parse_args(["queue", "--failed", "--status", "pending", "--project", "my"])
+		args = parser.parse_args(
+			["queue", "--failed", "--status", "pending", "--project", "my"]
+		)
 		assert args.failed is True
 		assert args.status == "pending"
 		assert args.project == "my"
+		args2 = parser.parse_args(["queue", "--project-like", "substring"])
+		assert args2.project_like == "substring"
+
+	def test_status_scope_flags(self) -> None:
+		"""Status parser accepts --scope, --project, --live, --interval."""
+		parser = cli.build_parser()
+		args = parser.parse_args(
+			["status", "--scope", "project", "--project", "myproj", "--live", "--interval", "1.5"]
+		)
+		assert args.scope == "project"
+		assert args.project == "myproj"
+		assert args.live is True
+		assert args.interval == 1.5
+
+	def test_ask_scope_flags(self) -> None:
+		"""Ask parser accepts --scope and optional --project."""
+		parser = cli.build_parser()
+		args = parser.parse_args(["ask", "hello", "--scope", "project", "--project", "myproj"])
+		assert args.scope == "project"
+		assert args.project == "myproj"
 
 	def test_retry_skip_args(self) -> None:
 		"""Retry and skip parsers accept run_id, --project, --all."""

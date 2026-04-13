@@ -249,7 +249,7 @@ def test_run_extraction_signature_no_per_pass_limits():
 
 
 def test_run_extraction_still_has_return_messages_flag():
-	"""The return_messages flag is preserved for eval harness compatibility."""
+	"""The return_messages flag is preserved for eval harness callers."""
 	sig = inspect.signature(run_extraction)
 	assert "return_messages" in sig.parameters
 	assert sig.parameters["return_messages"].default is False

@@ -17,8 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Removed
 
-- Removed DSPy runtime branches and DSPy-specific config surface from active runtime paths.
-- Removed DSPy and LiteLLM runtime dependencies from active package/lock state.
+- Removed prior runtime branches and prior runtime-specific config surface from active runtime paths.
+- Removed prior runtime and proxy-bridge runtime dependencies from active package/lock state.
 
 ## [0.2.0] - 2026-03-25
 
@@ -26,7 +26,7 @@ _Historical note: this release snapshot was later superseded by the PydanticAI-o
 
 ### Changed
 
-- **Migrated to a legacy ReAct stack** -- the lead agent moved off the original Pydantic flow onto role-specific ReAct modules at that time.
+- **Migrated to a prior ReAct stack** -- the lead agent moved off the original Pydantic flow onto role-specific ReAct modules at that time.
 - **Removed explorer subagent** -- search, read, and writes moved onto lead-agent tool functions (`read_file`, `list_files`, `scan_memory_manifest`, `write_memory`) instead of a nested explorer.
 - Removed `max_explorers` config option (no longer applicable).
 - Removed `[roles.explorer]` config section.
@@ -65,7 +65,7 @@ _Historical note: this release snapshot was later superseded by the PydanticAI-o
 
 - **Ollama lifecycle management** — automatic model load/unload before and after each sync/maintain cycle. Controlled by `auto_unload` in `[providers]` (default: true).
 - **vllm-mlx provider** — Apple Silicon local model support via `provider = "mlx"`.
-- **LiteLLM proxy integration** — routes Ollama think-off requests through LiteLLM for PydanticAI compatibility.
+- **Proxy bridge integration** — routes Ollama think-off requests through a proxy bridge for PydanticAI compatibility.
 - Docker networking for host Ollama access (`host.docker.internal`).
 - Eval runners for sync and maintain pipelines with judge prompts and trace files.
 - Eval configs organized under `evals/configs/`.
