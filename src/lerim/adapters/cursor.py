@@ -25,7 +25,6 @@ from lerim.adapters.base import SessionRecord, ViewerMessage, ViewerSession
 from lerim.adapters.common import (
     compact_jsonl,
     in_window,
-    load_jsonl_dict_lines,
     make_canonical_entry,
     normalize_timestamp_iso,
     parse_timestamp,
@@ -374,113 +373,6 @@ WHERE key LIKE 'bubbleId:%' ORDER BY key"""
     return records
 
 
-def find_session_path(session_id: str, traces_dir: Path | None = None) -> Path | None:
-    """Find a Cursor session file by ID, checking cache first then DB."""
-    session_id = session_id.strip()
-    if not session_id:
-        return None
-
-    # Check cache first
-    cache_path = _default_cache_dir() / f"{session_id}.jsonl"
-    if cache_path.is_file():
-        return cache_path
-
-    # Fall back to scanning DB files
-    root = traces_dir or default_path()
-    if root is None or not root.exists():
-        return None
-    for db_path in _resolve_db_paths(root):
-        conn = readonly_connect(db_path)
-        try:
-            row = conn.execute(
-                "SELECT key FROM cursorDiskKV WHERE key LIKE ? LIMIT 1",
-                (f"bubbleId:{session_id}:%",),
-            ).fetchone()
-            if row:
-                return db_path
-        except sqlite3.Error:
-            continue
-        finally:
-            conn.close()
-    return None
-
-
-def read_session(
-    session_path: Path, session_id: str | None = None
-) -> ViewerSession | None:
-    """Read one Cursor session from an exported JSONL or directly from SQLite.
-
-    If *session_path* is a ``.jsonl`` file, reads the exported cache file.
-    If it is a ``.vscdb`` file and *session_id* is provided, queries the DB
-    directly (backward compat with dashboard).
-    """
-    if session_path.suffix == ".jsonl" and session_path.is_file():
-        return _read_session_jsonl(session_path, session_id)
-    if session_path.suffix == ".vscdb" and session_id:
-        return _read_session_db(session_path, session_id)
-    # Try resolving as directory containing state.vscdb
-    db_path = session_path / "state.vscdb"
-    if db_path.exists() and session_id:
-        return _read_session_db(db_path, session_id)
-    return None
-
-
-def _read_session_jsonl(path: Path, session_id: str | None) -> ViewerSession | None:
-    """Parse an exported Cursor JSONL file into a ViewerSession.
-
-    Handles both old format (composerData header + raw bubbles) and new
-    canonical format (each line is ``{"type": "user|assistant", "message": ...}``).
-    """
-    lines = load_jsonl_dict_lines(path)
-    if not lines:
-        return None
-
-    first = lines[0]
-
-    # Detect canonical format: first line has "type" in {"user", "assistant"}
-    if first.get("type") in ("user", "assistant") and "message" in first:
-        # New canonical format
-        resolved_id = session_id or path.stem
-        messages: list[ViewerMessage] = []
-        for entry in lines:
-            msg = entry.get("message")
-            if not isinstance(msg, dict):
-                continue
-            role = msg.get("role", "assistant")
-            content = msg.get("content", "")
-            if isinstance(content, str):
-                if not content.strip():
-                    continue
-                messages.append(ViewerMessage(role=role, content=content))
-            elif isinstance(content, list):
-                # Tool-use blocks: extract text representation
-                parts: list[str] = []
-                for block in content:
-                    if not isinstance(block, dict):
-                        continue
-                    if block.get("type") == "tool_use":
-                        parts.append(f"[tool_use: {block.get('name', '?')}]")
-                    elif block.get("type") == "tool_result":
-                        parts.append(str(block.get("content", "")))
-                if parts:
-                    messages.append(
-                        ViewerMessage(role=role, content="\n".join(parts))
-                    )
-        return ViewerSession(session_id=resolved_id, messages=messages)
-
-    # Old format: first line is composerData header, rest are raw bubbles
-    metadata = first
-    resolved_id = session_id or metadata.get("composerId") or path.stem
-    messages = []
-    for bubble in lines[1:]:
-        role = _normalize_role(bubble.get("type"))
-        text = _extract_text(bubble.get("text"))
-        if not text.strip():
-            continue
-        messages.append(ViewerMessage(role=role, content=text))
-    return ViewerSession(session_id=resolved_id, messages=messages)
-
-
 def _read_session_db(db_path: Path, session_id: str) -> ViewerSession | None:
     """Read one session directly from a Cursor SQLite DB by composerId."""
     conn = readonly_connect(db_path)
@@ -543,10 +435,5 @@ if __name__ == "__main__":
         lines = jsonl_path.read_text(encoding="utf-8").strip().splitlines()
         assert len(lines) > 1, f"Expected multiple lines, got {len(lines)}"
         print(f"  first JSONL ({jsonl_path.name}): {len(lines)} lines")
-
-        viewer = read_session(jsonl_path, first.run_id)
-        assert viewer is not None, "read_session returned None"
-        assert viewer.messages, "read_session returned no messages"
-        print(f"  read_session: {len(viewer.messages)} messages")
 
     print("Self-test passed.")

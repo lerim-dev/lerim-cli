@@ -24,7 +24,6 @@ from lerim.adapters.base import SessionRecord, ViewerMessage, ViewerSession
 from lerim.adapters.common import (
     compact_jsonl,
     in_window,
-    load_jsonl_dict_lines,
     make_canonical_entry,
     normalize_timestamp_iso,
     parse_timestamp,
@@ -144,33 +143,6 @@ def count_sessions(path: Path) -> int:
         return 0
 
 
-def find_session_path(session_id: str, traces_dir: Path | None = None) -> Path | None:
-    """Return the JSONL cache path if it exists, else DB path if session exists."""
-    session_id = session_id.strip()
-    if not session_id:
-        return None
-    # Check cache first
-    cache_path = _default_cache_dir() / f"{session_id}.jsonl"
-    if cache_path.is_file():
-        return cache_path
-    # Fall back to DB
-    root = traces_dir or default_path()
-    if root is None or not root.exists():
-        return None
-    db_path = _resolve_db_path(root)
-    if not db_path:
-        return None
-    try:
-        conn = readonly_connect(db_path)
-        row = conn.execute(
-            "SELECT id FROM session WHERE id = ? LIMIT 1", (session_id,)
-        ).fetchone()
-        conn.close()
-        return db_path if row else None
-    except sqlite3.Error:
-        return None
-
-
 def _read_session_db(db_path: Path, session_id: str) -> ViewerSession | None:
     """Read one OpenCode session directly from the SQLite database."""
     try:
@@ -262,92 +234,6 @@ def _read_session_db(db_path: Path, session_id: str) -> ViewerSession | None:
         return None
 
 
-def _read_session_jsonl(path: Path, session_id: str | None) -> ViewerSession | None:
-    """Parse an exported OpenCode JSONL cache file into a ViewerSession.
-
-    Handles both canonical schema (no metadata line, entries have
-    ``type/message/timestamp``) and legacy schema (metadata line 0,
-    entries have ``role/content``).
-    """
-    lines = load_jsonl_dict_lines(path)
-    if not lines:
-        return None
-
-    resolved_id = session_id or path.stem
-    messages: list[ViewerMessage] = []
-
-    for row in lines:
-        # --- Canonical format ---
-        if validate_canonical_entry(row):
-            msg = row["message"]
-            role = msg["role"]
-            content = msg["content"]
-            ts = row.get("timestamp")
-
-            if isinstance(content, list):
-                # Structured content blocks (tool_use + tool_result)
-                tool_name: str | None = None
-                tool_input: Any = None
-                tool_output: str | None = None
-                for block in content:
-                    if isinstance(block, dict):
-                        if block.get("type") == "tool_use":
-                            tool_name = block.get("name")
-                            tool_input = block.get("input")
-                        elif block.get("type") == "tool_result":
-                            tool_output = block.get("content")
-                messages.append(
-                    ViewerMessage(
-                        role="tool",
-                        tool_name=tool_name,
-                        tool_input=tool_input,
-                        tool_output=tool_output,
-                        timestamp=ts,
-                    )
-                )
-            else:
-                # Plain text content
-                if isinstance(content, str) and content.strip():
-                    messages.append(
-                        ViewerMessage(role=role, content=content, timestamp=ts)
-                    )
-            continue
-
-        # --- Legacy format: skip metadata line (has session_id key) ---
-        if "session_id" in row:
-            resolved_id = session_id or row.get("session_id") or path.stem
-            continue
-
-        # --- Legacy format: role-based entries ---
-        role = row.get("role") or "assistant"
-        if role == "tool":
-            messages.append(
-                ViewerMessage(
-                    role="tool",
-                    tool_name=row.get("tool_name"),
-                    tool_input=row.get("tool_input"),
-                    tool_output=row.get("tool_output"),
-                    timestamp=row.get("timestamp"),
-                )
-            )
-        else:
-            content = row.get("content") or ""
-            if isinstance(content, str) and content.strip():
-                messages.append(
-                    ViewerMessage(
-                        role=role,
-                        content=content,
-                        timestamp=row.get("timestamp"),
-                        model=row.get("model"),
-                    )
-                )
-
-    return ViewerSession(
-        session_id=resolved_id,
-        messages=messages,
-    )
-
-
 def _export_session_jsonl(session: ViewerSession, out_dir: Path) -> Path:
     """Export a ViewerSession to a compacted JSONL cache file in canonical schema.
 
@@ -396,23 +282,6 @@ def _export_session_jsonl(session: ViewerSession, out_dir: Path) -> Path:
         lines.append(json.dumps(entry, ensure_ascii=False))
 
     return write_session_cache(out_dir, session.session_id, lines, compact_trace)
-
-
-def read_session(
-    session_path: Path, session_id: str | None = None
-) -> ViewerSession | None:
-    """Read one OpenCode session from JSONL cache or SQLite database.
-
-    If *session_path* is a ``.jsonl`` file, reads the exported cache.
-    If it points to ``opencode.db`` (or its parent), queries the DB directly.
-    """
-    if session_path.suffix == ".jsonl" and session_path.is_file():
-        return _read_session_jsonl(session_path, session_id)
-    # Try as DB path or directory containing opencode.db
-    db_path = _resolve_db_path(session_path) if session_path.is_dir() else session_path
-    if db_path and db_path.is_file() and session_id:
-        return _read_session_db(db_path, session_id)
-    return None
 
 
 def iter_sessions(
@@ -538,32 +407,19 @@ if __name__ == "__main__":
         assert len(lines) >= 1, f"Expected at least one line, got {len(lines)}"
         print(f"  first JSONL ({jsonl_path.name}): {len(lines)} lines")
 
-        # Verify JSONL round-trip via read_session
-        viewer = read_session(jsonl_path, first.run_id)
-        assert viewer is not None, "read_session(jsonl) returned None"
-        assert viewer.messages, "read_session(jsonl) returned no messages"
-        print(f"  read_session(jsonl): {len(viewer.messages)} messages")
-
-        # Verify direct DB read still works
+        # Verify direct DB read works
         viewer_db = _read_session_db(db, first.run_id)
         assert viewer_db is not None, "read_session(db) returned None"
-        assert len(viewer_db.messages) == len(viewer.messages), (
-            "JSONL round-trip message count mismatch"
-        )
-        print(f"  read_session(db):   {len(viewer_db.messages)} messages (matches)")
+        print(f"  read_session(db):   {len(viewer_db.messages)} messages")
 
         print(
-            f"    tokens: in={viewer.total_input_tokens} out={viewer.total_output_tokens}"
+            f"    tokens: in={viewer_db.total_input_tokens} out={viewer_db.total_output_tokens}"
         )
-        print(f"    title: {viewer.meta.get('title', '?')}")
+        print(f"    title: {viewer_db.meta.get('title', '?')}")
 
         roles: dict[str, int] = {}
-        for m in viewer.messages:
+        for m in viewer_db.messages:
             roles[m.role] = roles.get(m.role, 0) + 1
         print(f"    roles: {roles}")
-
-        # Verify find_session_path returns the cached JSONL
-        found = find_session_path(first.run_id, root)
-        print(f"  find_session_path: {found}")
 
     print("Self-test passed.")

@@ -9,9 +9,7 @@ from lerim.adapters.codex import (
     _extract_message_text,
     compact_trace,
     count_sessions,
-    find_session_path,
     iter_sessions,
-    read_session,
 )
 
 
@@ -21,50 +19,6 @@ def _write_codex_jsonl(path: Path, entries: list[dict]) -> Path:
         for entry in entries:
             fh.write(json.dumps(entry) + "\n")
     return path
-
-
-def test_read_session_response_item_format(tmp_path):
-    """Codex JSONL with response_item events -> ViewerMessages."""
-    f = _write_codex_jsonl(
-        tmp_path / "sess.jsonl",
-        [
-            {
-                "type": "response_item",
-                "payload": {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": "Hello from codex"}],
-                },
-            },
-        ],
-    )
-    session = read_session(f, "sess")
-    assert session is not None
-    asst = [m for m in session.messages if m.role == "assistant"]
-    assert len(asst) == 1
-    assert "Hello from codex" in asst[0].content
-
-
-def test_read_session_event_msg_format(tmp_path):
-    """Codex JSONL with event_msg/user_message events -> ViewerMessages."""
-    f = _write_codex_jsonl(
-        tmp_path / "sess.jsonl",
-        [
-            {
-                "type": "event_msg",
-                "payload": {"type": "user_message", "message": "User says hi"},
-            },
-            {
-                "type": "event_msg",
-                "payload": {"type": "agent_message", "message": "Agent replies"},
-            },
-        ],
-    )
-    session = read_session(f, "sess")
-    assert session is not None
-    assert len(session.messages) == 2
-    assert session.messages[0].role == "user"
-    assert session.messages[1].role == "assistant"
 
 
 def test_extract_message_text_string():
@@ -110,18 +64,6 @@ def test_count_sessions(tmp_path):
     (tmp_path / "a.jsonl").write_text('{"x":1}\n', encoding="utf-8")
     (tmp_path / "empty.jsonl").write_text("", encoding="utf-8")
     assert count_sessions(tmp_path) == 1
-
-
-def test_find_session_path_exact_and_partial(tmp_path):
-    """find_session_path with exact stem and partial match."""
-    target = tmp_path / "my-session-123.jsonl"
-    target.write_text('{"x":1}\n', encoding="utf-8")
-    # Exact match
-    found = find_session_path("my-session-123", traces_dir=tmp_path)
-    assert found is not None
-    # Partial match
-    found_partial = find_session_path("session-123", traces_dir=tmp_path)
-    assert found_partial is not None
 
 
 def test_iter_sessions_skips_known_ids(tmp_path):
@@ -483,122 +425,6 @@ def test_iter_sessions_counts_tool_calls_and_errors(tmp_path):
     assert records[0].error_count == 1
 
 
-# --- read_session edge cases ---
-
-
-def test_read_session_empty_file(tmp_path):
-    """Empty JSONL file produces session with no messages."""
-    f = tmp_path / "empty.jsonl"
-    f.write_text("", encoding="utf-8")
-    session = read_session(f, "empty")
-    assert session is not None
-    assert session.messages == []
-
-
-def test_read_session_function_call_output_unknown_id(tmp_path):
-    """function_call_output with unknown call_id becomes standalone tool message."""
-    f = _write_codex_jsonl(
-        tmp_path / "orphan.jsonl",
-        [
-            {
-                "type": "response_item",
-                "payload": {
-                    "type": "function_call_output",
-                    "call_id": "unknown-123",
-                    "output": "some result",
-                },
-            },
-        ],
-    )
-    session = read_session(f, "orphan")
-    assert session is not None
-    assert len(session.messages) == 1
-    assert session.messages[0].role == "tool"
-    assert session.messages[0].tool_output == "some result"
-
-
-def test_read_session_custom_tool_call(tmp_path):
-    """custom_tool_call entries are parsed as tool messages."""
-    f = _write_codex_jsonl(
-        tmp_path / "custom.jsonl",
-        [
-            {
-                "type": "response_item",
-                "payload": {
-                    "type": "custom_tool_call",
-                    "id": "ct-1",
-                    "name": "my_tool",
-                    "input": {"arg": "val"},
-                },
-            },
-            {
-                "type": "response_item",
-                "payload": {
-                    "type": "custom_tool_call_output",
-                    "id": "ct-1",
-                    "output": "tool result",
-                },
-            },
-        ],
-    )
-    session = read_session(f, "custom")
-    assert session is not None
-    tool_msgs = [m for m in session.messages if m.role == "tool"]
-    assert len(tool_msgs) == 1
-    assert tool_msgs[0].tool_name == "my_tool"
-    assert tool_msgs[0].tool_output == "tool result"
-
-
-def test_read_session_token_counting(tmp_path):
-    """token_count events accumulate input/output tokens."""
-    f = _write_codex_jsonl(
-        tmp_path / "tokens.jsonl",
-        [
-            {
-                "type": "event_msg",
-                "payload": {
-                    "type": "token_count",
-                    "info": {
-                        "last_token_usage": {
-                            "input_tokens": 200,
-                            "output_tokens": 100,
-                            "reasoning_output_tokens": 50,
-                        }
-                    },
-                },
-            },
-            {
-                "type": "response_item",
-                "payload": {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": "hi",
-                },
-            },
-        ],
-    )
-    session = read_session(f, "tokens")
-    assert session is not None
-    assert session.total_input_tokens == 200
-    assert session.total_output_tokens == 150  # 100 + 50
-
-
-def test_read_session_uses_stem_as_default_id(tmp_path):
-    """When session_id is None, the file stem is used."""
-    f = _write_codex_jsonl(
-        tmp_path / "my-session.jsonl",
-        [
-            {
-                "type": "response_item",
-                "payload": {"type": "message", "role": "assistant", "content": "hi"},
-            },
-        ],
-    )
-    session = read_session(f)
-    assert session is not None
-    assert session.session_id == "my-session"
-
-
 # --- compact_trace / _clean_entry edge cases ---
 
 
@@ -648,25 +474,3 @@ def test_compact_trace_multiple_lines():
     assert parsed[0]["type"] == "user"
     assert parsed[0]["message"]["content"] == "hello"
 
-
-# --- find_session_path edge cases ---
-
-
-def test_find_session_path_empty_id(tmp_path):
-    """Empty session_id returns None."""
-    (tmp_path / "test.jsonl").write_text("{}\n", encoding="utf-8")
-    assert find_session_path("", traces_dir=tmp_path) is None
-
-
-def test_find_session_path_whitespace_id(tmp_path):
-    """Whitespace-only session_id returns None."""
-    (tmp_path / "test.jsonl").write_text("{}\n", encoding="utf-8")
-    assert find_session_path("   ", traces_dir=tmp_path) is None
-
-
-def test_find_session_path_nonexistent_dir():
-    """Non-existent traces_dir returns None."""
-    from pathlib import Path
-
-    result = find_session_path("any-id", traces_dir=Path("/tmp/nonexistent_abc_123"))
-    assert result is None

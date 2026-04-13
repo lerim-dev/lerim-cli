@@ -1,7 +1,7 @@
 """HTTP server: JSON APIs for sessions, memories, pipeline, queue, and config.
 
 Optional bundled static files under ``dashboard/`` (repo or ``/opt/lerim/dashboard``)
-may serve a legacy local UI. If no ``index.html`` is present, GET ``/`` returns a
+may serve a local UI. If no ``index.html`` is present, GET ``/`` returns a
 minimal page pointing to Lerim Cloud; the web app itself lives in ``lerim-cloud``.
 """
 
@@ -1333,8 +1333,12 @@ SELECT COUNT(1) AS total FROM session_docs d WHERE 1=1{where_sql}"""
             if not question:
                 self._error(HTTPStatus.BAD_REQUEST, "Missing 'question'")
                 return
-            # Compatibility only: API still tolerates `limit`, runtime ignores it.
-            _ = body.get("limit")
+            if "limit" in body:
+                self._error(
+                    HTTPStatus.BAD_REQUEST,
+                    "The 'limit' field was removed from /api/ask.",
+                )
+                return
             import threading
 
             result_holder: list[dict[str, Any]] = []

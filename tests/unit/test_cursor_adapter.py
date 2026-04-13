@@ -16,9 +16,7 @@ from lerim.adapters.cursor import (
 	compact_trace,
 	count_sessions,
 	default_path,
-	find_session_path,
 	iter_sessions,
-	read_session,
 	validate_connection,
 )
 
@@ -574,91 +572,6 @@ def test_iter_sessions_double_encoded_values(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# read_session tests
-# ---------------------------------------------------------------------------
-
-
-def test_read_session_from_exported_jsonl():
-	"""read_session on an exported JSONL returns correct role mapping."""
-	with TemporaryDirectory() as tmp:
-		db_path = Path(tmp) / "state.vscdb"
-		cache_dir = Path(tmp) / "cache"
-		_make_cursor_db(
-			db_path,
-			composers={"sess": {"composerId": "sess", "createdAt": 1700000000000}},
-			bubbles=[
-				("sess", "1", {"type": 1, "text": "user question"}),
-				("sess", "2", {"type": 2, "text": "assistant answer"}),
-				("sess", "3", {"type": 1, "text": "follow up"}),
-			],
-		)
-		records = iter_sessions(traces_dir=Path(tmp), cache_dir=cache_dir)
-		assert len(records) == 1
-
-		session = read_session(Path(records[0].session_path), "sess")
-		assert session is not None
-		assert session.session_id == "sess"
-		assert len(session.messages) == 3
-		assert session.messages[0].role == "user"
-		assert session.messages[0].content == "user question"
-		assert session.messages[1].role == "assistant"
-		assert session.messages[1].content == "assistant answer"
-		assert session.messages[2].role == "user"
-
-
-def test_read_session_from_vscdb(tmp_path):
-	"""read_session reads directly from a .vscdb file when session_id is given."""
-	db_path = tmp_path / "state.vscdb"
-	_make_cursor_db(
-		db_path,
-		composers={"db1": {"composerId": "db1"}},
-		bubbles=[
-			("db1", "1", {"type": 1, "text": "hello user"}),
-			("db1", "2", {"type": 2, "text": "hello assistant"}),
-		],
-	)
-	session = read_session(db_path, session_id="db1")
-	assert session is not None
-	assert session.session_id == "db1"
-	assert len(session.messages) == 2
-	assert session.messages[0].role == "user"
-	assert session.messages[1].role == "assistant"
-
-
-def test_read_session_from_directory_containing_vscdb(tmp_path):
-	"""read_session resolves a directory to state.vscdb inside it."""
-	db_path = tmp_path / "state.vscdb"
-	_make_cursor_db(
-		db_path,
-		composers={"dir1": {"composerId": "dir1"}},
-		bubbles=[("dir1", "1", {"type": 1, "text": "msg"})],
-	)
-	session = read_session(tmp_path, session_id="dir1")
-	assert session is not None
-	assert session.session_id == "dir1"
-
-
-def test_read_session_no_session_id_on_vscdb(tmp_path):
-	"""read_session returns None for .vscdb path without session_id."""
-	db_path = tmp_path / "state.vscdb"
-	_make_cursor_db(db_path, composers={}, bubbles=[])
-	assert read_session(db_path) is None
-
-
-def test_read_session_nonexistent_jsonl(tmp_path):
-	"""read_session returns None for a nonexistent .jsonl path."""
-	fake = tmp_path / "nope.jsonl"
-	assert read_session(fake) is None
-
-
-def test_read_session_unknown_suffix(tmp_path):
-	"""read_session returns None for a path with unknown suffix and no DB."""
-	fake = tmp_path / "file.txt"
-	fake.touch()
-	assert read_session(fake) is None
-
-
-# ---------------------------------------------------------------------------
 # _read_session_db tests
 # ---------------------------------------------------------------------------
 
@@ -726,71 +639,6 @@ def test_read_session_db_non_dict_bubble_skipped(tmp_path):
 	session = _read_session_db(db_path, "s")
 	assert session is not None
 	assert len(session.messages) == 1
-
-
-# ---------------------------------------------------------------------------
-# find_session_path tests
-# ---------------------------------------------------------------------------
-
-
-def test_find_session_path_from_cache(tmp_path, monkeypatch):
-	"""find_session_path returns cached JSONL when it exists."""
-	cache_dir = tmp_path / "cache"
-	cache_dir.mkdir()
-	cached_file = cache_dir / "abc123.jsonl"
-	cached_file.write_text("{}\n", encoding="utf-8")
-	monkeypatch.setattr(
-		"lerim.adapters.cursor._default_cache_dir", lambda: cache_dir
-	)
-	result = find_session_path("abc123")
-	assert result == cached_file
-
-
-def test_find_session_path_from_db(tmp_path, monkeypatch):
-	"""find_session_path falls back to DB scan when cache miss."""
-	cache_dir = tmp_path / "empty_cache"
-	cache_dir.mkdir()
-	monkeypatch.setattr(
-		"lerim.adapters.cursor._default_cache_dir", lambda: cache_dir
-	)
-	db_path = tmp_path / "state.vscdb"
-	_make_cursor_db(
-		db_path,
-		composers={},
-		bubbles=[("mysess", "1", {"type": 1, "text": "hi"})],
-	)
-	result = find_session_path("mysess", traces_dir=tmp_path)
-	assert result == db_path
-
-
-def test_find_session_path_empty_id():
-	"""find_session_path returns None for empty session_id."""
-	assert find_session_path("") is None
-	assert find_session_path("   ") is None
-
-
-def test_find_session_path_not_found(tmp_path, monkeypatch):
-	"""find_session_path returns None when session does not exist anywhere."""
-	cache_dir = tmp_path / "cache"
-	cache_dir.mkdir()
-	monkeypatch.setattr(
-		"lerim.adapters.cursor._default_cache_dir", lambda: cache_dir
-	)
-	db_path = tmp_path / "state.vscdb"
-	_make_cursor_db(db_path, composers={}, bubbles=[])
-	result = find_session_path("unknown", traces_dir=tmp_path)
-	assert result is None
-
-
-def test_find_session_path_nonexistent_root(tmp_path, monkeypatch):
-	"""find_session_path returns None when traces_dir does not exist."""
-	cache_dir = tmp_path / "cache"
-	cache_dir.mkdir()
-	monkeypatch.setattr(
-		"lerim.adapters.cursor._default_cache_dir", lambda: cache_dir
-	)
-	result = find_session_path("abc", traces_dir=tmp_path / "nope")
-	assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -1002,53 +850,6 @@ def test_iter_sessions_empty_text_not_in_summaries(tmp_path):
 	assert records[0].summaries == ["real text"]
 
 
-def test_read_session_jsonl_fallback_id(tmp_path):
-	"""read_session falls back to composerId from metadata when no session_id given."""
-	cache_dir = tmp_path / "cache"
-	cache_dir.mkdir()
-	jsonl = cache_dir / "test.jsonl"
-	lines = [
-		json.dumps({"composerId": "from_meta"}),
-		json.dumps({"type": 1, "text": "user msg"}),
-	]
-	jsonl.write_text("\n".join(lines) + "\n", encoding="utf-8")
-	session = read_session(jsonl)
-	assert session is not None
-	assert session.session_id == "from_meta"
-
-
-def test_read_session_jsonl_stem_fallback_id(tmp_path):
-	"""read_session uses path stem when no session_id and no composerId in metadata."""
-	cache_dir = tmp_path / "cache"
-	cache_dir.mkdir()
-	jsonl = cache_dir / "my_session.jsonl"
-	lines = [
-		json.dumps({"some_key": "some_val"}),
-		json.dumps({"type": 1, "text": "msg"}),
-	]
-	jsonl.write_text("\n".join(lines) + "\n", encoding="utf-8")
-	session = read_session(jsonl)
-	assert session is not None
-	assert session.session_id == "my_session"
-
-
-def test_read_session_jsonl_strips_empty_text_bubbles(tmp_path):
-	"""read_session from JSONL skips bubbles with empty text."""
-	cache_dir = tmp_path / "cache"
-	cache_dir.mkdir()
-	jsonl = cache_dir / "strip.jsonl"
-	lines = [
-		json.dumps({"composerId": "st"}),
-		json.dumps({"type": 1, "text": "   "}),
-		json.dumps({"type": 2, "text": "real reply"}),
-	]
-	jsonl.write_text("\n".join(lines) + "\n", encoding="utf-8")
-	session = read_session(jsonl, "st")
-	assert session is not None
-	assert len(session.messages) == 1
-	assert session.messages[0].role == "assistant"
-
-
 # ---------------------------------------------------------------------------
 # SQLite error handling tests
 # ---------------------------------------------------------------------------
@@ -1089,28 +890,8 @@ def test_iter_sessions_sqlite_error(tmp_path):
 	assert records == []
 
 
-def test_find_session_path_sqlite_error(tmp_path, monkeypatch):
-	"""find_session_path returns None on SQLite error during DB scan."""
-	cache_dir = tmp_path / "cache"
-	cache_dir.mkdir()
-	monkeypatch.setattr(
-		"lerim.adapters.cursor._default_cache_dir", lambda: cache_dir
-	)
-	db_path = tmp_path / "state.vscdb"
-	db_path.write_bytes(b"corrupt data")
-	result = find_session_path("xyz", traces_dir=tmp_path)
-	assert result is None
-
-
 def test_read_session_db_sqlite_error(tmp_path):
 	"""_read_session_db returns None on SQLite error."""
 	db_path = tmp_path / "state.vscdb"
 	db_path.write_bytes(b"corrupt data")
 	assert _read_session_db(db_path, "sid") is None
-
-
-def test_read_session_empty_jsonl(tmp_path):
-	"""read_session returns None for a JSONL with no valid dict lines."""
-	jsonl = tmp_path / "empty.jsonl"
-	jsonl.write_text("\n\n", encoding="utf-8")
-	assert read_session(jsonl) is None

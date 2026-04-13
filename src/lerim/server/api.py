@@ -218,12 +218,8 @@ def api_health() -> dict[str, Any]:
     return {"status": "ok", "version": __version__}
 
 
-def api_ask(question: str, limit: int = 12) -> dict[str, Any]:
-    """Run one ask query against the runtime agent and return result dict.
-
-    The ``limit`` argument is accepted for API compatibility and ignored.
-    """
-    _ = limit
+def api_ask(question: str) -> dict[str, Any]:
+    """Run one ask query against the runtime agent and return result dict."""
     config = get_config()
     memory_root = str(config.memory_dir)
     agent = LerimRuntime()

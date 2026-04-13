@@ -11,14 +11,11 @@ from lerim.adapters.opencode import (
 	_export_session_jsonl,
 	_json_col,
 	_read_session_db,
-	_read_session_jsonl,
 	_resolve_db_path,
 	compact_trace,
 	count_sessions,
 	default_path,
-	find_session_path,
 	iter_sessions,
-	read_session,
 	validate_connection,
 )
 
@@ -537,147 +534,12 @@ def test_read_session_db_default_role(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# read_session dispatch tests
-# ---------------------------------------------------------------------------
-
-
-def test_read_session_from_sqlite(tmp_path):
-	"""Read session from an in-memory SQLite DB mimicking OpenCode schema."""
-	db_path = tmp_path / "opencode.db"
-	_make_opencode_db(db_path)
-	session = read_session(tmp_path, session_id="sess-1")
-	assert session is not None
-	assert isinstance(session, ViewerSession)
-	assert session.session_id == "sess-1"
-	user_msgs = [m for m in session.messages if m.role == "user"]
-	asst_msgs = [m for m in session.messages if m.role == "assistant"]
-	assert len(user_msgs) >= 1
-	assert len(asst_msgs) >= 1
-	assert "User question" in user_msgs[0].content
-	assert "Assistant answer" in asst_msgs[0].content
-
-
-def test_read_session_from_jsonl(tmp_path):
-	"""Read session from a JSONL cache file (legacy format)."""
-	jsonl_path = tmp_path / "test.jsonl"
-	lines = [
-		json.dumps({"session_id": "j1", "cwd": "/tmp", "total_input_tokens": 5, "total_output_tokens": 10, "meta": {}}),
-		json.dumps({"role": "user", "content": "hello"}),
-		json.dumps({"role": "assistant", "content": "world", "model": "gpt-4"}),
-	]
-	jsonl_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-	session = read_session(jsonl_path, session_id="j1")
-	assert session is not None
-	assert session.session_id == "j1"
-	assert len(session.messages) == 2
-
-
-def test_read_session_from_canonical_jsonl(tmp_path):
-	"""Read session from a canonical-format JSONL cache file."""
-	jsonl_path = tmp_path / "test.jsonl"
-	lines = [
-		json.dumps({"type": "user", "message": {"role": "user", "content": "hello"}, "timestamp": "2024-02-15T12:00:00Z"}),
-		json.dumps({"type": "assistant", "message": {"role": "assistant", "content": "world"}, "timestamp": "2024-02-15T12:00:01Z"}),
-	]
-	jsonl_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-	session = read_session(jsonl_path, session_id="c1")
-	assert session is not None
-	assert session.session_id == "c1"
-	assert len(session.messages) == 2
-	assert session.messages[0].role == "user"
-	assert session.messages[0].content == "hello"
-	assert session.messages[1].role == "assistant"
-	assert session.messages[1].content == "world"
-
-
-def test_read_session_from_direct_db_path(tmp_path):
-	"""read_session works when given the .db file path directly."""
-	db_path = tmp_path / "opencode.db"
-	_make_opencode_db(db_path)
-	session = read_session(db_path, session_id="sess-1")
-	assert session is not None
-	assert session.session_id == "sess-1"
-
-
-def test_read_session_returns_none_no_session_id(tmp_path):
-	"""read_session returns None for a DB file path without session_id."""
-	db_path = tmp_path / "opencode.db"
-	_make_opencode_db(db_path)
-	assert read_session(db_path) is None
-
-
-def test_read_session_nonexistent_jsonl(tmp_path):
-	"""read_session returns None for nonexistent JSONL."""
-	assert read_session(tmp_path / "nope.jsonl") is None
-
-
-# ---------------------------------------------------------------------------
-# _read_session_jsonl tests
-# ---------------------------------------------------------------------------
-
-
-def test_read_session_jsonl_with_tool_messages(tmp_path):
-	"""_read_session_jsonl handles tool messages in JSONL."""
-	jsonl_path = tmp_path / "tools.jsonl"
-	lines = [
-		json.dumps({"session_id": "t1", "cwd": "/tmp", "total_input_tokens": 0, "total_output_tokens": 0, "meta": {}}),
-		json.dumps({"role": "user", "content": "run ls"}),
-		json.dumps({"role": "tool", "tool_name": "bash", "tool_input": "ls", "tool_output": "files", "timestamp": "2024-01-01T00:00:00"}),
-		json.dumps({"role": "assistant", "content": "Here are the files"}),
-	]
-	jsonl_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-	session = _read_session_jsonl(jsonl_path, "t1")
-	assert session is not None
-	assert len(session.messages) == 3
-	tool_msg = [m for m in session.messages if m.role == "tool"][0]
-	assert tool_msg.tool_name == "bash"
-	assert tool_msg.tool_input == "ls"
-	assert tool_msg.tool_output == "files"
-
-
-def test_read_session_jsonl_empty_file(tmp_path):
-	"""_read_session_jsonl returns None for an empty file."""
-	jsonl_path = tmp_path / "empty.jsonl"
-	jsonl_path.write_text("", encoding="utf-8")
-	assert _read_session_jsonl(jsonl_path, "x") is None
-
-
-def test_read_session_jsonl_id_fallback(tmp_path):
-	"""_read_session_jsonl falls back to path stem when no session_id given or in data."""
-	jsonl_path = tmp_path / "fallback_id.jsonl"
-	lines = [
-		json.dumps({"cwd": "/tmp", "total_input_tokens": 0, "total_output_tokens": 0, "meta": {}}),
-		json.dumps({"role": "user", "content": "hi"}),
-	]
-	jsonl_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-	session = _read_session_jsonl(jsonl_path, None)
-	assert session is not None
-	assert session.session_id == "fallback_id"
-
-
-def test_read_session_jsonl_skips_empty_content(tmp_path):
-	"""_read_session_jsonl skips messages with empty content."""
-	jsonl_path = tmp_path / "sparse.jsonl"
-	lines = [
-		json.dumps({"session_id": "sp", "cwd": "/", "total_input_tokens": 0, "total_output_tokens": 0, "meta": {}}),
-		json.dumps({"role": "user", "content": ""}),
-		json.dumps({"role": "user", "content": "   "}),
-		json.dumps({"role": "assistant", "content": "real"}),
-	]
-	jsonl_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-	session = _read_session_jsonl(jsonl_path, "sp")
-	assert session is not None
-	assert len(session.messages) == 1
-	assert session.messages[0].content == "real"
-
-
-# ---------------------------------------------------------------------------
 # _export_session_jsonl + roundtrip tests
 # ---------------------------------------------------------------------------
 
 
 def test_jsonl_export_roundtrip(tmp_path):
-	"""Export ViewerSession to JSONL, re-read, verify identical content."""
+	"""Export ViewerSession to JSONL and verify canonical line schema."""
 	session = ViewerSession(
 		session_id="roundtrip-test",
 		cwd="/tmp",
@@ -701,15 +563,29 @@ def test_jsonl_export_roundtrip(tmp_path):
 		assert "message" in obj
 		assert "timestamp" in obj
 
-	reloaded = _read_session_jsonl(jsonl_path, "roundtrip-test")
-	assert reloaded is not None
-	assert len(reloaded.messages) == 3
+	user_count = 0
+	assistant_count = 0
+	tool_result_entries = 0
+	for line in raw_lines:
+		obj = json.loads(line)
+		assert obj["type"] in ("user", "assistant")
+		msg = obj["message"]
+		assert msg["role"] in ("user", "assistant")
+		content = msg["content"]
+		if isinstance(content, str):
+			if msg["role"] == "user":
+				user_count += 1
+			else:
+				assistant_count += 1
+		elif isinstance(content, list):
+			for block in content:
+				if block.get("type") == "tool_result":
+					tool_result_entries += 1
+					assert str(block.get("content", "")).startswith("[cleared:")
 
-	# Check tool message preserved with cleared output
-	tool = [m for m in reloaded.messages if m.role == "tool"][0]
-	assert tool.tool_name == "bash"
-	assert tool.tool_input == "ls"
-	assert tool.tool_output.startswith("[cleared:")
+	assert user_count == 1
+	assert assistant_count >= 1
+	assert tool_result_entries == 1
 
 
 def test_export_session_jsonl_empty_messages(tmp_path):
@@ -718,78 +594,6 @@ def test_export_session_jsonl_empty_messages(tmp_path):
 	jsonl_path = _export_session_jsonl(session, tmp_path)
 	content = jsonl_path.read_text(encoding="utf-8").strip()
 	assert content == ""
-
-
-# ---------------------------------------------------------------------------
-# find_session_path tests
-# ---------------------------------------------------------------------------
-
-
-def test_find_session_path_from_cache(tmp_path, monkeypatch):
-	"""find_session_path returns cached JSONL when it exists."""
-	cache_dir = tmp_path / "cache"
-	cache_dir.mkdir()
-	cached = cache_dir / "sid1.jsonl"
-	cached.write_text("{}\n", encoding="utf-8")
-	monkeypatch.setattr(
-		"lerim.adapters.opencode._default_cache_dir", lambda: cache_dir
-	)
-	result = find_session_path("sid1")
-	assert result == cached
-
-
-def test_find_session_path_from_db(tmp_path, monkeypatch):
-	"""find_session_path falls back to DB when cache miss."""
-	cache_dir = tmp_path / "empty_cache"
-	cache_dir.mkdir()
-	monkeypatch.setattr(
-		"lerim.adapters.opencode._default_cache_dir", lambda: cache_dir
-	)
-	db_path = tmp_path / "opencode.db"
-	_make_opencode_db(db_path)
-	result = find_session_path("sess-1", traces_dir=tmp_path)
-	assert result == db_path
-
-
-def test_find_session_path_empty_id():
-	"""find_session_path returns None for empty session_id."""
-	assert find_session_path("") is None
-	assert find_session_path("   ") is None
-
-
-def test_find_session_path_not_found(tmp_path, monkeypatch):
-	"""find_session_path returns None when session does not exist."""
-	cache_dir = tmp_path / "cache"
-	cache_dir.mkdir()
-	monkeypatch.setattr(
-		"lerim.adapters.opencode._default_cache_dir", lambda: cache_dir
-	)
-	db_path = tmp_path / "opencode.db"
-	_make_opencode_db(db_path)
-	result = find_session_path("unknown", traces_dir=tmp_path)
-	assert result is None
-
-
-def test_find_session_path_no_db(tmp_path, monkeypatch):
-	"""find_session_path returns None when no DB exists."""
-	cache_dir = tmp_path / "cache"
-	cache_dir.mkdir()
-	monkeypatch.setattr(
-		"lerim.adapters.opencode._default_cache_dir", lambda: cache_dir
-	)
-	result = find_session_path("abc", traces_dir=tmp_path)
-	assert result is None
-
-
-def test_find_session_path_nonexistent_root(tmp_path, monkeypatch):
-	"""find_session_path returns None when traces_dir does not exist."""
-	cache_dir = tmp_path / "cache"
-	cache_dir.mkdir()
-	monkeypatch.setattr(
-		"lerim.adapters.opencode._default_cache_dir", lambda: cache_dir
-	)
-	result = find_session_path("abc", traces_dir=tmp_path / "nope")
-	assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -1103,19 +907,6 @@ def test_count_sessions_sqlite_error(tmp_path):
 	db_path = tmp_path / "opencode.db"
 	db_path.write_bytes(b"corrupt data not a database")
 	assert count_sessions(tmp_path) == 0
-
-
-def test_find_session_path_sqlite_error(tmp_path, monkeypatch):
-	"""find_session_path returns None on SQLite error."""
-	cache_dir = tmp_path / "cache"
-	cache_dir.mkdir()
-	monkeypatch.setattr(
-		"lerim.adapters.opencode._default_cache_dir", lambda: cache_dir
-	)
-	db_path = tmp_path / "opencode.db"
-	db_path.write_bytes(b"corrupt data")
-	result = find_session_path("sid", traces_dir=tmp_path)
-	assert result is None
 
 
 def test_read_session_db_sqlite_error(tmp_path):

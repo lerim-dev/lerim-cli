@@ -315,7 +315,7 @@ def test_server(tmp_path, monkeypatch):
 	monkeypatch.setattr("lerim.server.httpd.list_provider_models", lambda provider: ["model-a", "model-b"])
 
 	# POST action mocks
-	monkeypatch.setattr("lerim.server.httpd.api_ask", lambda question, limit=12: {
+	monkeypatch.setattr("lerim.server.httpd.api_ask", lambda question: {
 		"answer": f"Mocked answer for: {question}",
 		"agent_session_id": "test-session-001",
 		"memories_used": [],
@@ -589,16 +589,16 @@ def test_post_ask(test_server):
 	assert "Mocked answer" in body["answer"]
 
 
-def test_post_ask_with_compat_limit_field(test_server):
-	"""POST /api/ask tolerates legacy `limit` field for compatibility."""
+def test_post_ask_rejects_limit_field(test_server):
+	"""POST /api/ask rejects removed `limit` field."""
 	port, _, _ = test_server
-	status, body = _api_post(
+	status, body = _api_post_error(
 		port,
 		"/api/ask",
 		{"question": "What is Lerim?", "limit": 5},
 	)
-	assert status == 200
-	assert "answer" in body
+	assert status == 400
+	assert "error" in body
 
 
 def test_post_ask_missing_question(test_server):

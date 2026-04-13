@@ -20,7 +20,8 @@ def test_get_adapter_known_platform():
     """get_adapter('claude') returns claude adapter module."""
     adapter = get_adapter("claude")
     assert adapter is not None
-    assert hasattr(adapter, "read_session")
+    assert hasattr(adapter, "default_path")
+    assert hasattr(adapter, "count_sessions")
     assert hasattr(adapter, "iter_sessions")
 
 
