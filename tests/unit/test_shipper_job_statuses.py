@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 
-from lerim.app.cloud_shipper import (
+from lerim.cloud.shipper import (
 	_JOB_STATUS_MAP,
 	_ShipperState,
 	_query_job_statuses,
@@ -51,7 +51,7 @@ def test_shipper_state_has_jobs_shipped_at():
 def test_shipper_state_load_saves_jobs_watermark(tmp_path, monkeypatch):
 	"""Save state with jobs_shipped_at, load it back -- value preserved."""
 	state_path = tmp_path / "cloud_shipper_state.json"
-	monkeypatch.setattr("lerim.app.cloud_shipper._STATE_PATH", state_path)
+	monkeypatch.setattr("lerim.cloud.shipper._STATE_PATH", state_path)
 
 	state = _ShipperState(jobs_shipped_at="2026-03-25T12:00:00Z")
 	state.save()
@@ -203,7 +203,7 @@ def test_ship_job_statuses_maps_and_advances_watermark(tmp_path):
 		captured_payloads.append(payload)
 		return True
 
-	with patch("lerim.app.cloud_shipper._post_batch", side_effect=mock_post_batch):
+	with patch("lerim.cloud.shipper._post_batch", side_effect=mock_post_batch):
 		shipped = asyncio.run(
 			_ship_job_statuses("http://test", "tok", state, db_path)
 		)
@@ -226,7 +226,7 @@ def test_ship_job_statuses_no_rows_does_not_advance(tmp_path):
 
 	state = _ShipperState(jobs_shipped_at="2026-03-01T00:00:00Z")
 
-	with patch("lerim.app.cloud_shipper._post_batch", new_callable=AsyncMock) as mock:
+	with patch("lerim.cloud.shipper._post_batch", new_callable=AsyncMock) as mock:
 		shipped = asyncio.run(
 			_ship_job_statuses("http://test", "tok", state, db_path)
 		)
@@ -248,7 +248,7 @@ def test_ship_job_statuses_stops_on_post_failure(tmp_path):
 	async def mock_fail(*args, **kwargs):
 		return False
 
-	with patch("lerim.app.cloud_shipper._post_batch", side_effect=mock_fail):
+	with patch("lerim.cloud.shipper._post_batch", side_effect=mock_fail):
 		shipped = asyncio.run(
 			_ship_job_statuses("http://test", "tok", state, db_path)
 		)

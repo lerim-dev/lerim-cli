@@ -32,7 +32,7 @@ This reads `~/.lerim/config.toml`, generates a `docker-compose.yml` in `~/.lerim
 
 By default the compose file references the pre-built GHCR image (`ghcr.io/lerim-dev/lerim-cli`) tagged with the current package version. Use `--build` to build from the local Dockerfile instead (useful for development).
 
-Running `lerim up` again recreates the container.
+Running `lerim up` again recreates the container. After start, the CLI waits for `GET /api/health` to return `200 OK` before reporting success.
 
 ### `lerim down`
 
@@ -44,11 +44,14 @@ lerim down
 
 ### `lerim logs`
 
-View container logs:
+View local log entries from `~/.lerim/logs/lerim.jsonl` (last 50 by default).
 
 ```bash
-lerim logs                  # show recent logs
-lerim logs --follow         # tail logs continuously
+lerim logs                      # show recent logs
+lerim logs --follow             # tail logs continuously
+lerim logs --level error        # filter by level
+lerim logs --since 2h           # entries from the last 2 hours
+lerim logs --json               # raw JSONL output
 ```
 
 ## Parameters
@@ -64,11 +67,36 @@ lerim logs --follow         # tail logs continuously
 
 <div class="param-field">
   <div class="param-header">
-    <span class="param-name">--follow</span>
+    <span class="param-name">--follow, -f</span>
     <span class="param-type">boolean</span>
     <span class="param-badge default">default: off</span>
   </div>
-  <p class="param-desc">Continuously tail logs (for <code>lerim logs</code>).</p>
+  <p class="param-desc">Live tail: watch for new log lines and print as they appear.</p>
+</div>
+
+<div class="param-field">
+  <div class="param-header">
+    <span class="param-name">--level</span>
+    <span class="param-type">string</span>
+  </div>
+  <p class="param-desc">Filter by log level (case-insensitive). E.g. <code>error</code>, <code>warning</code>, <code>info</code>.</p>
+</div>
+
+<div class="param-field">
+  <div class="param-header">
+    <span class="param-name">--since</span>
+    <span class="param-type">string</span>
+  </div>
+  <p class="param-desc">Show entries from the last N hours/minutes/days. Format: <code>1h</code>, <code>30m</code>, <code>2d</code>.</p>
+</div>
+
+<div class="param-field">
+  <div class="param-header">
+    <span class="param-name">--json</span>
+    <span class="param-type">boolean</span>
+    <span class="param-badge default">default: off</span>
+  </div>
+  <p class="param-desc">Output raw JSONL lines instead of formatted text.</p>
 </div>
 
 ## Examples
@@ -89,8 +117,9 @@ lerim down
 
 ## Notes
 
-- The container runs `lerim serve` which provides the daemon loop and JSON API (web UI: [Lerim Cloud](https://lerim.dev))
-- Dashboard is available at `http://localhost:8765` when running
+- The container runs `lerim serve` which provides the daemon loop and JSON API
+- `http://localhost:8765/api/health` is the local health endpoint
+- `http://localhost:8765/` serves a small local stub/diagnostic page
 - Docker restart policy is `"no"` — the container does not auto-restart after reboots
 
 ## Related commands

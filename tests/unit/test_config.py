@@ -7,12 +7,9 @@ from pathlib import Path
 
 from lerim.config.settings import (
     Config,
-    DSPyRoleConfig,
-    LLMRoleConfig,
-    _build_dspy_role,
-    _build_llm_role,
+    RoleConfig,
+    _build_role,
     _deep_merge,
-    _require_float,
     _require_int,
     _to_non_empty_string,
     ensure_user_config_exists,
@@ -63,21 +60,6 @@ def test_require_int_missing():
         _require_int({}, "k")
 
 
-def test_require_float_valid():
-    """_require_float parses valid values and clamps to bounds."""
-    assert _require_float({"k": 0.5}, "k", minimum=0.0, maximum=1.0) == 0.5
-    assert _require_float({"k": 2.0}, "k", minimum=0.0, maximum=1.0) == 1.0
-    assert _require_float({"k": -0.5}, "k", minimum=0.0, maximum=1.0) == 0.0
-
-
-def test_require_float_missing():
-    """_require_float raises on missing key."""
-    import pytest
-
-    with pytest.raises(ValueError, match="missing required config key"):
-        _require_float({}, "k", minimum=0.0, maximum=1.0)
-
-
 def test_type_conversion_non_empty_string():
     """_to_non_empty_string trims whitespace, handles None."""
     assert _to_non_empty_string("  hello  ") == "hello"
@@ -87,34 +69,38 @@ def test_type_conversion_non_empty_string():
 
 
 def test_role_config_construction():
-    """_build_llm_role produces LLMRoleConfig from explicit config values."""
-    role = _build_llm_role(
-        {"timeout_seconds": 300, "max_iterations": 10},
+    """_build_role produces RoleConfig from explicit config values.
+
+    The single-pass extraction agent auto-scales its budget — no
+    usage_limit_* keys live on RoleConfig anymore.
+    """
+    role = _build_role(
+        {},
         default_provider="openrouter",
         default_model="qwen/qwen3-coder-30b-a3b-instruct",
     )
-    assert isinstance(role, LLMRoleConfig)
+    assert isinstance(role, RoleConfig)
     assert role.provider == "openrouter"
     assert role.model == "qwen/qwen3-coder-30b-a3b-instruct"
-    assert role.timeout_seconds == 300
 
 
-def test_dspy_role_config_construction():
-    """_build_dspy_role produces DSPyRoleConfig from explicit config values."""
-    role = _build_dspy_role(
+def test_role_config_construction_with_request_limits():
+    """_build_role should honor maintain/ask request limit overrides."""
+    role = _build_role(
         {
-            "timeout_seconds": 180,
-            "max_window_tokens": 300000,
-            "window_overlap_tokens": 5000,
+            "provider": "ollama",
+            "model": "qwen3:8b",
+            "max_iters_maintain": 12,
+            "max_iters_ask": 8,
         },
-        default_provider="ollama",
-        default_model="qwen3:8b",
+        default_provider="openrouter",
+        default_model="default-model",
     )
-    assert isinstance(role, DSPyRoleConfig)
+    assert isinstance(role, RoleConfig)
     assert role.provider == "ollama"
     assert role.model == "qwen3:8b"
-    assert role.max_window_tokens == 300000
-    assert role.window_overlap_tokens == 5000
+    assert role.max_iters_maintain == 12
+    assert role.max_iters_ask == 8
 
 
 def test_config_scaffold_creation(tmp_path, monkeypatch):
@@ -144,7 +130,7 @@ def test_config_env_var_override(tmp_path, monkeypatch):
     config_path = write_test_config(tmp_path)
     monkeypatch.setenv("LERIM_CONFIG", str(config_path))
     cfg = reload_config()
-    assert cfg.data_dir == tmp_path
+    assert cfg.global_data_dir == tmp_path
 
 
 def test_config_public_dict(tmp_path):
@@ -158,14 +144,3 @@ def test_config_public_dict(tmp_path):
     assert "zai_api_key" not in d
     # Should have public fields
     assert "data_dir" in d
-    assert "memory_scope" in d
-
-
-def test_config_decay_fields(tmp_path):
-    """Config exposes decay_days, decay_archive_threshold, etc."""
-    cfg = make_config(tmp_path)
-    assert isinstance(cfg.decay_days, int)
-    assert isinstance(cfg.decay_archive_threshold, float)
-    assert isinstance(cfg.decay_enabled, bool)
-    assert isinstance(cfg.decay_min_confidence_floor, float)
-    assert isinstance(cfg.decay_recent_access_grace_days, int)

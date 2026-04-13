@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -90,6 +92,101 @@ def compute_file_hash(path: Path) -> str:
         for chunk in iter(lambda: f.read(8192), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Canonical compacted schema
+# ---------------------------------------------------------------------------
+# Every adapter must produce JSONL entries matching this shape:
+#   {"type": "user|assistant", "message": {"role": "user|assistant", "content": ...}, "timestamp": "..."}
+# Content can be a string or a list of block dicts (e.g. tool_use, tool_result).
+
+_CANONICAL_TYPES = frozenset({"user", "assistant"})
+
+
+def make_canonical_entry(
+    entry_type: str,
+    role: str,
+    content: str | list,
+    timestamp: str | None,
+) -> dict[str, Any]:
+    """Build a canonical compacted JSONL entry."""
+    return {
+        "type": entry_type,
+        "message": {"role": role, "content": content},
+        "timestamp": timestamp,
+    }
+
+
+def validate_canonical_entry(obj: dict[str, Any]) -> bool:
+    """Return True if entry conforms to the canonical compacted schema."""
+    if set(obj.keys()) != {"type", "message", "timestamp"}:
+        return False
+    if obj["type"] not in _CANONICAL_TYPES:
+        return False
+    msg = obj.get("message")
+    if not isinstance(msg, dict) or set(msg.keys()) != {"role", "content"}:
+        return False
+    if msg["role"] not in _CANONICAL_TYPES:
+        return False
+    if not isinstance(msg["content"], (str, list)):
+        return False
+    return True
+
+
+def normalize_timestamp_iso(value: Any) -> str | None:
+    """Parse any timestamp shape and return ISO 8601 UTC string, or None."""
+    dt = parse_timestamp(value)
+    if dt is None:
+        return None
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def compact_jsonl(
+    raw_text: str, cleaner: Callable[[dict[str, Any]], dict[str, Any] | None]
+) -> str:
+    """Compact JSONL text by applying a format-specific cleaner to each parsed line.
+
+    The *cleaner* receives each parsed JSON dict and returns the cleaned dict,
+    or ``None`` to drop the line entirely.  Non-JSON lines are kept as-is.
+    """
+    kept: list[str] = []
+    for line in raw_text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            kept.append(line)
+            continue
+        obj = cleaner(obj)
+        if obj is None:
+            continue
+        kept.append(json.dumps(obj, ensure_ascii=False))
+    return "\n".join(kept) + "\n"
+
+
+def readonly_connect(db_path: Path) -> sqlite3.Connection:
+    """Open a read-only SQLite connection with Row factory."""
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA query_only=ON")
+    return conn
+
+
+def write_session_cache(
+    cache_dir: Path,
+    run_id: str,
+    lines: list[str],
+    compact_fn: Callable[[str], str],
+) -> Path:
+    """Write compacted session JSONL to cache directory and return the path."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{run_id}.jsonl"
+    raw = "\n".join(lines) + "\n"
+    cache_path.write_text(compact_fn(raw), encoding="utf-8")
+    return cache_path
 
 
 if __name__ == "__main__":

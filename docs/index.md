@@ -15,6 +15,7 @@ hide:
 </p>
 
 Lerim is the **continual learning and context graph layer** for AI coding agents — it watches sessions, extracts structured knowledge, and builds a shared intelligence graph across agents, projects, and teams.
+Current runtime architecture is **PydanticAI-only** for sync, maintain, and ask.
 
 <p align="center">
   <img src="assets/agent-network.gif" alt="Lerim network animation" width="450">
@@ -37,11 +38,10 @@ This is **agent context amnesia**, and it's the biggest productivity drain in AI
 Lerim solves this by:
 
 - :material-sync: **Watching** your agent sessions across all supported coding agents
-- :material-brain: **Extracting** decisions and learnings automatically using LLM pipelines (DSPy + OpenAI Agents SDK)
+- :material-brain: **Extracting** decisions and learnings automatically using a PydanticAI extraction agent
 - :material-file-document: **Storing** everything as plain markdown files in your repo (`.lerim/`)
-- :material-refresh: **Refining** knowledge continuously — merges duplicates, archives stale entries, applies time-based decay
-- :material-graph: **Connecting** learnings into a context graph — related decisions and patterns are linked
-- :material-share-variant: **Unifying** knowledge across all your agents — what one agent learns, every other can recall
+- :material-refresh: **Refining** knowledge over time — merges duplicates, archives stale entries, refreshes the memory index
+- :material-share-variant: **Unifying** knowledge across all your agents — shared files under `.lerim/memory/`
 - :material-chat-question: **Answering** questions about past context: `lerim ask "why did we choose Postgres?"`
 
 No proprietary format. No database lock-in. Just markdown files that both humans and agents can read.
@@ -112,7 +112,7 @@ No proprietary formats — just `.md` files in `.lerim/`
 
 #### :material-auto-fix: Automatic extraction
 
-LLM pipelines extract decisions and learnings from sessions
+PydanticAI agents extract decisions and learnings from sessions
 
 </div>
 
@@ -120,7 +120,7 @@ LLM pipelines extract decisions and learnings from sessions
 
 #### :material-refresh: Continuous refinement
 
-Merges duplicates, archives stale entries, applies time decay
+Merges duplicates, archives stale entries, maintains `index.md`
 
 </div>
 
@@ -179,33 +179,27 @@ lerim connect auto
 
 ### Sync sessions
 
-Lerim reads session transcripts, extracts decisions and learnings via DSPy pipelines, and writes them as markdown files. **Lead agent** + **tools** (DSPy runs inside the extract/summarize pipeline tools):
+Lerim reads session transcripts and runs the **PydanticAI extraction flow** with the **`[roles.agent]`** model. The agent uses tool functions to read the trace, take notes, prune context, search existing memories, write or edit markdown, and save a session summary:
 
 ```mermaid
 flowchart TB
-    subgraph lead["Lead"]
-        OAI[LerimOAIAgent · OpenAI Agents SDK]
+    subgraph runtime_sync["Agent flow"]
+        RT[LerimRuntime · run_extraction]
     end
-    subgraph syncTools["Sync tools"]
-        ep[extract_pipeline]
-        sp[summarize_pipeline]
-        bd[batch_dedup_candidates]
-        wm[write_memory]
-        wr[write_report]
-        rf["read_file · list_files"]
+    subgraph lm["LM"]
+        L[roles.agent]
     end
-    subgraph dspy["DSPy LMs"]
-        ex[roles.extract]
-        su[roles.summarize]
+    subgraph syncTools["Sync tools (7)"]
+        t1["read · grep"]
+        c1["note · prune"]
+        wm["write · edit"]
+        v1["verify_index"]
     end
-    OAI --> ep
-    OAI --> sp
-    OAI --> bd
-    OAI --> wm
-    OAI --> wr
-    OAI --> rf
-    ep -.-> ex
-    sp -.-> su
+    RT --> L
+    RT --> t1
+    RT --> c1
+    RT --> wm
+    RT --> v1
 ```
 
 </div>
@@ -214,29 +208,23 @@ flowchart TB
 
 ### Maintain knowledge
 
-Offline refinement merges duplicates, archives low-value entries, consolidates related learnings, and applies time-based decay. **Lead agent** + **maintain tools** only:
+Offline refinement merges duplicates, archives low-value entries, and consolidates related learnings. The **maintain flow** uses the same **`[roles.agent]`** model with maintain-only tools:
 
 ```mermaid
 flowchart TB
-    subgraph lead_m["Lead"]
-        OAI_m[LerimOAIAgent · OpenAI Agents SDK]
+    subgraph runtime_maintain["Agent flow"]
+        RT_m[LerimRuntime · run_maintain]
     end
-    subgraph maintainTools["Maintain tools"]
-        ms[memory_search]
-        ar[archive_memory]
-        em[edit_memory]
-        wh[write_hot_memory]
-        wm2[write_memory]
-        wr2[write_report]
-        rf2["read_file · list_files"]
+    subgraph maintainTools["Maintain tools (6)"]
+        t2["read · scan"]
+        wm2["write · edit"]
+        ar[archive]
+        v2[verify_index]
     end
-    OAI_m --> ms
-    OAI_m --> ar
-    OAI_m --> em
-    OAI_m --> wh
-    OAI_m --> wm2
-    OAI_m --> wr2
-    OAI_m --> rf2
+    RT_m --> t2
+    RT_m --> wm2
+    RT_m --> ar
+    RT_m --> v2
 ```
 
 </div>
@@ -249,7 +237,7 @@ Ask Lerim about any past decision or learning. Your agents can do this too.
 
 ```bash
 lerim ask "Why did we choose Postgres over MongoDB?"
-lerim memory search "authentication"
+lerim memory list
 ```
 
 </div>
@@ -258,11 +246,11 @@ lerim memory search "authentication"
 
 ---
 
-## Web UI (Lerim Cloud)
+## Dashboard
 
-The browser UI lives in **[Lerim Cloud](https://lerim.dev)** (separate from this CLI package). The local daemon still exposes a **JSON API** on `http://localhost:8765` for the CLI and for Cloud when connected.
+Dashboard UI is not released yet. The local daemon exposes a **JSON API** on `http://localhost:8765` for CLI usage.
 
-See [Web UI (Lerim Cloud)](guides/dashboard.md).
+See [Dashboard (Coming Soon)](guides/dashboard.md).
 
 ---
 

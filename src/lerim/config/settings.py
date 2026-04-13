@@ -30,49 +30,31 @@ _LAST_CONFIG_SOURCES: list[dict[str, str]] = []
 
 
 @dataclass(frozen=True)
-class LLMRoleConfig:
-    """Role config for lead orchestration agent."""
+class RoleConfig:
+	"""Configuration for the agent LLM role.
 
-    provider: str
-    model: str
-    api_base: str
-    fallback_models: tuple[str, ...]
-    timeout_seconds: int
-    max_iterations: int
-    openrouter_provider_order: tuple[str, ...]
-    thinking: bool = True
-    max_tokens: int = 32000
-    max_explorers: int = 4
-    max_turns_sync: int = 50
-    max_turns_maintain: int = 100
-    max_turns_ask: int = 30
+	All fields have defaults so the same class works for any future role.
+	"""
 
-
-@dataclass(frozen=True)
-class DSPyRoleConfig:
-    """Role config for DSPy extraction and summarization pipelines."""
-
-    provider: str
-    model: str
-    api_base: str
-    timeout_seconds: int
-    max_window_tokens: int
-    window_overlap_tokens: int
-    openrouter_provider_order: tuple[str, ...]
-    fallback_models: tuple[str, ...] = ()
-    thinking: bool = True
-    max_tokens: int = 32000
-    max_workers: int = 4
-
-
-@dataclass(frozen=True)
-class CodexRoleConfig:
-	"""Configuration for the Codex filesystem sub-agent."""
-	provider: str = "opencode_go"
-	model: str = "minimax-m2.5"
+	provider: str
+	model: str
 	api_base: str = ""
-	timeout_seconds: int = 600
-	idle_timeout_seconds: int = 120
+	fallback_models: tuple[str, ...] = ()
+	openrouter_provider_order: tuple[str, ...] = ()
+	thinking: bool = True
+	# MiniMax-M2 official preset: temperature=1.0, top_p=0.95, top_k=40
+	temperature: float = 1.0
+	top_p: float = 0.95
+	top_k: int = 40
+	max_tokens: int = 32000
+	parallel_tool_calls: bool = True
+	# PydanticAI single-pass sync now auto-scales its request_limit from
+	# trace size via lerim.agents.tools.compute_request_budget(trace_path).
+	# No static extract-budget field on RoleConfig — the budget is derived
+	# at run start from the actual trace's line count, clamped [50, 100].
+	# PydanticAI request-turn limits for maintain/ask flows.
+	max_iters_maintain: int = 30
+	max_iters_ask: int = 30
 
 
 def load_toml_file(path: Path | None) -> dict[str, Any]:
@@ -116,6 +98,12 @@ def _to_non_empty_string(value: Any) -> str:
     return str(value).strip()
 
 
+def _ensure_dict(data: dict[str, Any], key: str) -> dict[str, Any]:
+	"""Get a dict value from data, returning empty dict if missing or wrong type."""
+	val = data.get(key, {})
+	return val if isinstance(val, dict) else {}
+
+
 def _require_int(raw: dict[str, Any], key: str, minimum: int = 0) -> int:
     """Read a required integer from config dict. Raises if missing from config."""
     value = raw.get(key)
@@ -128,22 +116,6 @@ def _require_int(raw: dict[str, Any], key: str, minimum: int = 0) -> int:
     except (TypeError, ValueError):
         raise ValueError(f"config key {key} must be an integer, got: {value!r}")
     return max(minimum, parsed)
-
-
-def _require_float(
-    raw: dict[str, Any], key: str, minimum: float = 0.0, maximum: float = 1.0
-) -> float:
-    """Read a required float from config dict. Raises if missing from config."""
-    value = raw.get(key)
-    if value is None:
-        raise ValueError(
-            f"missing required config key: {key} (set it in default.toml or user config)"
-        )
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"config key {key} must be a number, got: {value!r}")
-    return min(maximum, max(minimum, parsed))
 
 
 def _to_fallback_models(value: Any) -> tuple[str, ...]:
@@ -172,51 +144,14 @@ def ensure_user_config_exists() -> Path:
 # Lerim user overrides
 # Override only keys you need.
 
-# [roles.lead]
+# [roles.agent]
 # provider = "openrouter"
 # model = "qwen/qwen3-coder-30b-a3b-instruct"
-
-# [roles.extract]
-# provider = "ollama"
-# model = "qwen3:8b"
 """,
         encoding="utf-8",
     )
     return path
 
-
-def _ensure_project_config_exists(data_root: Path) -> Path:
-    """Create project config scaffold under a resolved data root when missing."""
-    path = data_root / "config.toml"
-    if path.exists() or os.getenv("PYTEST_CURRENT_TEST"):
-        return path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        """\
-# Lerim project overrides
-# Only set what this repo needs.
-
-# [memory]
-# scope = "project_fallback_global"
-
-# [roles.lead]
-# model = "qwen/qwen3-coder-30b-a3b-instruct"
-""",
-        encoding="utf-8",
-    )
-    gitignore = data_root / ".gitignore"
-    if not gitignore.exists():
-        gitignore.write_text(
-            """\
-# Lerim data (not committed by default)
-memory/
-index/
-workspace/
-meta/
-""",
-            encoding="utf-8",
-        )
-    return path
 
 
 def _load_layers() -> tuple[dict[str, Any], list[dict[str, str]]]:
@@ -255,19 +190,8 @@ class Config:
     global_data_dir: Path
     memory_dir: Path
     index_dir: Path
-    memories_db_path: Path
-    graph_db_path: Path
     sessions_db_path: Path
     platforms_path: Path
-
-    memory_scope: str
-    memory_project_dir_name: str
-
-    decay_enabled: bool
-    decay_days: int
-    decay_min_confidence_floor: float
-    decay_archive_threshold: float
-    decay_recent_access_grace_days: int
 
     server_host: str
     server_port: int
@@ -275,16 +199,10 @@ class Config:
     maintain_interval_minutes: int
     sync_window_days: int
     sync_max_sessions: int
-    parallel_pipelines: bool
 
-    lead_role: LLMRoleConfig
-    codex_role: CodexRoleConfig
-    extract_role: DSPyRoleConfig
-    summarize_role: DSPyRoleConfig
+    agent_role: RoleConfig
 
-    tracing_enabled: bool
-    tracing_include_httpx: bool
-    tracing_include_content: bool
+    mlflow_enabled: bool
 
     anthropic_api_key: str | None
     openai_api_key: str | None
@@ -302,36 +220,6 @@ class Config:
     agents: dict[str, str]
     projects: dict[str, str]
 
-    @property
-    def provider(self) -> str:
-        """Backward-compatible shortcut to lead role provider."""
-        return self.lead_role.provider
-
-    @property
-    def agent_model(self) -> str:
-        """Backward-compatible shortcut to lead role model."""
-        return self.lead_role.model
-
-    @property
-    def agent_timeout(self) -> int:
-        """Backward-compatible shortcut to lead role timeout."""
-        return self.lead_role.timeout_seconds
-
-    @property
-    def dspy_provider(self) -> str:
-        """Backward-compatible shortcut to extract role provider."""
-        return self.extract_role.provider
-
-    @property
-    def dspy_model(self) -> str:
-        """Backward-compatible shortcut to extract role model."""
-        return self.extract_role.model
-
-    @property
-    def dspy_api_base(self) -> str:
-        """Backward-compatible shortcut to extract role API base."""
-        return self.extract_role.api_base
-
     def public_dict(self) -> dict[str, Any]:
         """Return safe serialized config for CLI/dashboard visibility."""
         return {
@@ -339,63 +227,22 @@ class Config:
             "global_data_dir": str(self.global_data_dir),
             "memory_dir": str(self.memory_dir),
             "index_dir": str(self.index_dir),
-            "memories_db_path": str(self.memories_db_path),
-            "graph_db_path": str(self.graph_db_path),
             "sessions_db_path": str(self.sessions_db_path),
             "platforms_path": str(self.platforms_path),
-            "memory_scope": self.memory_scope,
-            "memory_project_dir_name": self.memory_project_dir_name,
             "server_host": self.server_host,
             "server_port": self.server_port,
             "sync_interval_minutes": self.sync_interval_minutes,
             "maintain_interval_minutes": self.maintain_interval_minutes,
-            "lead_role": {
-                "provider": self.lead_role.provider,
-                "model": self.lead_role.model,
-                "api_base": self.lead_role.api_base,
-                "fallback_models": list(self.lead_role.fallback_models),
-                "timeout_seconds": self.lead_role.timeout_seconds,
-                "max_iterations": self.lead_role.max_iterations,
+            "agent_role": {
+                "provider": self.agent_role.provider,
+                "model": self.agent_role.model,
+                "api_base": self.agent_role.api_base,
+                "fallback_models": list(self.agent_role.fallback_models),
                 "openrouter_provider_order": list(
-                    self.lead_role.openrouter_provider_order
+                    self.agent_role.openrouter_provider_order
                 ),
             },
-            "codex_role": {
-                "provider": self.codex_role.provider,
-                "model": self.codex_role.model,
-                "idle_timeout_seconds": self.codex_role.idle_timeout_seconds,
-            },
-            "extract_role": {
-                "provider": self.extract_role.provider,
-                "model": self.extract_role.model,
-                "api_base": self.extract_role.api_base,
-                "timeout_seconds": self.extract_role.timeout_seconds,
-                "max_window_tokens": self.extract_role.max_window_tokens,
-                "window_overlap_tokens": self.extract_role.window_overlap_tokens,
-                "openrouter_provider_order": list(
-                    self.extract_role.openrouter_provider_order
-                ),
-            },
-            "summarize_role": {
-                "provider": self.summarize_role.provider,
-                "model": self.summarize_role.model,
-                "api_base": self.summarize_role.api_base,
-                "timeout_seconds": self.summarize_role.timeout_seconds,
-                "max_window_tokens": self.summarize_role.max_window_tokens,
-                "window_overlap_tokens": self.summarize_role.window_overlap_tokens,
-                "openrouter_provider_order": list(
-                    self.summarize_role.openrouter_provider_order
-                ),
-            },
-            "parallel_pipelines": self.parallel_pipelines,
-            "decay_enabled": self.decay_enabled,
-            "decay_days": self.decay_days,
-            "decay_min_confidence_floor": self.decay_min_confidence_floor,
-            "decay_archive_threshold": self.decay_archive_threshold,
-            "decay_recent_access_grace_days": self.decay_recent_access_grace_days,
-            "tracing_enabled": self.tracing_enabled,
-            "tracing_include_httpx": self.tracing_include_httpx,
-            "tracing_include_content": self.tracing_include_content,
+            "mlflow_enabled": self.mlflow_enabled,
             "provider_api_bases": dict(self.provider_api_bases),
             "auto_unload": self.auto_unload,
             "cloud_endpoint": self.cloud_endpoint,
@@ -415,68 +262,38 @@ def _to_string_tuple(value: Any) -> tuple[str, ...]:
     return ()
 
 
-def _build_llm_role(
-    raw: dict[str, Any], *, default_provider: str, default_model: str
-) -> LLMRoleConfig:
-    """Build one orchestration role config from TOML payload."""
-    from lerim.runtime.provider_caps import normalize_model_name
+def _build_role(
+	raw: dict[str, Any], *, default_provider: str, default_model: str
+) -> RoleConfig:
+	"""Build a role config from TOML payload."""
+	from lerim.config.providers import normalize_model_name
 
-    provider = _to_non_empty_string(raw.get("provider")) or default_provider
-    model = _to_non_empty_string(raw.get("model")) or default_model
-    model = normalize_model_name(provider, model)
-    return LLMRoleConfig(
-        provider=provider,
-        model=model,
-        api_base=_to_non_empty_string(raw.get("api_base")),
-        fallback_models=_to_fallback_models(raw.get("fallback_models")),
-        timeout_seconds=_require_int(raw, "timeout_seconds", minimum=10),
-        max_iterations=_require_int(raw, "max_iterations", minimum=1),
-        openrouter_provider_order=_to_string_tuple(
-            raw.get("openrouter_provider_order")
-        ),
-        thinking=bool(raw.get("thinking", True)),
-        max_tokens=int(raw.get("max_tokens", 32000)),
-        max_explorers=int(raw.get("max_explorers", 4)),
-        max_turns_sync=int(raw.get("max_turns_sync", 50)),
-        max_turns_maintain=int(raw.get("max_turns_maintain", 100)),
-        max_turns_ask=int(raw.get("max_turns_ask", 30)),
-    )
+	provider = _to_non_empty_string(raw.get("provider")) or default_provider
+	model = _to_non_empty_string(raw.get("model")) or default_model
+	model = normalize_model_name(provider, model)
+	return RoleConfig(
+		provider=provider,
+		model=model,
+		api_base=_to_non_empty_string(raw.get("api_base")),
+		fallback_models=_to_fallback_models(raw.get("fallback_models")),
+		openrouter_provider_order=_to_string_tuple(raw.get("openrouter_provider_order")),
+		thinking=bool(raw.get("thinking", True)),
+		temperature=float(raw.get("temperature", 1.0)),
+		top_p=float(raw.get("top_p", 0.95)),
+		top_k=int(raw.get("top_k", 40)),
+		max_tokens=int(raw.get("max_tokens", 32000)),
+		parallel_tool_calls=bool(raw.get("parallel_tool_calls", True)),
+		max_iters_maintain=int(raw.get("max_iters_maintain", 30)),
+		max_iters_ask=int(raw.get("max_iters_ask", 30)),
+	)
 
 
-def _build_dspy_role(
-    raw: dict[str, Any], *, default_provider: str, default_model: str
-) -> DSPyRoleConfig:
-    """Build one DSPy role config from TOML payload."""
-    from lerim.runtime.provider_caps import normalize_model_name
-
-    provider = _to_non_empty_string(raw.get("provider")) or default_provider
-    model = _to_non_empty_string(raw.get("model")) or default_model
-    model = normalize_model_name(provider, model)
-    return DSPyRoleConfig(
-        provider=provider,
-        model=model,
-        api_base=_to_non_empty_string(raw.get("api_base")),
-        fallback_models=_to_fallback_models(raw.get("fallback_models")),
-        timeout_seconds=_require_int(raw, "timeout_seconds", minimum=10),
-        max_window_tokens=_require_int(raw, "max_window_tokens", minimum=1000),
-        window_overlap_tokens=_require_int(raw, "window_overlap_tokens", minimum=0),
-        openrouter_provider_order=_to_string_tuple(
-            raw.get("openrouter_provider_order")
-        ),
-        thinking=bool(raw.get("thinking", True)),
-        max_tokens=int(raw.get("max_tokens", 32000)),
-        max_workers=int(raw.get("max_workers", 4)),
-    )
-
-
-def _build_codex_role(raw: dict[str, Any]) -> CodexRoleConfig:
-	"""Build Codex filesystem sub-agent role config from TOML payload."""
-	return CodexRoleConfig(
-		provider=_to_non_empty_string(raw.get("provider")) or "opencode_go",
-		model=_to_non_empty_string(raw.get("model")) or "minimax-m2.5",
-		api_base=_to_non_empty_string(raw.get("api_base")) or "",
-		timeout_seconds=int(raw.get("timeout_seconds", 600)),
-		idle_timeout_seconds=int(raw.get("idle_timeout_seconds", 120)),
+def _build_agent_role(roles: dict[str, Any]) -> RoleConfig:
+	"""Build agent role config from TOML roles section."""
+	return _build_role(
+		_ensure_dict(roles, "agent"),
+		default_provider="openrouter",
+		default_model="qwen/qwen3-coder-30b-a3b-instruct",
 	)
 
 
@@ -515,11 +332,13 @@ def _migrate_platforms_json(platforms_path: Path) -> dict[str, str]:
 @lru_cache(maxsize=1)
 def load_config() -> Config:
     """Load effective config from TOML layers plus env API keys."""
-    # Always load ~/.lerim/.env (CWD-independent), then CWD .env as override
+    # Always load ~/.lerim/.env (CWD-independent).
+    # Optional CWD .env loading is opt-in to avoid hidden cwd coupling.
     _lerim_env = Path.home() / ".lerim" / ".env"
     if _lerim_env.is_file():
         load_dotenv(_lerim_env)
-    load_dotenv()  # CWD search (overrides ~/.lerim/.env if both exist)
+    if os.getenv("LERIM_LOAD_CWD_ENV", "").strip().lower() in ("1", "true", "yes", "on"):
+        load_dotenv()
     ensure_user_config_exists()
     toml_data, sources = _load_layers()
 
@@ -527,89 +346,50 @@ def load_config() -> Config:
     _LAST_CONFIG_SOURCES = sources
 
     data = toml_data.get("data", {})
-    memory = toml_data.get("memory", {})
-    decay = memory.get("decay", {}) if isinstance(memory.get("decay", {}), dict) else {}
     server = toml_data.get("server", {})
-    roles = (
-        toml_data.get("roles", {})
-        if isinstance(toml_data.get("roles", {}), dict)
-        else {}
-    )
-    _runtime = (  # noqa: F841 — reserved for future use
-        toml_data.get("runtime", {})
-        if isinstance(toml_data.get("runtime", {}), dict)
-        else {}
-    )
-    tracing = (
-        toml_data.get("tracing", {})
-        if isinstance(toml_data.get("tracing", {}), dict)
-        else {}
-    )
-
+    roles = _ensure_dict(toml_data, "roles")
     global_data_dir = _expand(data.get("dir"), GLOBAL_DATA_DIR)
 
-    memory_scope = (
-        _to_non_empty_string(memory.get("scope")).lower() or "project_fallback_global"
-    )
-    memory_project_dir_name = (
-        _to_non_empty_string(memory.get("project_dir_name")) or ".lerim"
-    )
-
     scope = resolve_data_dirs(
-        scope=memory_scope,
-        project_dir_name=memory_project_dir_name,
         global_data_dir=global_data_dir,
         repo_path=Path.cwd(),
     )
-    primary = scope.ordered_data_dirs[0] if scope.ordered_data_dirs else global_data_dir
 
-    memory_dir = primary / "memory"
-    index_dir = primary / "index"
+    # Infrastructure (workspace, index, locks) always in global dir.
+    # Per-project .lerim/ contains only memory/ (knowledge).
+    index_dir = global_data_dir / "index"
 
-    # Lazy import: structural circular dependency (settings -> memory_repo -> memory_record -> extract_pipeline -> settings)
-    from lerim.memory.memory_repo import build_memory_paths, ensure_memory_paths
+    # Memory dir: project-level if inside a registered project, else global.
+    memory_dir = (
+        (scope.project_data_dir / "memory")
+        if scope.project_data_dir
+        else (global_data_dir / "memory")
+    )
 
+    # Lazy import: structural circular dependency (settings -> memory_repo -> memory_record -> settings)
+    from lerim.memory.repo import (
+        build_memory_paths,
+        ensure_global_infrastructure,
+        ensure_project_memory,
+    )
+
+    # Global infrastructure: workspace, index, cache, logs
+    ensure_global_infrastructure(global_data_dir)
+
+    # Per-project memory dirs (knowledge only, no workspace/index)
     for data_root in scope.ordered_data_dirs:
-        ensure_memory_paths(build_memory_paths(data_root))
-        _ensure_project_config_exists(data_root)
+        ensure_project_memory(build_memory_paths(data_root))
 
-    lead_role = _build_llm_role(
-        roles.get("lead", {}) if isinstance(roles.get("lead", {}), dict) else {},
-        default_provider="openrouter",
-        default_model="qwen/qwen3-coder-30b-a3b-instruct",
-    )
-    extract_role = _build_dspy_role(
-        roles.get("extract", {}) if isinstance(roles.get("extract", {}), dict) else {},
-        default_provider="ollama",
-        default_model="qwen3:8b",
-    )
-    summarize_role = _build_dspy_role(
-        roles.get("summarize", {})
-        if isinstance(roles.get("summarize", {}), dict)
-        else {},
-        default_provider=extract_role.provider,
-        default_model=extract_role.model,
-    )
-    codex_role = _build_codex_role(
-        roles.get("codex", {}) if isinstance(roles.get("codex", {}), dict) else {}
-    )
+    agent_role = _build_agent_role(roles)
 
     port = _require_int(server, "port", minimum=1)
     if port > 65535:
         port = 8765
 
-    cloud = (
-        toml_data.get("cloud", {})
-        if isinstance(toml_data.get("cloud", {}), dict)
-        else {}
-    )
+    cloud = _ensure_dict(toml_data, "cloud")
 
-    agents_raw = toml_data.get("agents", {})
-    agents = _parse_string_table(agents_raw if isinstance(agents_raw, dict) else {})
-    projects_raw = toml_data.get("projects", {})
-    projects = _parse_string_table(
-        projects_raw if isinstance(projects_raw, dict) else {}
-    )
+    agents = _parse_string_table(_ensure_dict(toml_data, "agents"))
+    projects = _parse_string_table(_ensure_dict(toml_data, "projects"))
 
     # Migrate platforms.json -> [agents] if agents section is empty
     platforms_path = global_data_dir / "platforms.json"
@@ -628,27 +408,12 @@ def load_config() -> Config:
     )
 
     return Config(
-        data_dir=primary,
+        data_dir=global_data_dir,
         global_data_dir=global_data_dir,
         memory_dir=memory_dir,
         index_dir=index_dir,
-        memories_db_path=index_dir / "memories.sqlite3",
-        graph_db_path=index_dir / "graph.sqlite3",
         sessions_db_path=global_data_dir / "index" / "sessions.sqlite3",
         platforms_path=global_data_dir / "platforms.json",
-        memory_scope=memory_scope,
-        memory_project_dir_name=memory_project_dir_name,
-        decay_enabled=bool(decay.get("enabled", True)),
-        decay_days=_require_int(decay, "decay_days", minimum=30),
-        decay_min_confidence_floor=_require_float(
-            decay, "min_confidence_floor", minimum=0.0, maximum=1.0
-        ),
-        decay_archive_threshold=_require_float(
-            decay, "archive_threshold", minimum=0.0, maximum=1.0
-        ),
-        decay_recent_access_grace_days=_require_int(
-            decay, "recent_access_grace_days", minimum=0
-        ),
         server_host=_to_non_empty_string(server.get("host")) or "127.0.0.1",
         server_port=port,
         sync_interval_minutes=_require_int(server, "sync_interval_minutes", minimum=1),
@@ -657,15 +422,9 @@ def load_config() -> Config:
         ),
         sync_window_days=_require_int(server, "sync_window_days", minimum=1),
         sync_max_sessions=_require_int(server, "sync_max_sessions", minimum=1),
-        parallel_pipelines=bool(server.get("parallel_pipelines", True)),
-        lead_role=lead_role,
-        codex_role=codex_role,
-        extract_role=extract_role,
-        summarize_role=summarize_role,
-        tracing_enabled=bool(tracing.get("enabled", False))
-        or os.getenv("LERIM_TRACING", "").strip().lower() in ("1", "true", "yes", "on"),
-        tracing_include_httpx=bool(tracing.get("include_httpx", False)),
-        tracing_include_content=bool(tracing.get("include_content", True)),
+        agent_role=agent_role,
+        mlflow_enabled=os.getenv("LERIM_MLFLOW", "").strip().lower()
+        in ("1", "true", "yes", "on"),
         anthropic_api_key=_to_non_empty_string(os.environ.get("ANTHROPIC_API_KEY"))
         or None,
         openai_api_key=_to_non_empty_string(os.environ.get("OPENAI_API_KEY")) or None,
@@ -675,12 +434,8 @@ def load_config() -> Config:
         minimax_api_key=_to_non_empty_string(os.environ.get("MINIMAX_API_KEY")) or None,
         opencode_api_key=_to_non_empty_string(os.environ.get("OPENCODE_API_KEY"))
         or None,
-        provider_api_bases=_parse_string_table(
-            toml_data.get("providers", {})
-            if isinstance(toml_data.get("providers"), dict)
-            else {}
-        ),
-        auto_unload=bool((toml_data.get("providers") or {}).get("auto_unload", True)),
+        provider_api_bases=_parse_string_table(_ensure_dict(toml_data, "providers")),
+        auto_unload=bool(_ensure_dict(toml_data, "providers").get("auto_unload", True)),
         cloud_endpoint=cloud_endpoint,
         cloud_token=cloud_token,
         agents=agents,
@@ -688,23 +443,8 @@ def load_config() -> Config:
     )
 
 
-_CONFIG_OVERRIDE: Config | None = None
-
-
-def set_config_override(config: Config | None) -> None:
-    """Set a process-wide config override for isolated execution.
-
-    When set, get_config() returns this instead of the cached load_config().
-    Call set_config_override(None) to clear.
-    """
-    global _CONFIG_OVERRIDE
-    _CONFIG_OVERRIDE = config
-
-
 def get_config() -> Config:
-    """Return config override if set, otherwise cached config."""
-    if _CONFIG_OVERRIDE is not None:
-        return _CONFIG_OVERRIDE
+    """Return cached config from TOML layers + env."""
     return load_config()
 
 
@@ -775,174 +515,28 @@ def _write_config_full(data: dict[str, Any]) -> Config:
     return reload_config()
 
 
-def build_isolated_config(
-    roles_override: dict[str, dict[str, Any]], temp_data_dir: Path
-) -> Config:
-    """Build an isolated Config without any disk side effects.
-
-    Reads base TOML layers (read-only) and env API keys, deep-merges
-    roles_override into the roles section, and returns a Config with all paths
-    pointing to temp_data_dir. Does NOT call ensure_user_config_exists(),
-    ensure_memory_paths(), _ensure_project_config_exists(), or
-    save_config_patch().
-    """
-    load_dotenv()
-    toml_data, _sources = _load_layers()
-
-    memory = toml_data.get("memory", {})
-    decay = memory.get("decay", {}) if isinstance(memory.get("decay", {}), dict) else {}
-    server = toml_data.get("server", {})
-    roles = (
-        toml_data.get("roles", {})
-        if isinstance(toml_data.get("roles", {}), dict)
-        else {}
-    )
-    tracing = (
-        toml_data.get("tracing", {})
-        if isinstance(toml_data.get("tracing", {}), dict)
-        else {}
-    )
-
-    # Deep-merge roles_override into roles section
-    for role_name, overrides in roles_override.items():
-        existing = (
-            roles.get(role_name, {})
-            if isinstance(roles.get(role_name, {}), dict)
-            else {}
-        )
-        roles[role_name] = _deep_merge(existing, overrides)
-
-    lead_role = _build_llm_role(
-        roles.get("lead", {}) if isinstance(roles.get("lead", {}), dict) else {},
-        default_provider="openrouter",
-        default_model="qwen/qwen3-coder-30b-a3b-instruct",
-    )
-    extract_role = _build_dspy_role(
-        roles.get("extract", {}) if isinstance(roles.get("extract", {}), dict) else {},
-        default_provider="ollama",
-        default_model="qwen3:8b",
-    )
-    summarize_role = _build_dspy_role(
-        roles.get("summarize", {})
-        if isinstance(roles.get("summarize", {}), dict)
-        else {},
-        default_provider=extract_role.provider,
-        default_model=extract_role.model,
-    )
-    codex_role = _build_codex_role(
-        roles.get("codex", {}) if isinstance(roles.get("codex", {}), dict) else {}
-    )
-
-    port = _require_int(server, "port", minimum=1)
-    if port > 65535:
-        port = 8765
-
-    agents_raw = toml_data.get("agents", {})
-    agents = _parse_string_table(agents_raw if isinstance(agents_raw, dict) else {})
-    projects_raw = toml_data.get("projects", {})
-    projects = _parse_string_table(
-        projects_raw if isinstance(projects_raw, dict) else {}
-    )
-
-    memory_scope = (
-        _to_non_empty_string(memory.get("scope")).lower() or "project_fallback_global"
-    )
-
-    return Config(
-        data_dir=temp_data_dir,
-        global_data_dir=temp_data_dir,
-        memory_dir=temp_data_dir / "memory",
-        index_dir=temp_data_dir / "index",
-        memories_db_path=temp_data_dir / "index" / "memories.sqlite3",
-        graph_db_path=temp_data_dir / "index" / "graph.sqlite3",
-        sessions_db_path=temp_data_dir / "index" / "sessions.sqlite3",
-        platforms_path=temp_data_dir / "platforms.json",
-        memory_scope=memory_scope,
-        memory_project_dir_name=_to_non_empty_string(memory.get("project_dir_name"))
-        or ".lerim",
-        decay_enabled=bool(decay.get("enabled", True)),
-        decay_days=_require_int(decay, "decay_days", minimum=30),
-        decay_min_confidence_floor=_require_float(
-            decay, "min_confidence_floor", minimum=0.0, maximum=1.0
-        ),
-        decay_archive_threshold=_require_float(
-            decay, "archive_threshold", minimum=0.0, maximum=1.0
-        ),
-        decay_recent_access_grace_days=_require_int(
-            decay, "recent_access_grace_days", minimum=0
-        ),
-        server_host=_to_non_empty_string(server.get("host")) or "127.0.0.1",
-        server_port=port,
-        sync_interval_minutes=_require_int(server, "sync_interval_minutes", minimum=1),
-        maintain_interval_minutes=_require_int(
-            server, "maintain_interval_minutes", minimum=1
-        ),
-        sync_window_days=_require_int(server, "sync_window_days", minimum=1),
-        sync_max_sessions=_require_int(server, "sync_max_sessions", minimum=1),
-        parallel_pipelines=bool(server.get("parallel_pipelines", True)),
-        lead_role=lead_role,
-        codex_role=codex_role,
-        extract_role=extract_role,
-        summarize_role=summarize_role,
-        tracing_enabled=bool(tracing.get("enabled", False))
-        or os.getenv("LERIM_TRACING", "").strip().lower() in ("1", "true", "yes", "on"),
-        tracing_include_httpx=bool(tracing.get("include_httpx", False)),
-        tracing_include_content=bool(tracing.get("include_content", True)),
-        anthropic_api_key=_to_non_empty_string(os.environ.get("ANTHROPIC_API_KEY"))
-        or None,
-        openai_api_key=_to_non_empty_string(os.environ.get("OPENAI_API_KEY")) or None,
-        zai_api_key=_to_non_empty_string(os.environ.get("ZAI_API_KEY")) or None,
-        openrouter_api_key=_to_non_empty_string(os.environ.get("OPENROUTER_API_KEY"))
-        or None,
-        minimax_api_key=_to_non_empty_string(os.environ.get("MINIMAX_API_KEY")) or None,
-        opencode_api_key=None,
-        provider_api_bases=_parse_string_table(
-            toml_data.get("providers", {})
-            if isinstance(toml_data.get("providers"), dict)
-            else {}
-        ),
-        auto_unload=bool((toml_data.get("providers") or {}).get("auto_unload", True)),
-        cloud_endpoint="https://api.lerim.dev",
-        cloud_token=None,
-        agents=agents,
-        projects=projects,
-    )
-
-
 if __name__ == "__main__":
     """Run a real-path config smoke test and role validation checks."""
     cfg = load_config()
     assert cfg.data_dir
     assert cfg.memory_dir
     assert cfg.index_dir
-    assert cfg.memories_db_path.name == "memories.sqlite3"
-    assert cfg.lead_role.provider
-    assert cfg.lead_role.model
-    assert isinstance(cfg.lead_role.fallback_models, tuple)
-    assert cfg.extract_role.provider
-    assert cfg.extract_role.max_window_tokens >= 1000
-    assert cfg.extract_role.window_overlap_tokens >= 0
-    assert cfg.summarize_role.provider
-    assert cfg.summarize_role.max_window_tokens >= 1000
-    assert cfg.summarize_role.window_overlap_tokens >= 0
-    assert isinstance(cfg.tracing_enabled, bool)
-    assert isinstance(cfg.tracing_include_httpx, bool)
-    assert isinstance(cfg.tracing_include_content, bool)
+    assert cfg.sessions_db_path.name == "sessions.sqlite3"
+    assert cfg.agent_role.provider
+    assert cfg.agent_role.model
+    assert isinstance(cfg.agent_role.fallback_models, tuple)
+    assert isinstance(cfg.mlflow_enabled, bool)
     assert isinstance(cfg.agents, dict)
     assert isinstance(cfg.projects, dict)
     payload = cfg.public_dict()
-    assert "lead_role" in payload
-    assert "extract_role" in payload
-    assert "summarize_role" in payload
-    assert "decay_enabled" in payload
+    assert "agent_role" in payload
     assert "agents" in payload
     assert "projects" in payload
     print(
         f"""\
 Config loaded: \
 data_dir={cfg.data_dir}, \
-lead={cfg.lead_role.provider}/{cfg.lead_role.model}, \
-extract={cfg.extract_role.provider}/{cfg.extract_role.model}, \
+agent={cfg.agent_role.provider}/{cfg.agent_role.model}, \
 agents={list(cfg.agents.keys())}, \
 projects={list(cfg.projects.keys())}"""
     )

@@ -5,35 +5,12 @@
 #   LERIM_TEST_PROVIDER  — provider for all roles
 #   LERIM_TEST_MODEL     — model for all roles
 
-[memory]
-scope = "global_only"
-
-[roles.lead]
+[roles.agent]
 provider = "minimax"
 model = "MiniMax-M2.5"
 fallback_models = ["zai:glm-4.7"]
-timeout_seconds = 300
-max_iterations = 10
-
-[roles.explorer]
-provider = "minimax"
-model = "MiniMax-M2.5"
-fallback_models = ["zai:glm-4.7"]
-timeout_seconds = 180
-max_iterations = 8
-
-[roles.extract]
-provider = "minimax"
-model = "MiniMax-M2.5"
-fallback_models = ["zai:glm-4.5-air"]
-timeout_seconds = 180
-max_window_tokens = 300000
-window_overlap_tokens = 5000
-
-[roles.summarize]
-provider = "minimax"
-model = "MiniMax-M2.5"
-fallback_models = ["zai:glm-4.5-air"]
-timeout_seconds = 180
-max_window_tokens = 300000
-window_overlap_tokens = 5000
+max_iters_maintain = 30
+max_iters_ask = 30
+thinking = true
+temperature = 1.0
+max_tokens = 32000

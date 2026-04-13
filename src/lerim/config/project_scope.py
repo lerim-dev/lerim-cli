@@ -30,21 +30,16 @@ class ScopeResolution:
 
 def resolve_data_dirs(
     *,
-    scope: str,
-    project_dir_name: str,
     global_data_dir: Path,
     repo_path: Path | None = None,
 ) -> ScopeResolution:
-    """Resolve effective memory data roots based on scope mode and repository root."""
-    scope = str(scope or "project_fallback_global").strip().lower()
+    """Resolve project + global data directories (project-first, global fallback)."""
     project_root = git_root_for(repo_path)
-    project_data_dir = (project_root / project_dir_name).resolve() if project_root else None
+    project_data_dir = (project_root / ".lerim").resolve() if project_root else None
     ordered: list[Path] = []
 
-    if scope == "global_only" or project_data_dir is None:
+    if project_data_dir is None:
         ordered = [global_data_dir]
-    elif scope == "project_only":
-        ordered = [project_data_dir]
     else:
         ordered = [project_data_dir]
         if project_data_dir != global_data_dir:
@@ -95,8 +90,6 @@ if __name__ == "__main__":
     """Run a real-path smoke test for scope resolution logic."""
     cwd = Path.cwd()
     resolved = resolve_data_dirs(
-        scope="project_fallback_global",
-        project_dir_name=".lerim",
         global_data_dir=Path.home() / ".lerim",
         repo_path=cwd,
     )

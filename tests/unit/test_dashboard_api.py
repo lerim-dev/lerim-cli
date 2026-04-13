@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 
 
-from lerim.app.dashboard import (
+from lerim.server.httpd import (
     _compute_stats,
-    _detect_primitive,
+    _detect_type,
     _extract_session_details,
     _filter_memories,
     _parse_int,
@@ -114,23 +114,23 @@ def test_extract_session_details_reads_cursor_model(tmp_path):
 
 
 def test_filter_memories_by_query():
-    """_filter_memories with query matches title/body."""
+    """_filter_memories with query matches name/body/description."""
     items = [
-        {"title": "JWT auth decision", "_body": "use HS256", "tags": []},
-        {"title": "Queue fix", "_body": "atomic claims", "tags": []},
+        {"name": "JWT auth decision", "_body": "use HS256", "tags": []},
+        {"name": "Queue fix", "_body": "atomic claims", "tags": []},
     ]
     result = _filter_memories(
         items, query="JWT", type_filter=None, state_filter=None, project_filter=None
     )
     assert len(result) == 1
-    assert result[0]["title"] == "JWT auth decision"
+    assert result[0]["name"] == "JWT auth decision"
 
 
 def test_filter_memories_by_type():
     """_filter_memories with type_filter returns only matching type."""
     items = [
-        {"title": "A", "_path": "/memory/decisions/a.md", "tags": []},
-        {"title": "B", "_path": "/memory/learnings/b.md", "tags": []},
+        {"name": "A", "type": "decision", "tags": []},
+        {"name": "B", "type": "learning", "tags": []},
     ]
     result = _filter_memories(
         items,
@@ -140,7 +140,7 @@ def test_filter_memories_by_type():
         project_filter=None,
     )
     assert len(result) == 1
-    assert result[0]["title"] == "A"
+    assert result[0]["name"] == "A"
 
 
 def test_serialize_memory():
@@ -165,17 +165,15 @@ def test_graph_payload_construction():
     """_build_memory_graph_payload is callable (note: has a known bug returning None)."""
     # This is a known bug in the codebase - the function doesn't return the dict it builds.
     # We just verify it doesn't crash on import.
-    from lerim.app.dashboard import _build_memory_graph_payload
+    from lerim.server.httpd import _build_memory_graph_payload
 
     assert callable(_build_memory_graph_payload)
 
 
-def test_detect_primitive_from_path():
-    """_detect_primitive detects decision/learning/summary from path."""
-    assert _detect_primitive({"_path": "/memory/decisions/auth.md"}) == "decision"
-    assert (
-        _detect_primitive({"_path": "/memory/summaries/20260220/sum.md"}) == "summary"
-    )
-    assert _detect_primitive({"_path": "/memory/learnings/queue.md"}) == "learning"
-    # Default fallback
-    assert _detect_primitive({"_path": "/other/file.md"}) == "learning"
+def test_detect_type_from_type():
+    """_detect_type reads type from frontmatter 'type' field."""
+    assert _detect_type({"type": "decision"}) == "decision"
+    assert _detect_type({"type": "summary"}) == "summary"
+    assert _detect_type({"type": "learning"}) == "learning"
+    # Default fallback when type is absent
+    assert _detect_type({"_path": "/other/file.md"}) == "project"

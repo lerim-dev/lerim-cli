@@ -4,15 +4,51 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-03-25
+> Historical entries below are point-in-time snapshots. The current runtime architecture is PydanticAI-only.
+
+## [Unreleased]
+
+- No entries yet.
+
+## [0.1.72] - 2026-04-13
+
+### Fixed
+
+- Restored `build_test_ctx` compatibility helper in `lerim.agents.tools`, fixing `tests/unit/test_tools.py` import errors in CI.
+- Cleaned up Ruff violations in unit tests (unused imports and ambiguous loop variable names), so `CI / unit-tests` is green again.
+- Preserved queue project fallback semantics while removing an unused exception binding in API project resolution.
+
+## [0.1.71] - 2026-04-13
+
+### Added
+
+- Unified status dashboard output for `lerim status` and `lerim status --live` (same sections, live mode only refreshes).
+- Per-project stream visibility in status (`projects[]`) plus timeline activity (`recent_activity[]`) from sync + maintain runs.
+- New `lerim unscoped` command to inspect indexed sessions without project mapping.
+- Queue filtering split into exact project match (`--project`) and substring match (`--project-like`).
 
 ### Changed
 
-- **Migrated from PydanticAI to OpenAI Agents SDK** -- the lead agent now runs on the OpenAI Agents SDK. Non-OpenAI providers are supported via `ResponsesProxy` (translates Responses API to Chat Completions via LiteLLM).
-- **Removed explorer subagent** -- search, read, and writes go through OpenAI Agents SDK tools on the lead agent (e.g. `read_file`, `list_files`, `memory_search`, `write_memory`) instead of a nested explorer.
+- Default read scope for `ask`, `status`, and `memory list` is now all registered projects, with explicit `--scope project --project ...` for narrowing.
+- Status output now includes stronger action hints with full commands (`lerim retry ...`, `lerim skip ...`, `lerim queue --project ...`).
+- Canonical run telemetry now stored in `service_runs.details_json` with normalized metrics (`metrics_version=1`, sync/maintain totals, per-project metrics, events), while keeping compatibility fields for older consumers.
+
+### Fixed
+
+- Live status activity now surfaces currently running sync work so the activity panel no longer appears frozen during long cycles.
+- Fixed maintain runtime failure caused by undefined `index_path`.
+
+## [0.2.0] - 2026-03-25
+
+_Historical note: this release snapshot was later superseded by the PydanticAI-only runtime noted above._
+
+### Changed
+
+- **Migrated to a prior ReAct stack** -- the lead agent moved off the original Pydantic flow onto role-specific ReAct modules at that time.
+- **Removed explorer subagent** -- search, read, and writes moved onto lead-agent tool functions (`read_file`, `list_files`, `scan_memory_manifest`, `write_memory`) instead of a nested explorer.
 - Removed `max_explorers` config option (no longer applicable).
 - Removed `[roles.explorer]` config section.
-- Runtime module reorganized: `agent.py` replaced by `oai_agent.py`, `tools.py`/`subagents.py` replaced by `oai_tools.py`, `oai_providers.py`, `oai_context.py`, `responses_proxy.py`, `helpers.py`.
+- Runtime module reorganized: `agent.py` replaced by `runtime.py`, `tools.py`/`subagents.py` replaced by `tools.py`, `providers.py`, `context.py`, `helpers.py`.
 
 ### Removed
 
@@ -24,20 +60,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Evaluation framework** — dataset pipeline to build benchmarks from real traces, LLM-as-judge scoring with Claude CLI / Codex / OpenCode, per-model eval configs (MiniMax, Ollama Qwen 3.5 4B/9B/35B), and benchmark script for model comparison.
 - **Trace compaction** — Claude and Codex adapters strip noise lines (progress updates, file snapshots, context dumps) before extraction. Claude ~80% reduction, Codex ~65%. Cached in `~/.lerim/cache/{claude,codex}/`.
-- **Parallel window processing** — DSPy extraction and summarization pipelines process transcript windows in parallel via `ThreadPoolExecutor`. Controlled by `max_workers` (default: 4).
+- **Parallel window processing** — extraction and summarization pipelines process transcript windows in parallel via `ThreadPoolExecutor`. Controlled by `max_workers` (default: 4).
 - **JSONL-boundary windowing** — transcript windows split on line boundaries instead of mid-JSON.
 - **`max_explorers` config** — controls parallel explorer subagents per lead turn (default: 4).
 - **`max_workers` config** — controls parallel window processing threads (default: 4).
 - **`thinking` config** — controls model reasoning mode on all four roles (default: true).
-- Fallback model support in DSPy pipelines (e.g. MiniMax -> Z.AI on rate limits).
+- Fallback model support in extraction/summarization pipelines (e.g. MiniMax -> Z.AI on rate limits).
 - 455 unit tests, all passing.
 
 ### Changed
 
 - **Pipeline optimization** — switched from `ChainOfThought` to `Predict` for fewer failures and lower latency. `XMLAdapter` hardcoded (94% success rate).
-- **Simplified DSPy signatures** — removed metadata/metrics from LLM inputs, slimmed output schemas.
+- **Simplified extraction signatures** — removed metadata/metrics from LLM inputs, slimmed output schemas.
 - **ID-based session skip** — run ID membership check instead of SHA-256 content hashing.
-- DSPy pipelines use `Refine(N=2)` for retry on validation failure.
+- Extraction pipelines use `Refine(N=2)` for retry on validation failure.
 - Fixed conftest skip scoping, `_toml_value` list serialization, integration test provider config.
 - Reduced xdist workers from auto(16) to 4 for API rate limit safety.
 
@@ -47,7 +83,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Ollama lifecycle management** — automatic model load/unload before and after each sync/maintain cycle. Controlled by `auto_unload` in `[providers]` (default: true).
 - **vllm-mlx provider** — Apple Silicon local model support via `provider = "mlx"`.
-- **LiteLLM proxy integration** — routes Ollama think-off requests through LiteLLM for PydanticAI compatibility.
+- **Proxy bridge integration** — routes Ollama think-off requests through a proxy bridge for PydanticAI compatibility.
 - Docker networking for host Ollama access (`host.docker.internal`).
 - Eval runners for sync and maintain pipelines with judge prompts and trace files.
 - Eval configs organized under `evals/configs/`.
@@ -107,7 +143,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- **Per-run LLM cost tracking** via OpenRouter's `usage.cost` response field. PydanticAI calls captured via httpx response hook; DSPy calls captured from LM history. Cost logged in `activity.log` and returned in API responses.
+- **Per-run LLM cost tracking** via OpenRouter's `usage.cost` response field. Model calls were captured from both HTTP hooks and provider histories. Cost logged in `activity.log` and returned in API responses.
 - Activity log format: `timestamp | op | project | stats | $cost | duration`.
 - Multi-project maintain (iterates all registered projects).
 
@@ -182,8 +218,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Continual learning layer for coding agents and projects.
 - Platform adapters for Claude Code, Codex CLI, Cursor, and OpenCode.
-- Memory extraction pipeline using DSPy with transcript windowing.
-- Trace summarization pipeline using DSPy with transcript windowing.
+- Memory extraction pipeline with transcript windowing.
+- Trace summarization pipeline with transcript windowing.
 - PydanticAI lead agent with read-only explorer subagent.
 - Three CLI flows: `sync`, `maintain`, and `ask`.
 - Daemon mode for continuous sync and maintain loop.

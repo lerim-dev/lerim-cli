@@ -89,29 +89,6 @@ def test_service_run_record_and_latest():
     assert latest["job_type"] == "extract"
 
 
-def test_stale_job_reclamation():
-    """claim_session_jobs reclaims stale running jobs."""
-    from lerim.sessions.catalog import _connect
-
-    _seed_session("stale-job")
-    enqueue_session_job(
-        "stale-job", session_path="/tmp/stale.jsonl", repo_path="/tmp/project"
-    )
-    # First claim picks up the pending job
-    jobs = claim_session_jobs(limit=1, timeout_seconds=30)
-    assert len(jobs) >= 1
-    # Backdate claimed_at/heartbeat_at so the job looks stale
-    with _connect() as conn:
-        conn.execute(
-            "UPDATE session_jobs SET claimed_at = '2020-01-01T00:00:00+00:00', "
-            "heartbeat_at = '2020-01-01T00:00:00+00:00' WHERE run_id = 'stale-job'"
-        )
-        conn.commit()
-    # Second claim should reclaim the stale running job
-    jobs2 = claim_session_jobs(limit=1, timeout_seconds=30)
-    assert len(jobs2) >= 1
-
-
 def test_concurrent_init_safety(tmp_path, monkeypatch):
     """Multiple threads calling init_sessions_db don't crash."""
     import time

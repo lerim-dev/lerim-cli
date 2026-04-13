@@ -33,7 +33,9 @@ site/
 specs/
 .lerim/
 .playwright-cli/
-.logfire/
+mlruns/
+mlartifacts/
+mlflow.db
 .pytest_cache/
 .ruff_cache/
 .claude/
@@ -62,3 +64,5 @@ CLAUDE.md
 evals/dataset/catalog.json
 evals/dataset/manifest.json
 evals/dataset/traces/
+.coverage
+.DS_Store

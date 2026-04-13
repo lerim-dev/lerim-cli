@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from lerim import __version__
-from lerim.app.api import (
+from lerim.server.api import (
     GHCR_IMAGE,
     _generate_compose_yml,
     api_up,
@@ -24,7 +24,7 @@ from tests.helpers import make_config
 def _isolate_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Monkeypatch reload_config so compose generation uses a temp config."""
     cfg = make_config(tmp_path)
-    monkeypatch.setattr("lerim.app.api.reload_config", lambda: cfg)
+    monkeypatch.setattr("lerim.server.api.reload_config", lambda: cfg)
 
 
 def test_default_compose_uses_ghcr_image() -> None:
@@ -37,7 +37,7 @@ def test_default_compose_uses_ghcr_image() -> None:
 def test_build_local_uses_build_directive(monkeypatch: pytest.MonkeyPatch) -> None:
     """build_local=True emits a build directive instead of an image directive."""
     fake_root = Path("/fake/lerim-root")
-    monkeypatch.setattr("lerim.app.api._find_package_root", lambda: fake_root)
+    monkeypatch.setattr("lerim.server.api._find_package_root", lambda: fake_root)
     content = _generate_compose_yml(build_local=True)
     assert f"build: {fake_root}" in content
     assert "image:" not in content
@@ -45,7 +45,7 @@ def test_build_local_uses_build_directive(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_build_local_no_dockerfile_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """build_local=True raises FileNotFoundError when Dockerfile is missing."""
-    monkeypatch.setattr("lerim.app.api._find_package_root", lambda: None)
+    monkeypatch.setattr("lerim.server.api._find_package_root", lambda: None)
     with pytest.raises(FileNotFoundError, match="Cannot find Dockerfile"):
         _generate_compose_yml(build_local=True)
 
@@ -66,7 +66,7 @@ def test_version_tag_matches_dunder_version() -> None:
 
 def test_api_up_docker_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     """api_up returns an error dict when Docker is not available."""
-    monkeypatch.setattr("lerim.app.api.docker_available", lambda: False)
+    monkeypatch.setattr("lerim.server.api.docker_available", lambda: False)
     result = api_up()
     assert "error" in result
     assert "Docker" in result["error"]
@@ -74,8 +74,8 @@ def test_api_up_docker_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_api_up_build_local_no_dockerfile(monkeypatch: pytest.MonkeyPatch) -> None:
     """api_up(build_local=True) returns error dict when Dockerfile is missing."""
-    monkeypatch.setattr("lerim.app.api.docker_available", lambda: True)
-    monkeypatch.setattr("lerim.app.api._find_package_root", lambda: None)
+    monkeypatch.setattr("lerim.server.api.docker_available", lambda: True)
+    monkeypatch.setattr("lerim.server.api._find_package_root", lambda: None)
     result = api_up(build_local=True)
     assert "error" in result
     assert "Dockerfile" in result["error"]
@@ -127,7 +127,7 @@ def test_compose_mounts_lerim_dirs_only(tmp_path, monkeypatch) -> None:
     from dataclasses import replace
     cfg = make_config(tmp_path)
     cfg = replace(cfg, projects={"test": str(tmp_path / "myproject")})
-    monkeypatch.setattr("lerim.app.api.reload_config", lambda: cfg)
+    monkeypatch.setattr("lerim.server.api.reload_config", lambda: cfg)
 
     content = _generate_compose_yml(build_local=False)
     # Should mount project/.lerim, not project/ directly
@@ -144,7 +144,7 @@ def test_compose_agent_dirs_read_only(tmp_path, monkeypatch) -> None:
     cfg = make_config(tmp_path)
     agent_path = str(tmp_path / "sessions")
     cfg = replace(cfg, agents={"claude": agent_path})
-    monkeypatch.setattr("lerim.app.api.reload_config", lambda: cfg)
+    monkeypatch.setattr("lerim.server.api.reload_config", lambda: cfg)
 
     content = _generate_compose_yml(build_local=False)
     assert f"{agent_path}:{agent_path}:ro" in content

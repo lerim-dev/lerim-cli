@@ -1,20 +1,9 @@
 # Lerim default configuration — shipped with the package.
-# Override in ~/.lerim/config.toml (user) or <repo>/.lerim/config.toml (project).
-# API keys come from environment variables only.
+# Override in ~/.lerim/config.toml (user)
+# API keys come from environment variables only in ~/.lerim/.env
 
 [data]
 dir = "~/.lerim"
-
-[memory]
-scope = "project_fallback_global"   # project_fallback_global | project_only | global_only
-project_dir_name = ".lerim"
-
-[memory.decay]
-enabled = true
-decay_days = 180                    # days of no access before full decay
-min_confidence_floor = 0.1          # decay never drops below this multiplier
-archive_threshold = 0.2             # effective confidence below this → archive candidate
-recent_access_grace_days = 30       # recently accessed memories skip archiving
 
 [server]
 host = "127.0.0.1"
@@ -23,67 +12,46 @@ sync_interval_minutes = 30          # sync hot path interval
 maintain_interval_minutes = 60       # maintain cold path interval
 sync_window_days = 7
 sync_max_sessions = 50
-parallel_pipelines = true               # run extract + summarize in the same tool turn (set false for local/Ollama models)
 
-[roles.lead]
-provider = "opencode_go"               # opencode_go | minimax | zai | openrouter | openai | ollama
-model = "minimax-m2.5"                 # OpenCode Go models: minimax-m2.7, minimax-m2.5, kimi-k2.5, glm-5
+[roles.agent]
+provider = "minimax"               # opencode_go | minimax | zai | openrouter | openai | ollama
+model = "MiniMax-M2.7"                 # package default model for minimax provider
 api_base = ""
 # Model names are auto-normalized per provider (e.g. minimax-m2.5 → MiniMax-M2.5 for minimax provider).
-fallback_models = ["minimax:MiniMax-M2.5"]  # auto-switch on quota/rate-limit errors
-timeout_seconds = 600
-max_iterations = 30
-max_turns_sync = 50                    # max tool calls for lead agent in sync flow
-max_turns_maintain = 100               # max tool calls for lead agent in maintain flow
-max_turns_ask = 30                     # max tool calls for lead agent in ask flow
+fallback_models = []  # disabled for now — ensure exact model is used, no silent fallback
+# PydanticAI single-pass sync auto-scales its request budget from trace
+# size via lerim.agents.tools.compute_request_budget(trace_path). Small
+# traces get the 50-turn floor; 2000-line traces get ~65; pathological
+# inputs clamp at 100. The formula lives in tools.py and is the single
+# source of truth — no per-pass limits in config.
+max_iters_maintain = 50                # max request turns for maintain flow
+max_iters_ask = 20                     # max request turns for ask flow
 openrouter_provider_order = []
 thinking = true
-max_tokens = 32000
-
-[roles.extract]
-provider = "opencode_go"
-model = "minimax-m2.5"                 # DSPy extraction model
-api_base = ""
-fallback_models = []
-timeout_seconds = 300
-max_window_tokens = 100000
-window_overlap_tokens = 5000
-openrouter_provider_order = []
-thinking = true
-max_tokens = 32000
-max_workers = 4
-
-[roles.summarize]
-provider = "opencode_go"
-model = "minimax-m2.5"                 # DSPy summarization model
-api_base = ""
-fallback_models = []
-timeout_seconds = 300
-max_window_tokens = 100000
-window_overlap_tokens = 5000
-openrouter_provider_order = []
-thinking = true
-max_tokens = 32000
+# MiniMax-M2 official sampling preset (from HuggingFace model card):
+# temperature=1.0, top_p=0.95, top_k=40. These are for "agent/tool-calling
+# tasks" per the vendor recommendation. See also MiniMax docs re valid
+# temperature range (0.0, 1.0] — clamped in _build_model_settings.
+temperature = 1.0
+top_p = 0.95
+top_k = 40                              # passed via extra_body (not a standard OpenAI param)
+max_tokens = 32000                      # completion budget passed to the model
+parallel_tool_calls = true              # enable parallel tool emission when the model supports it
 
 [providers]
 # Default API base URLs per provider.
 # Override here to point all roles using that provider at a different endpoint.
 # Per-role api_base (under [roles.*]) takes precedence over these defaults.
 minimax = "https://api.minimax.io/v1"
+minimax_anthropic = "https://api.minimax.io/anthropic"
 zai = "https://api.z.ai/api/coding/paas/v4"
 openai = "https://api.openai.com/v1"
 openrouter = "https://openrouter.ai/api/v1"
 opencode_go = "https://opencode.ai/zen/go/v1"
 ollama = "http://127.0.0.1:11434"
 # Docker: use "http://host.docker.internal:11434" if Ollama runs on the host.
-litellm_proxy = "http://127.0.0.1:4000"
 mlx = "http://127.0.0.1:8000/v1"
 auto_unload = true                     # unload Ollama models after each sync/maintain cycle to free RAM
-
-[tracing]
-enabled = false                          # set true or LERIM_TRACING=1 to enable
-include_httpx = false                    # capture raw HTTP request/response bodies
-include_content = true                   # include prompt/completion text in spans
 
 [cloud]
 endpoint = "https://api.lerim.dev"
@@ -99,25 +67,3 @@ endpoint = "https://api.lerim.dev"
 [projects]
 # Map project short names to absolute host paths.
 # my-project = "~/codes/my-project"
-
-# --- Planned features (uncomment when implemented) ---
-# [embeddings]
-# provider = "local"
-# model = "Alibaba-NLP/gte-modernbert-base"
-# chunk_tokens = 800
-# chunk_overlap_tokens = 200
-# max_input_tokens = 8192
-
-# [search]
-# mode = "files"                       # files | fts | hybrid
-# enable_fts = false
-# enable_vectors = false
-# enable_graph = true
-# graph_depth = 1
-# graph_export = false
-
-# [paths]
-# claude_dir = "~/.claude/projects"
-# codex_dir = "~/.codex/sessions"
-# opencode_dir = "~/.local/share/opencode"
-# cursor_dir = "~/Library/Application Support/Cursor/User/globalStorage"

@@ -1,14 +1,24 @@
-# Web UI (Lerim Cloud)
+# Dashboard (Coming Soon)
 
-The interactive web UI for Lerim — sessions, memories, pipeline, and settings — is **not** bundled in `lerim-cli`. It lives in the **[lerim-cloud](https://github.com/lerim-dev/lerim-cloud)** repository and is deployed at **[lerim.dev](https://lerim.dev)**.
+The dashboard UI is not released yet.
 
-The `lerim` process still runs a **local JSON API** on port **8765** (default) when you use `lerim up` or `lerim serve`. The CLI (`lerim ask`, `lerim sync`, …) uses that API. Opening `http://localhost:8765/` without bundled static assets shows a short stub page with a link to Lerim Cloud.
+For now, use the CLI and local API directly:
 
 ```bash
-lerim dashboard   # print local API URL + Cloud web UI hint
+lerim status
+lerim ask "What changed?"
+lerim sync
+lerim maintain
+```
+
+The local API is available on port `8765` (default) when you run `lerim up` or `lerim serve`.
+
+```bash
+curl http://localhost:8765/api/health
 ```
 
 ## Related
 
 - [CLI: lerim serve](../cli/serve.md) — local API + daemon loop
-- [CLI: lerim dashboard](../cli/dashboard.md) — print URLs
+- [CLI: lerim dashboard](../cli/dashboard.md) — prints CLI alternatives
+- [CLI: lerim status](../cli/status.md) — runtime overview

@@ -6,6 +6,7 @@ Lerim has two runtime paths that keep your memory store accurate and clean:
 - **Maintain** (cold path) -- refines existing memories offline
 
 Both run automatically in the daemon loop and can also be triggered manually.
+Both use the same PydanticAI runtime and the `[roles.agent]` role model.
 
 ---
 
@@ -16,9 +17,8 @@ The sync path turns raw agent session transcripts into structured memories:
 1. **Discover** -- adapters scan session directories for new sessions within the time window
 2. **Index** -- new sessions are cataloged in `sessions.sqlite3`
 3. **Match to project** -- sessions matching a registered project are enqueued; unmatched sessions are indexed but not extracted
-4. **Compact and extract** -- traces are compacted (tool outputs stripped), then DSPy extracts decision/learning candidates
-5. **Deduplicate** -- the lead agent compares candidates against existing memories and decides: add, update, or skip
-6. **Write** -- new memories and a session summary are saved to `.lerim/memory/`
+4. **Compact** -- traces are compacted (tool outputs stripped) and cached
+5. **Extract flow** -- the PydanticAI extraction agent (`[roles.agent]`) reads the trace and uses memory tools (`read`, `grep`, `note`, `prune`, `write`, `edit`, `verify_index`) to write or edit memories, update `index.md`, and save a session summary
 
 ### Time window
 
@@ -44,36 +44,20 @@ lerim sync --max-sessions 10         # limit batch size
 
 The maintain path runs offline refinement over stored memories, iterating over all registered projects:
 
-1. **Scan** -- reads all active memories in the project
-2. **Merge duplicates** -- combines memories covering the same concept into a single stronger entry
-3. **Archive low-value** -- soft-deletes memories with effective confidence below the archive threshold (default: 0.2)
-4. **Consolidate** -- combines related memories into richer entries
-5. **Apply decay** -- reduces confidence of memories not accessed recently
+1. **Scan** -- `scan()` and optional reads of summaries / `index.md`
+2. **Merge duplicates** -- edit or archive redundant markdown files
+3. **Archive low-value** -- `archive()` moves files to `memory/archived/`
+4. **Consolidate** -- combine related topics via `edit()` / `write()`
+5. **Re-index** -- `verify_index()` checks consistency; the agent uses `edit("index.md", ...)` to refresh the memory index when needed
 
----
+### Request turn limits
 
-## Memory decay
+The maintain and ask flows use explicit request-turn budgets from config:
 
-Decay keeps the memory store focused on relevant knowledge by reducing confidence of unaccessed memories over time.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `decay_days` | `180` | Days of no access before full decay |
-| `min_confidence_floor` | `0.1` | Decay never drops below this |
-| `archive_threshold` | `0.2` | Below this, memory is archived during maintain |
-| `recent_access_grace_days` | `30` | Recently accessed memories skip archiving |
-
-```toml
-[memory.decay]
-enabled = true
-decay_days = 180
-min_confidence_floor = 0.1
-archive_threshold = 0.2
-recent_access_grace_days = 30
-```
-
-!!! tip "Accessing memories resets decay"
-    Querying memories with `lerim ask` or `lerim memory search` updates access timestamps. Frequently useful memories naturally stay alive.
+| Flow | Config key | Purpose |
+|------|------------|---------|
+| Maintain | `max_iters_maintain` | Caps maintain agent request turns per run |
+| Ask | `max_iters_ask` | Caps ask agent request turns per query |
 
 ---
 
@@ -81,9 +65,9 @@ recent_access_grace_days = 30
 
 The daemon runs sync and maintain on independent intervals:
 
-| Path | Config key | Default |
+| Path | Config key | Default (see `default.toml`) |
 |------|------------|---------|
-| Sync | `sync_interval_minutes` | `10` |
+| Sync | `sync_interval_minutes` | `30` |
 | Maintain | `maintain_interval_minutes` | `60` |
 
 Both trigger immediately on daemon startup, then repeat at their configured intervals.
@@ -120,7 +104,7 @@ lerim maintain --dry-run             # preview without writing
 
     ---
 
-    Primitives, lifecycle, and confidence decay.
+    Types, layout, and lifecycle.
 
     [:octicons-arrow-right-24: Memory model](memory-model.md)
 
@@ -128,7 +112,7 @@ lerim maintain --dry-run             # preview without writing
 
     ---
 
-    Full TOML config reference including intervals and decay.
+    Full TOML config reference including daemon intervals.
 
     [:octicons-arrow-right-24: Configuration](../configuration/overview.md)
 

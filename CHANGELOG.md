@@ -5,11 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.72] - 2026-04-13
+
+### Fixed
+- CI `unit-tests` pipeline now passes again after restoring missing test compatibility helper `build_test_ctx` in `lerim.agents.tools`.
+- Addressed Ruff failures in unit tests (unused imports and ambiguous loop variable names), so release branches no longer fail lint before tests run.
+- Kept queue project filter fallback behavior while removing unused exception binding in API path resolution.
+
+## [0.1.71] - 2026-04-13
+
+### Added
+- `lerim status --live` now uses the same data and renderer as snapshot mode, with periodic refresh only as the difference.
+- New status payload fields for richer operations visibility:
+  - `projects[]` per-project memory/queue/blocker summary
+  - `recent_activity[]` timeline including `sync` and `maintain`
+  - `unscoped_sessions` totals by agent
+- New `lerim unscoped` command to inspect indexed sessions that do not map to a registered project.
+- Queue filters now support exact project matching (`--project`) and explicit substring matching (`--project-like`).
+
+### Changed
+- Status UI redesigned for clarity:
+  - project stream table (`blocked` / `running` / `queued` / `healthy`)
+  - explicit “What These Terms Mean” section
+  - actionable “What To Do Next” section with full `lerim ...` commands
+  - activity panel (sync + maintain)
+- Read/query defaults now use all registered projects unless explicitly narrowed:
+  - `lerim status --scope all|project --project ...`
+  - `lerim ask --scope all|project --project ...`
+  - `lerim memory list --scope all|project --project ...`
+- Canonical run telemetry is now written in `service_runs.details_json` with normalized keys (`metrics_version=1`, sync/maintain totals, per-project metrics, events) while preserving legacy compatibility fields.
+
+### Fixed
+- Live status activity no longer appears stale during long in-flight sync runs; running queue jobs are now surfaced in `recent_activity`.
+- Fixed maintain runtime error (`name 'index_path' is not defined`) that caused maintain runs to fail.
+
 ## [0.1.70] - 2026-03-28
 
 ### Quality Improvements
 - **+41% composite quality score** via Layer 1 AutoResearch optimization
-- ChainOfThought for DSPy extraction pipeline (biggest single improvement)
+- ChainOfThought for the prior extraction pipeline (biggest single improvement)
 - Explicit dedup classification thresholds (0.7/0.4) in sync prompt
 - Improved MemoryCandidate schema field descriptions for better output consistency
 - Tighter post-extraction body filter (30→50 chars minimum)
@@ -28,22 +62,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Cleanup
 - Removed stale Codex tool references from ask prompt
-- Cleaned up ResponsesProxy references in internal docs
+- Cleaned up stale OAI SDK / ResponsesProxy references in internal docs
 
 ## [0.1.69] - 2026-03-25
 
 ### Breaking
 
-- Removed PydanticAI dependency — all agent operations now use OpenAI Agents SDK.
+- Removed PydanticAI dependency -- all agent operations now use a ReAct runtime.
 - Removed explorer subagent — replaced by Codex filesystem sub-agent.
 - Removed custom filesystem tools (read, write, edit, glob, grep) — Codex handles all filesystem ops.
 - Removed `[roles.explorer]` config section (kept in default.toml for compatibility but unused).
 
 ### Added
 
-- OpenAI Agents SDK with LitellmModel for multi-provider support (MiniMax, ZAI, OpenRouter, OpenAI, Ollama, MLX).
+- ReAct runtime with a provider-agnostic LM wrapper for multi-provider support (MiniMax, ZAI, OpenRouter, OpenAI, Ollama, MLX).
 - Codex tool as intelligent filesystem sub-agent with kernel-level sandboxing.
-- ResponsesProxy — built-in Responses API → Chat Completions proxy for non-OpenAI providers (no external proxy needed).
+- Unified `providers.py` -- all providers use the same LM wrapper path (no proxy layer needed).
 - Cross-session intelligence in maintain: signal amplification, contradiction detection, gap detection.
 - Cross-agent knowledge synthesis: detects patterns across Claude, Cursor, Codex, OpenCode sessions.
 - Hot-memory curation: auto-generated `.lerim/hot-memory.md` (~2000 tokens) with Active Decisions, Key Learnings, Recent Context, Watch Out.
@@ -70,7 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Parallelism support**: three config knobs control concurrent execution:
-  - `max_workers` in `[roles.extract]`: parallel extraction window processing via ThreadPoolExecutor (each thread gets its own DSPy LM instances for thread safety).
+  - `max_workers` in `[roles.extract]`: parallel extraction window processing via ThreadPoolExecutor (each thread gets its own LM instance for thread safety).
   - `max_explorers` in `[roles.explorer]`: concurrent explorer subagent calls per lead turn.
   - `parallel_pipelines` in `[server]`: run extract + summarize pipelines in the same tool turn.
 - **Async explore tool**: explorer subagent changed from sync (`run_sync`) to async (`await agent.run`), enabling true concurrent dispatch via PydanticAI's `asyncio.create_task`.
@@ -85,7 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Ollama lifecycle management**: automatic model load/unload around sync and maintain cycles. Models are warm-loaded into GPU/RAM before each cycle and unloaded after (`keep_alive: 0`) to free 5-10 GB of memory between runs. Controlled by `auto_unload = true` in `[providers]`.
-- **LiteLLM proxy support**: new `litellm_proxy` provider base URL in `[providers]` for routing PydanticAI OpenAI-format calls through LiteLLM to Ollama's native API (enables thinking mode control).
+- **Proxy bridge support**: new proxy provider base URL in `[providers]` for routing PydanticAI OpenAI-format calls to Ollama's native API (enables thinking mode control).
 - **Eval framework**: four eval pipelines (`extraction`, `summarization`, `sync`, `maintain`) with LLM-as-judge scoring, config-driven model comparison, and `bench_models.sh` multi-model benchmarking script.
 - Eval configs for Ollama models (Qwen3.5 4B/9B, thinking/non-thinking) and MiniMax-M2.5 cloud baseline.
 - Synthetic eval traces and judge prompt templates for all four pipelines.
@@ -144,8 +178,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Same-path volume mounting for zero path translation between host and container.
 - Continual learning layer for coding agents and projects.
 - Platform adapters for Claude Code, Codex CLI, Cursor, and OpenCode.
-- Memory extraction pipeline using DSPy ChainOfThought with transcript windowing to extract decisions and learnings from coding session traces.
-- Trace summarization pipeline using DSPy ChainOfThought with transcript windowing to produce structured summaries with YAML frontmatter.
+- Memory extraction pipeline using ChainOfThought with transcript windowing to extract decisions and learnings from coding session traces.
+- Trace summarization pipeline using ChainOfThought with transcript windowing to produce structured summaries with YAML frontmatter.
 - PydanticAI lead agent with a read-only explorer subagent for memory operations.
 - Three CLI flows: `sync` (extract, summarize, write memories), `maintain` (merge, archive, decay), and `ask` (query memories).
 - Daemon mode for continuous sync and maintain loop.
@@ -153,7 +187,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Session catalog with SQLite FTS5 for session search.
 - Job queue with stale job reclamation.
 - TOML-layered configuration: shipped defaults, global, project, and env var override.
-- OpenTelemetry tracing via Logfire with PydanticAI and DSPy instrumentation.
+- OpenTelemetry tracing via Logfire with PydanticAI and runtime instrumentation.
 - Multi-provider LLM support: OpenRouter (with Nebius routing), Ollama, ZAI, OpenAI, Anthropic.
 - File-first memory model using markdown files with YAML frontmatter.
 - Project-first memory scope with global fallback.

@@ -8,7 +8,7 @@ Before you begin, make sure you have:
 
 - **Python 3.10 or higher**
 - **Docker** installed ([get Docker](https://docs.docker.com/get-docker/)) — recommended for the always-on service
-- **An LLM API key** — you only need a key for the provider(s) in your `[roles.*]` config (e.g. `OPENCODE_API_KEY` for OpenCode Go defaults, or MiniMax / Z.AI / OpenRouter / OpenAI / Anthropic as configured)
+- **An LLM API key** — you only need a key for the provider(s) in your `[roles.*]` config (the shipped default is MiniMax, so `MINIMAX_API_KEY` is the usual first key)
 
 !!! tip "Docker is optional"
     If you don't have Docker, you can run Lerim directly using `lerim serve` instead of `lerim up`. See [Running without Docker](#running-without-docker) below.
@@ -43,13 +43,19 @@ lerim --version
 
 Lerim needs an LLM provider for extraction and querying. Set at least one:
 
-=== "OpenCode Go (common default)"
+=== "MiniMax (current default)"
+
+    ```bash
+    export MINIMAX_API_KEY="sk-cp-..."
+    ```
+
+    The shipped default config uses `provider = "minimax"` and `model = "MiniMax-M2.7"`.
+
+=== "OpenCode Go"
 
     ```bash
     export OPENCODE_API_KEY="..."
     ```
-
-    Package defaults often use `provider = "opencode_go"` — set this unless you change `[roles.*]`.
 
 === "MiniMax + ZAI"
 
@@ -105,13 +111,19 @@ lerim project add ~/codes/my-app        # another project
     lerim up
     ```
 
-    This starts a Docker container with the daemon + JSON API on `http://localhost:8765` (web UI: [Lerim Cloud](https://lerim.dev)).
+    This starts a Docker container with the daemon + JSON API on `http://localhost:8765`.
+
+    If you want to build from local source instead of pulling GHCR:
+
+    ```bash
+    lerim up --build
+    ```
 
 === "Without Docker"
 
     ```bash
     lerim connect auto          # detect agent platforms
-    lerim serve                 # JSON API + daemon loop (web UI: Lerim Cloud)
+    lerim serve                 # JSON API + daemon loop
     ```
 
 ## Running without Docker
@@ -125,9 +137,15 @@ lerim serve                  # JSON API + daemon loop
 
 Then use `lerim ask`, `lerim sync`, `lerim status`, etc. as usual — they connect to the running server.
 
+Quick health check:
+
+```bash
+curl http://localhost:8765/api/health
+```
+
 ## Local models (Ollama)
 
-To use local models instead of cloud APIs:
+To use local models instead of remote APIs:
 
 1. Install Ollama: [ollama.com](https://ollama.com)
 2. Pull a model: `ollama pull qwen3.5:9b-q8_0`
@@ -136,11 +154,7 @@ To use local models instead of cloud APIs:
 
 ```toml
 # ~/.lerim/config.toml
-[roles.lead]
-provider = "ollama"
-model = "qwen3.5:9b-q8_0"
-
-[roles.extract]
+[roles.agent]
 provider = "ollama"
 model = "qwen3.5:9b-q8_0"
 ```

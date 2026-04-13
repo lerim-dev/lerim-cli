@@ -22,34 +22,50 @@ from typing import Any
 
 from lerim.adapters.base import SessionRecord, ViewerMessage, ViewerSession
 from lerim.adapters.common import (
+    compact_jsonl,
     in_window,
-    load_jsonl_dict_lines,
+    make_canonical_entry,
+    normalize_timestamp_iso,
     parse_timestamp,
+    readonly_connect,
+    validate_canonical_entry,
+    write_session_cache,
 )
 
 
-def compact_trace(raw_text: str) -> str:
-    """Strip tool outputs from OpenCode session JSONL.
+def _clean_entry(obj: dict[str, Any]) -> dict[str, Any] | None:
+    """Validate and pass through a canonical OpenCode JSONL entry.
 
-    Clears: tool_output field on tool messages (replaced with size descriptor).
-    Preserves: tool_name and tool_input for context.
-    First line (session metadata) is passed through unchanged.
+    Entries produced by ``_export_session_jsonl`` are already in canonical
+    compacted schema.  This function acts as an idempotency guard:
+
+    1. If the entry is already canonical, ensure any tool_result content
+       blocks have their output cleared, then return as-is.
+    2. If the entry is not canonical (e.g., old-format cache), return None
+       to drop it -- it will be re-exported from the DB on next sync.
     """
-    kept: list[str] = []
-    for line in raw_text.split("\n"):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            obj = json.loads(stripped)
-        except json.JSONDecodeError:
-            kept.append(line)
-            continue
-        if obj.get("role") == "tool" and "tool_output" in obj:
-            output = obj["tool_output"]
-            obj["tool_output"] = f"[cleared: {len(str(output))} chars]"
-        kept.append(json.dumps(obj, ensure_ascii=False))
-    return "\n".join(kept) + "\n"
+    if not validate_canonical_entry(obj):
+        return None
+
+    # Idempotency guard: ensure tool_result blocks are cleared
+    content = obj["message"]["content"]
+    if isinstance(content, list):
+        for block in content:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool_result"
+                and "content" in block
+            ):
+                raw = str(block["content"])
+                if not raw.startswith("[cleared:"):
+                    block["content"] = f"[cleared: {len(raw)} chars]"
+
+    return obj
+
+
+def compact_trace(raw_text: str) -> str:
+    """Strip tool outputs from OpenCode session JSONL."""
+    return compact_jsonl(raw_text, _clean_entry)
 
 
 def default_path() -> Path | None:
@@ -89,10 +105,9 @@ def validate_connection(path: Path) -> dict[str, Any]:
     if not db_path:
         return {"ok": False, "error": f"No opencode.db found under {path}"}
     try:
-        conn = sqlite3.connect(db_path)
-        conn.execute("PRAGMA query_only=ON")
+        conn = readonly_connect(db_path)
         tables = {
-            r[0]
+            r["name"]
             for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
@@ -120,8 +135,7 @@ def count_sessions(path: Path) -> int:
     if not db_path:
         return 0
     try:
-        conn = sqlite3.connect(db_path)
-        conn.execute("PRAGMA query_only=ON")
+        conn = readonly_connect(db_path)
         n = conn.execute("SELECT COUNT(*) FROM session").fetchone()[0]
         conn.close()
         return n
@@ -129,39 +143,10 @@ def count_sessions(path: Path) -> int:
         return 0
 
 
-def find_session_path(session_id: str, traces_dir: Path | None = None) -> Path | None:
-    """Return the JSONL cache path if it exists, else DB path if session exists."""
-    session_id = session_id.strip()
-    if not session_id:
-        return None
-    # Check cache first
-    cache_path = _default_cache_dir() / f"{session_id}.jsonl"
-    if cache_path.is_file():
-        return cache_path
-    # Fall back to DB
-    root = traces_dir or default_path()
-    if root is None or not root.exists():
-        return None
-    db_path = _resolve_db_path(root)
-    if not db_path:
-        return None
-    try:
-        conn = sqlite3.connect(db_path)
-        conn.execute("PRAGMA query_only=ON")
-        row = conn.execute(
-            "SELECT id FROM session WHERE id = ? LIMIT 1", (session_id,)
-        ).fetchone()
-        conn.close()
-        return db_path if row else None
-    except sqlite3.Error:
-        return None
-
-
 def _read_session_db(db_path: Path, session_id: str) -> ViewerSession | None:
     """Read one OpenCode session directly from the SQLite database."""
     try:
-        conn = sqlite3.connect(db_path)
-        conn.execute("PRAGMA query_only=ON")
+        conn = readonly_connect(db_path)
 
         sess_row = conn.execute(
             "SELECT directory, version, title FROM session WHERE id = ?",
@@ -170,7 +155,9 @@ def _read_session_db(db_path: Path, session_id: str) -> ViewerSession | None:
         if not sess_row:
             conn.close()
             return None
-        cwd, version, title = sess_row
+        cwd = sess_row["directory"]
+        version = sess_row["version"]
+        title = sess_row["title"]
 
         msg_rows = conn.execute(
             "SELECT id, data FROM message WHERE session_id = ? ORDER BY time_created",
@@ -181,8 +168,9 @@ def _read_session_db(db_path: Path, session_id: str) -> ViewerSession | None:
         total_output = 0
         messages: list[ViewerMessage] = []
 
-        for msg_id, msg_raw in msg_rows:
-            msg = _json_col(msg_raw)
+        for msg_row in msg_rows:
+            msg_id = msg_row["id"]
+            msg = _json_col(msg_row["data"])
             role = str(msg.get("role") or "assistant")
             time_info = msg.get("time") or {}
             timestamp = parse_timestamp(time_info.get("created"))
@@ -201,8 +189,8 @@ def _read_session_db(db_path: Path, session_id: str) -> ViewerSession | None:
             ).fetchall()
 
             text_parts: list[str] = []
-            for (part_raw,) in part_rows:
-                part = _json_col(part_raw)
+            for part_row in part_rows:
+                part = _json_col(part_row["data"])
                 ptype = part.get("type")
                 if ptype == "text":
                     text = part.get("text")
@@ -246,104 +234,54 @@ def _read_session_db(db_path: Path, session_id: str) -> ViewerSession | None:
         return None
 
 
-def _read_session_jsonl(path: Path, session_id: str | None) -> ViewerSession | None:
-    """Parse an exported OpenCode JSONL cache file into a ViewerSession."""
-    lines = load_jsonl_dict_lines(path)
-    if not lines:
-        return None
-    metadata = lines[0]
-    resolved_id = session_id or metadata.get("session_id") or path.stem
-    messages: list[ViewerMessage] = []
-    total_input = 0
-    total_output = 0
-    for row in lines[1:]:
-        role = row.get("role") or "assistant"
-        if role == "tool":
-            messages.append(
-                ViewerMessage(
-                    role="tool",
-                    tool_name=row.get("tool_name"),
-                    tool_input=row.get("tool_input"),
-                    tool_output=row.get("tool_output"),
-                    timestamp=row.get("timestamp"),
-                )
-            )
-        else:
-            content = row.get("content") or ""
-            if content.strip():
-                messages.append(
-                    ViewerMessage(
-                        role=role,
-                        content=content,
-                        timestamp=row.get("timestamp"),
-                        model=row.get("model"),
-                    )
-                )
-    total_input = int(metadata.get("total_input_tokens") or 0)
-    total_output = int(metadata.get("total_output_tokens") or 0)
-    return ViewerSession(
-        session_id=resolved_id,
-        cwd=metadata.get("cwd"),
-        messages=messages,
-        total_input_tokens=total_input,
-        total_output_tokens=total_output,
-        meta=metadata.get("meta") or {},
-    )
-
-
 def _export_session_jsonl(session: ViewerSession, out_dir: Path) -> Path:
-    """Export a ViewerSession to a compacted JSONL cache file, return the file path."""
-    jsonl_path = out_dir / f"{session.session_id}.jsonl"
-    lines: list[str] = []
-    # First line: session metadata
-    lines.append(
-        json.dumps(
-            {
-                "session_id": session.session_id,
-                "cwd": session.cwd,
-                "total_input_tokens": session.total_input_tokens,
-                "total_output_tokens": session.total_output_tokens,
-                "meta": session.meta,
-            },
-            ensure_ascii=True,
-        )
-    )
-    # Remaining lines: one per message
-    for msg in session.messages:
-        row: dict[str, Any] = {"role": msg.role}
-        if msg.content is not None:
-            row["content"] = msg.content
-        if msg.timestamp:
-            row["timestamp"] = msg.timestamp
-        if msg.model:
-            row["model"] = msg.model
-        if msg.tool_name:
-            row["tool_name"] = msg.tool_name
-        if msg.tool_input is not None:
-            row["tool_input"] = msg.tool_input
-        if msg.tool_output is not None:
-            row["tool_output"] = msg.tool_output
-        lines.append(json.dumps(row, ensure_ascii=True))
-    compacted = compact_trace("\n".join(lines) + "\n")
-    jsonl_path.write_text(compacted, encoding="utf-8")
-    return jsonl_path
+    """Export a ViewerSession to a compacted JSONL cache file in canonical schema.
 
+    No metadata line is emitted. Every line conforms to the canonical shape:
+    ``{"type": "user|assistant", "message": {"role": ..., "content": ...}, "timestamp": "..."}``
 
-def read_session(
-    session_path: Path, session_id: str | None = None
-) -> ViewerSession | None:
-    """Read one OpenCode session from JSONL cache or SQLite database.
-
-    If *session_path* is a ``.jsonl`` file, reads the exported cache.
-    If it points to ``opencode.db`` (or its parent), queries the DB directly.
+    Tool messages are folded into assistant-type entries with structured content
+    blocks (tool_use + tool_result with cleared output).
     """
-    if session_path.suffix == ".jsonl" and session_path.is_file():
-        return _read_session_jsonl(session_path, session_id)
-    # Try as DB path or directory containing opencode.db
-    db_path = _resolve_db_path(session_path) if session_path.is_dir() else session_path
-    if db_path and db_path.is_file() and session_id:
-        return _read_session_db(db_path, session_id)
-    return None
+    lines: list[str] = []
+    for msg in session.messages:
+        ts = normalize_timestamp_iso(msg.timestamp)
+
+        if msg.role == "user":
+            if not (msg.content or "").strip():
+                continue
+            entry = make_canonical_entry("user", "user", msg.content or "", ts)
+
+        elif msg.role == "assistant":
+            if not (msg.content or "").strip():
+                continue
+            entry = make_canonical_entry(
+                "assistant", "assistant", msg.content or "", ts
+            )
+
+        elif msg.role == "tool":
+            tool_name = msg.tool_name or "tool"
+            tool_input = msg.tool_input
+            tool_output = msg.tool_output
+            # Clear tool output, preserving already-cleared descriptors
+            output_str = str(tool_output) if tool_output is not None else ""
+            if output_str.startswith("[cleared:"):
+                descriptor = output_str
+            else:
+                descriptor = f"[cleared: {len(output_str)} chars]"
+            content_blocks: list[dict[str, Any]] = [
+                {"type": "tool_use", "name": tool_name, "input": tool_input},
+                {"type": "tool_result", "content": descriptor},
+            ]
+            entry = make_canonical_entry("assistant", "assistant", content_blocks, ts)
+
+        else:
+            # Unknown role -- skip
+            continue
+
+        lines.append(json.dumps(entry, ensure_ascii=False))
+
+    return write_session_cache(out_dir, session.session_id, lines, compact_trace)
 
 
 def iter_sessions(
@@ -366,12 +304,10 @@ def iter_sessions(
         return []
 
     out_dir = cache_dir or _default_cache_dir()
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     records: list[SessionRecord] = []
     try:
-        conn = sqlite3.connect(db_path)
-        conn.execute("PRAGMA query_only=ON")
+        conn = readonly_connect(db_path)
         rows = conn.execute(
             """SELECT id, directory, title, time_created FROM session \
 ORDER BY time_created"""
@@ -380,7 +316,10 @@ ORDER BY time_created"""
     except sqlite3.Error:
         return []
 
-    for sess_id, directory, title, time_created in rows:
+    for row in rows:
+        sess_id = row["id"]
+        directory = row["directory"]
+        time_created = row["time_created"]
         start_dt = parse_timestamp(time_created)
         if not in_window(start_dt, start, end):
             continue
@@ -465,35 +404,22 @@ if __name__ == "__main__":
         jsonl_path = Path(first.session_path)
         assert jsonl_path.is_file(), f"JSONL not found: {jsonl_path}"
         lines = jsonl_path.read_text(encoding="utf-8").strip().splitlines()
-        assert len(lines) > 1, f"Expected multiple lines, got {len(lines)}"
+        assert len(lines) >= 1, f"Expected at least one line, got {len(lines)}"
         print(f"  first JSONL ({jsonl_path.name}): {len(lines)} lines")
 
-        # Verify JSONL round-trip via read_session
-        viewer = read_session(jsonl_path, first.run_id)
-        assert viewer is not None, "read_session(jsonl) returned None"
-        assert viewer.messages, "read_session(jsonl) returned no messages"
-        print(f"  read_session(jsonl): {len(viewer.messages)} messages")
-
-        # Verify direct DB read still works
+        # Verify direct DB read works
         viewer_db = _read_session_db(db, first.run_id)
         assert viewer_db is not None, "read_session(db) returned None"
-        assert len(viewer_db.messages) == len(viewer.messages), (
-            "JSONL round-trip message count mismatch"
-        )
-        print(f"  read_session(db):   {len(viewer_db.messages)} messages (matches)")
+        print(f"  read_session(db):   {len(viewer_db.messages)} messages")
 
         print(
-            f"    tokens: in={viewer.total_input_tokens} out={viewer.total_output_tokens}"
+            f"    tokens: in={viewer_db.total_input_tokens} out={viewer_db.total_output_tokens}"
         )
-        print(f"    title: {viewer.meta.get('title', '?')}")
+        print(f"    title: {viewer_db.meta.get('title', '?')}")
 
         roles: dict[str, int] = {}
-        for m in viewer.messages:
+        for m in viewer_db.messages:
             roles[m.role] = roles.get(m.role, 0) + 1
         print(f"    roles: {roles}")
-
-        # Verify find_session_path returns the cached JSONL
-        found = find_session_path(first.run_id, root)
-        print(f"  find_session_path: {found}")
 
     print("Self-test passed.")

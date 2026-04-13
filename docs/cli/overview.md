@@ -4,10 +4,10 @@ Global flags, exit codes, and common patterns for Lerim CLI.
 
 The Lerim CLI is the primary interface for managing Lerim's continual learning layer. Commands fall into two categories:
 
-- **Host-only commands** run locally and do not call the HTTP API: `init`, `project`, `up`, `down`, `logs`, `connect`, `memory` (all subcommands: `search`, `list`, `add`, `reset`), `dashboard`, `queue`, `retry`, `skip`, `skill`, `auth`
+- **Host-only commands** run locally and do not call the HTTP API: `init`, `project`, `up`, `down`, `logs`, `connect`, `memory` (`list`, `reset`), `dashboard`, `queue`, `retry`, `skip`, `skill`, `auth`
 - **Service commands** forward to `lerim serve` via HTTP and require a running server (`lerim up` or `lerim serve`): `ask`, `sync`, `maintain`, `status`
 
-`memory search`, `memory list`, and `memory add` read or write the memory tree on disk directly (no server). The background sync/maintain loop runs **inside** `lerim serve` — there is no separate `lerim daemon` command (see [Background loop](daemon.md)).
+`memory list` and `memory reset` work on disk directly (no server). The background sync/maintain loop runs **inside** `lerim serve` — there is no separate `lerim daemon` command (see [Background loop](daemon.md)).
 
 ## Installation
 
@@ -49,8 +49,6 @@ Lerim commands return standard exit codes:
 | `0` | Success | Command completed without errors |
 | `1` | Runtime failure | Server not reachable, LLM API error |
 | `2` | Usage error | Invalid arguments, missing required parameters |
-| `3` | Partial success | Some sessions processed, others failed |
-| `4` | Lock busy | Another process holds the sync/maintain lock |
 
 ## Command categories
 
@@ -65,7 +63,7 @@ Lerim commands return standard exit codes:
 
 - `lerim up` — Start Docker container
 - `lerim down` — Stop Docker container
-- `lerim logs` — View container logs
+- `lerim logs` — View local Lerim JSONL logs
 - `lerim serve` — Run HTTP server + daemon (Docker entrypoint)
 
 ### Memory operations
@@ -74,6 +72,7 @@ Lerim commands return standard exit codes:
 - `lerim maintain` — Refine existing memories (cold path)
 - `lerim ask` — Query memories with natural language
 - `lerim queue` — Show session extraction queue (host-only, SQLite)
+- `lerim unscoped` — Show indexed sessions with no project match (host-only)
 - `lerim retry` / `lerim skip` — Manage dead-letter jobs (host-only)
 
 ### Platform connections
@@ -84,9 +83,7 @@ Lerim commands return standard exit codes:
 
 ### Direct memory access
 
-- `lerim memory search` — Full-text search across memories
-- `lerim memory list` — List stored memory files
-- `lerim memory add` — Manually create a memory
+- `lerim memory list` — List memory files (`--scope all|project`)
 - `lerim memory reset` — Destructive wipe of memory data
 
 ### Skills
@@ -95,12 +92,12 @@ Lerim commands return standard exit codes:
 
 ### Runtime status
 
-- `lerim status` — Show runtime state (requires server)
-- `lerim dashboard` — Print local API URL + Lerim Cloud hint (host-only)
+- `lerim status` — Show runtime state (`--live` available; requires server)
+- `lerim dashboard` — Print temporary dashboard notice + CLI alternatives (host-only)
 
-### Cloud
+### Auth
 
-- `lerim auth` — Lerim Cloud login, status, logout
+- `lerim auth` — Authentication login, status, logout
 
 ## Common patterns
 
@@ -124,6 +121,10 @@ lerim sync --max-sessions 10
 
 # View status
 lerim status
+lerim status --live
+
+# Project-scoped status
+lerim status --scope project --project lerim-cli
 ```
 
 ### Troubleshooting
@@ -134,6 +135,10 @@ lerim status
 
 # View logs
 lerim logs --follow
+
+# Inspect queue/unmapped sessions
+lerim queue --failed
+lerim unscoped --limit 20
 
 # Restart service
 lerim down && lerim up
@@ -183,8 +188,8 @@ API keys come from environment variables:
 
 Keys depend on `[roles.*]` (see shipped `src/lerim/config/default.toml`). Examples:
 
-- `OPENCODE_API_KEY` — OpenCode Go / Zen (common in current defaults)
-- `MINIMAX_API_KEY`, `ZAI_API_KEY` — when using those providers
+- `MINIMAX_API_KEY` — MiniMax (current shipped default provider)
+- `ZAI_API_KEY`, `OPENCODE_API_KEY` — when using those providers
 - `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, … — as configured
 
 Only the keys for providers you use are required.

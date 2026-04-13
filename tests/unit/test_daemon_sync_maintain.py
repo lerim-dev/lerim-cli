@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from lerim.app import daemon
-from lerim.app.activity_log import log_activity
+from lerim.server import daemon
+from lerim.server.daemon import log_activity
 from lerim.config.settings import reload_config
 from lerim.sessions import catalog
 from tests.helpers import make_config, write_test_config
@@ -32,7 +32,7 @@ def test_sync_does_not_run_vector_rebuild(monkeypatch, tmp_path) -> None:
     )
 
     monkeypatch.setattr(
-        "lerim.runtime.oai_agent.LerimOAIAgent.sync",
+        "lerim.server.runtime.LerimRuntime.sync",
         lambda *_args, **_kwargs: {
             "counts": {"add": 1, "update": 0, "no_op": 0},
         },
@@ -84,7 +84,7 @@ def test_sync_force_enqueues_changed_sessions(monkeypatch, tmp_path) -> None:
     from lerim.sessions.catalog import IndexedSession
 
     monkeypatch.setattr(
-        "lerim.app.daemon.index_new_sessions",
+        "lerim.server.daemon.index_new_sessions",
         lambda **kw: [
             IndexedSession(
                 run_id="run-changed-1",
@@ -97,7 +97,7 @@ def test_sync_force_enqueues_changed_sessions(monkeypatch, tmp_path) -> None:
         ],
     )
     monkeypatch.setattr(
-        "lerim.runtime.oai_agent.LerimOAIAgent.sync",
+        "lerim.server.runtime.LerimRuntime.sync",
         lambda *_a, **_kw: {"counts": {"add": 0, "update": 1, "no_op": 0}},
     )
 
@@ -123,7 +123,7 @@ def test_maintain_calls_agent(monkeypatch, tmp_path) -> None:
     _setup(tmp_path, monkeypatch)
     called: list[str] = []
     monkeypatch.setattr(
-        "lerim.runtime.oai_agent.LerimOAIAgent.maintain",
+        "lerim.server.runtime.LerimRuntime.maintain",
         lambda self, **kw: (
             called.append(kw.get("memory_root", "")),
             {
@@ -202,7 +202,7 @@ def test_daemon_sync_runs_more_often_than_maintain(tmp_path) -> None:
 def test_log_activity_appends_line(tmp_path, monkeypatch) -> None:
     """log_activity writes one formatted line per call."""
     log_file = tmp_path / "activity.log"
-    monkeypatch.setattr("lerim.app.activity_log.ACTIVITY_LOG_PATH", log_file)
+    monkeypatch.setattr("lerim.server.daemon.ACTIVITY_LOG_PATH", log_file)
 
     log_activity("sync", "myproject", "3 new, 1 updated, 2 sessions", 4.2)
     log_activity("maintain", "myproject", "2 archived, 1 merged", 6.15)
@@ -214,3 +214,101 @@ def test_log_activity_appends_line(tmp_path, monkeypatch) -> None:
         in lines[0]
     )
     assert "| maintain | myproject | 2 archived, 1 merged | $0.0000 | 6.2s" in lines[1]
+
+
+def test_sync_indexes_with_strict_scope(monkeypatch, tmp_path) -> None:
+    """Sync calls indexer with strict project scope filtering enabled."""
+    _setup(tmp_path, monkeypatch)
+    captured: dict[str, object] = {}
+
+    def _fake_index(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr("lerim.server.daemon.index_new_sessions", _fake_index)
+
+    code, summary = daemon.run_sync_once(
+        run_id=None,
+        agent_filter=None,
+        no_extract=False,
+        force=False,
+        max_sessions=1,
+        dry_run=False,
+        ignore_lock=True,
+        trigger="test",
+        window_start=None,
+        window_end=None,
+    )
+    assert code == daemon.EXIT_OK
+    assert summary.indexed_sessions == 0
+    assert captured.get("skip_unscoped") is True
+    projects = captured.get("projects")
+    assert isinstance(projects, dict)
+    assert projects.get("testproj") == str(tmp_path)
+
+
+def test_sync_runs_stale_reaper_before_claim(monkeypatch, tmp_path) -> None:
+    """Sync invokes stale-running reaper before claim cycle."""
+    _setup(tmp_path, monkeypatch)
+    from lerim.sessions.catalog import IndexedSession
+
+    session_path = tmp_path / "sessions" / "run-stale-reaper.jsonl"
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    session_path.write_text('{"role":"assistant","content":"ok"}\n', encoding="utf-8")
+
+    monkeypatch.setattr(
+        "lerim.server.daemon.index_new_sessions",
+        lambda **kw: [
+            IndexedSession(
+                run_id="run-stale-reaper",
+                agent_type="codex",
+                session_path=str(session_path),
+                start_time="2026-02-20T10:00:00Z",
+                repo_path=str(tmp_path),
+                changed=False,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "lerim.server.runtime.LerimRuntime.sync",
+        lambda *_a, **_kw: {"counts": {"add": 1, "update": 0, "no_op": 0}},
+    )
+    reaper_calls: list[int] = []
+    monkeypatch.setattr(
+        "lerim.server.daemon.reap_stale_running_jobs",
+        lambda **kw: reaper_calls.append(1) or 0,
+    )
+
+    code, summary = daemon.run_sync_once(
+        run_id=None,
+        agent_filter=None,
+        no_extract=False,
+        force=False,
+        max_sessions=1,
+        dry_run=False,
+        ignore_lock=True,
+        trigger="test",
+        window_start=None,
+        window_end=None,
+    )
+    assert code == daemon.EXIT_OK
+    assert summary.extracted_sessions == 1
+    assert len(reaper_calls) >= 1
+
+
+def test_maintain_no_registered_projects_is_clean_noop(monkeypatch, tmp_path) -> None:
+    """Maintain exits cleanly when no projects are registered."""
+    cfg = make_config(tmp_path)
+    monkeypatch.setattr("lerim.server.daemon.get_config", lambda: cfg)
+
+    called: list[str] = []
+    monkeypatch.setattr(
+        "lerim.server.runtime.LerimRuntime.maintain",
+        lambda self, **kw: called.append("called") or {},
+    )
+
+    code, payload = daemon.run_maintain_once(force=False, dry_run=False)
+    assert code == daemon.EXIT_OK
+    assert payload.get("projects") in ({}, None)
+    assert "No registered projects" in str(payload.get("message") or "")
+    assert called == []

@@ -50,32 +50,6 @@ def test_queue_fail_to_dead_letter(tmp_path, monkeypatch):
     assert row["status"] == "dead_letter"
 
 
-def test_queue_heartbeat_updates_running_job(tmp_path, monkeypatch):
-    _setup(tmp_path, monkeypatch)
-    catalog.enqueue_session_job(
-        "run-3",
-        agent_type="claude",
-        session_path="/tmp/run-3.jsonl",
-        repo_path="/tmp/project",
-    )
-    claimed = catalog.claim_session_jobs(limit=1)
-    assert claimed and claimed[0]["run_id"] == "run-3"
-    first_heartbeat = str(claimed[0].get("heartbeat_at") or "")
-    assert first_heartbeat
-
-    touched = catalog.heartbeat_session_job("run-3")
-    assert touched is True
-
-    row = next(
-        item
-        for item in catalog.list_session_jobs(limit=10)
-        if item["run_id"] == "run-3"
-    )
-    second_heartbeat = str(row.get("heartbeat_at") or "")
-    assert second_heartbeat
-    assert second_heartbeat >= first_heartbeat
-
-
 def test_queue_fail_marks_failed_before_dead_letter(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     catalog.enqueue_session_job("run-4", max_attempts=3, repo_path="/tmp/project")

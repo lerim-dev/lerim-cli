@@ -85,7 +85,7 @@ lerim project remove frontend
 
 - Adding or removing a project restarts the Docker container if it is running (to update volume mounts)
 - Each project stores its own memories in `<repo>/.lerim/memory/`
-- The `.lerim/` directory is automatically gitignored
+- Add `.lerim/` to your `.gitignore` if you do not want project memory files tracked in git
 
 ## Related commands
 

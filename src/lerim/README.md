@@ -2,21 +2,27 @@
 
 ## Summary
 
-This folder contains Lerim runtime code.
+This folder contains the Lerim runtime package.
+Current architecture is PydanticAI-only for agent execution.
+
 The package is organized by feature boundary:
 
-- `app/`: CLI, daemon loop, HTTP handler (`dashboard.py` serves JSON API + optional static), shared API logic (`api.py`)
-- `config/`: config loading, scope resolution, logging, OpenTelemetry tracing
-- `sessions/`: platform indexing, session catalog, queue
-- `memory/`: memory taxonomy/record schema (`memory_record.py`), repository paths (`memory_repo.py`), extraction pipeline, trace summarization pipeline
-- `runtime/`: lead runtime (`oai_agent.py`), OpenAI Agents SDK tools (`oai_tools.py`), provider/model builders (`oai_providers.py`), agent context (`oai_context.py`), shared helpers (`helpers.py`), typed contracts (`contracts.py`), prompt builders (`prompts/`)
-- `adapters/`: platform-specific session readers
+- `agents/`: agent flows (`extract.py`, `maintain.py`, `ask.py`), memory tools (`tools.py`), typed contracts (`contracts.py`)
+- `server/`: CLI (`cli.py`), HTTP API (`httpd.py`), daemon (`daemon.py`), runtime orchestrator (`runtime.py`), Docker/runtime API helpers (`api.py`)
+- `config/`: config loading (`settings.py`), PydanticAI model builders (`providers.py`), tracing and logging setup
+- `memory/`: memory layout and repo-scoped paths (`repo.py`), trace formatting helpers (`transcript.py`)
+- `sessions/`: session catalog and queue state (`catalog.py`)
+- `adapters/`: session readers for Claude, Codex, Cursor, OpenCode
+- `cloud/`: hosted auth/shipper integration (`auth.py`, `shipper.py`)
+- `skills/`: bundled skill markdown files
 
 ## How to use
 
-Read these files in order:
+If you are new to the codebase, read in this order:
 
-1. `app/cli.py` for the public command surface.
-2. `app/daemon.py` for sync/maintain execution flow.
-3. `sessions/catalog.py` + `memory/extract_pipeline.py` for ingest and extraction.
-4. `memory/memory_repo.py` + `memory/memory_record.py` for persisted memory behavior.
+1. `server/cli.py` for the public command surface.
+2. `server/daemon.py` for sync/maintain scheduling and lock flow.
+3. `server/runtime.py` for runtime orchestration across extract/maintain/ask.
+4. `agents/tools.py` for memory tool functions (`read`, `grep`, `scan`, `write`, `edit`, `archive`, `verify_index`).
+5. `agents/extract.py`, `agents/maintain.py`, `agents/ask.py` for PydanticAI agent behavior.
+6. `memory/repo.py` for on-disk layout under project and global scopes.

@@ -33,12 +33,6 @@ class _FakeAdapter:
             )
         ]
 
-    @staticmethod
-    def read_session(path: Path, session_id: str | None = None):
-        _ = (path, session_id)
-        return None
-
-
 class _FakeCursorAdapter(_FakeAdapter):
     @staticmethod
     def iter_sessions(traces_dir: Path, start=None, end=None, known_run_ids=None):

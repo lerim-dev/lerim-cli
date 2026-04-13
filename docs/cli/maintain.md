@@ -4,7 +4,7 @@ Refine existing memories offline (cold path).
 
 ## Overview
 
-Cold-path: offline memory refinement. Scans existing memories and merges duplicates, archives low-value items, and consolidates related memories. Archived items go to `memory/archived/{decisions,learnings}/`. Requires a running server (`lerim up` or `lerim serve`).
+Cold-path: offline memory refinement. Scans existing memories and merges duplicates, archives low-value items, and consolidates related memories. Archived items go to `memory/archived/`. Requires a running server (`lerim up` or `lerim serve`).
 
 ## Syntax
 
@@ -42,11 +42,11 @@ lerim maintain --dry-run      # preview only, no writes
 
 ## What maintenance does
 
-1. **Scan** — Load all existing decision and learning files from `memory/`
-2. **Merge duplicates** — Identify and consolidate similar memories
-3. **Archive low-value** — Move memories with low effective confidence to `memory/archived/`
-4. **Consolidate** — Group and strengthen related learnings
-5. **Apply decay** — Reduce confidence for memories that haven't been accessed recently
+1. **Scan** — Inspect memories (index + files under `memory/`)
+2. **Merge duplicates** — Consolidate overlapping markdown files
+3. **Archive low-value** — Move unneeded files to `memory/archived/`
+4. **Consolidate** — Strengthen related entries via edits or new files
+5. **Re-index** — Refresh `index.md` when instructed by the agent
 
 !!! info "Non-destructive"
     Maintenance is non-destructive — archived memories are moved to `memory/archived/` rather than deleted.

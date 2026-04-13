@@ -23,49 +23,107 @@ from typing import Any
 
 from lerim.adapters.base import SessionRecord, ViewerMessage, ViewerSession
 from lerim.adapters.common import (
+    compact_jsonl,
     in_window,
-    load_jsonl_dict_lines,
+    make_canonical_entry,
+    normalize_timestamp_iso,
     parse_timestamp,
+    readonly_connect,
+    write_session_cache,
 )
 
 
-def compact_trace(raw_text: str) -> str:
-    """Strip tool outputs and thinking content from Cursor session JSONL.
+def _clean_entry(obj: dict[str, Any]) -> dict[str, Any] | None:
+    """Convert a raw Cursor DB row into a canonical compacted entry.
 
-    Clears: toolFormerData[].result (replaced with size descriptor).
-    Clears: thinking block text (capabilityType 30, replaced with size descriptor).
-    Strips: empty array/dict fields on bubble objects to reduce noise.
+    Output schema: ``{"type": "user|assistant", "message": {"role": ..., "content": ...}, "timestamp": "..."}``
+
+    Returns ``None`` for rows that should be dropped (header rows, thinking
+    blocks, entries with empty text).
     """
-    kept: list[str] = []
-    for line in raw_text.split("\n"):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            obj = json.loads(stripped)
-        except json.JSONDecodeError:
-            kept.append(line)
-            continue
-        # Clear tool results in toolFormerData
-        tool_data = obj.get("toolFormerData")
-        if isinstance(tool_data, list):
+    # 1. Header row: has composerId but no usable integer type -> drop
+    if "composerId" in obj and not isinstance(obj.get("type"), int):
+        return None
+
+    entry_type = obj.get("type")
+
+    # 2. type == 1 -> user message
+    if entry_type == 1:
+        text = _extract_text(obj.get("text"))
+        if not text or not text.strip():
+            return None
+        return make_canonical_entry(
+            "user", "user", text, normalize_timestamp_iso(obj.get("createdAt"))
+        )
+
+    # 3-5. type == 2 -> assistant (thinking / tool call / plain text)
+    if entry_type == 2:
+        capability = obj.get("capabilityType")
+
+        # 3. Thinking block -> drop entirely
+        if capability == 30:
+            return None
+
+        # 4. Tool call (capabilityType 15) -> assistant with tool_use blocks
+        if capability == 15:
+            tool_data = obj.get("toolFormerData")
+            # Normalise to list
+            if isinstance(tool_data, dict):
+                tool_data = [tool_data]
+            if not isinstance(tool_data, list):
+                return None
+
+            content_blocks: list[dict[str, Any]] = []
             for tool in tool_data:
                 if not isinstance(tool, dict):
                     continue
+                content_blocks.append(
+                    {
+                        "type": "tool_use",
+                        "name": tool.get("name", "unknown"),
+                        "input": tool.get("params", {}),
+                    }
+                )
                 result = tool.get("result")
                 if result is not None:
-                    tool["result"] = f"[cleared: {len(str(result))} chars]"
-        # Clear thinking blocks
-        if obj.get("capabilityType") == 30:
-            thinking = obj.get("thinking")
-            if isinstance(thinking, dict):
-                text = thinking.get("text", "")
-                thinking["text"] = f"[thinking cleared: {len(text)} chars]"
-                thinking.pop("signature", None)
-        # Strip empty array/dict/None fields to reduce noise
-        obj = {k: v for k, v in obj.items() if v or v == 0 or v is False}
-        kept.append(json.dumps(obj, ensure_ascii=False))
-    return "\n".join(kept) + "\n"
+                    if str(result).startswith("[cleared:"):
+                        content_blocks.append(
+                            {"type": "tool_result", "content": str(result)}
+                        )
+                    else:
+                        content_blocks.append(
+                            {
+                                "type": "tool_result",
+                                "content": f"[cleared: {len(str(result))} chars]",
+                            }
+                        )
+            if not content_blocks:
+                return None
+            return make_canonical_entry(
+                "assistant",
+                "assistant",
+                content_blocks,
+                normalize_timestamp_iso(obj.get("createdAt")),
+            )
+
+        # 5. Plain text assistant response
+        text = _extract_text(obj.get("text"))
+        if not text or not text.strip():
+            return None
+        return make_canonical_entry(
+            "assistant",
+            "assistant",
+            text,
+            normalize_timestamp_iso(obj.get("createdAt")),
+        )
+
+    # 6. Any other type value -> drop
+    return None
+
+
+def compact_trace(raw_text: str) -> str:
+    """Strip tool outputs and thinking content from Cursor session JSONL."""
+    return compact_jsonl(raw_text, _clean_entry)
 
 
 # ---------------------------------------------------------------------------
@@ -172,9 +230,8 @@ def validate_connection(path: Path) -> dict[str, Any]:
     total_sessions = 0
     total_messages = 0
     for db_path in db_paths:
-        conn = sqlite3.connect(db_path)
+        conn = readonly_connect(db_path)
         try:
-            conn.execute("PRAGMA query_only=ON")
             table = conn.execute(
                 """SELECT name FROM sqlite_master \
 WHERE type='table' AND name='cursorDiskKV'"""
@@ -186,9 +243,10 @@ WHERE type='table' AND name='cursorDiskKV'"""
                 }
             # Collect distinct composerIds from bubbleId rows
             composer_ids: set[str] = set()
-            for (key,) in conn.execute(
+            for row in conn.execute(
                 "SELECT key FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
             ).fetchall():
+                key = row[0]
                 parts = key.split(":", 2)
                 if len(parts) >= 3:
                     composer_ids.add(parts[1])
@@ -208,13 +266,12 @@ def count_sessions(path: Path) -> int:
         return 0
     composer_ids: set[str] = set()
     for db_path in _resolve_db_paths(path):
-        conn = sqlite3.connect(db_path)
+        conn = readonly_connect(db_path)
         try:
-            conn.execute("PRAGMA query_only=ON")
-            for (key,) in conn.execute(
+            for row in conn.execute(
                 "SELECT key FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
             ).fetchall():
-                parts = key.split(":", 2)
+                parts = row[0].split(":", 2)
                 if len(parts) >= 3:
                     composer_ids.add(parts[1])
         except sqlite3.Error:
@@ -241,32 +298,30 @@ def iter_sessions(
         return []
 
     out_dir = cache_dir or _default_cache_dir()
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     records: list[SessionRecord] = []
     for db_path in _resolve_db_paths(root):
         composers: dict[str, dict] = {}
         bubbles: dict[str, list[dict]] = defaultdict(list)
-        conn = sqlite3.connect(db_path)
+        conn = readonly_connect(db_path)
         try:
-            conn.execute("PRAGMA query_only=ON")
-            for key, raw in conn.execute(
+            for row in conn.execute(
                 "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
             ).fetchall():
-                cid = key.split(":", 1)[1]
-                parsed = _parse_json_value(raw)
+                cid = row["key"].split(":", 1)[1]
+                parsed = _parse_json_value(row["value"])
                 if isinstance(parsed, dict):
                     composers[cid] = parsed
 
-            for key, raw in conn.execute(
+            for row in conn.execute(
                 """SELECT key, value FROM cursorDiskKV \
 WHERE key LIKE 'bubbleId:%' ORDER BY key"""
             ).fetchall():
-                parts = key.split(":", 2)
+                parts = row["key"].split(":", 2)
                 if len(parts) < 3:
                     continue
                 cid = parts[1]
-                parsed = _parse_json_value(raw)
+                parsed = _parse_json_value(row["value"])
                 if isinstance(parsed, dict):
                     bubbles[cid].append(parsed)
         except sqlite3.Error:
@@ -285,12 +340,10 @@ WHERE key LIKE 'bubbleId:%' ORDER BY key"""
                 continue
 
             # Export JSONL: metadata first line, then bubbles (compacted)
-            jsonl_path = out_dir / f"{cid}.jsonl"
             raw_lines = [json.dumps(metadata)]
             for bubble in bubble_list:
                 raw_lines.append(json.dumps(bubble))
-            compacted = compact_trace("\n".join(raw_lines) + "\n")
-            jsonl_path.write_text(compacted, encoding="utf-8")
+            jsonl_path = write_session_cache(out_dir, cid, raw_lines, compact_trace)
 
             message_count = sum(1 for b in bubble_list if b.get("type") in (1, 2))
             tool_count = sum(1 for b in bubble_list if b.get("type") not in (1, 2))
@@ -320,87 +373,17 @@ WHERE key LIKE 'bubbleId:%' ORDER BY key"""
     return records
 
 
-def find_session_path(session_id: str, traces_dir: Path | None = None) -> Path | None:
-    """Find a Cursor session file by ID, checking cache first then DB."""
-    session_id = session_id.strip()
-    if not session_id:
-        return None
-
-    # Check cache first
-    cache_path = _default_cache_dir() / f"{session_id}.jsonl"
-    if cache_path.is_file():
-        return cache_path
-
-    # Fall back to scanning DB files
-    root = traces_dir or default_path()
-    if root is None or not root.exists():
-        return None
-    for db_path in _resolve_db_paths(root):
-        conn = sqlite3.connect(db_path)
-        try:
-            conn.execute("PRAGMA query_only=ON")
-            row = conn.execute(
-                "SELECT key FROM cursorDiskKV WHERE key LIKE ? LIMIT 1",
-                (f"bubbleId:{session_id}:%",),
-            ).fetchone()
-            if row:
-                return db_path
-        except sqlite3.Error:
-            continue
-        finally:
-            conn.close()
-    return None
-
-
-def read_session(
-    session_path: Path, session_id: str | None = None
-) -> ViewerSession | None:
-    """Read one Cursor session from an exported JSONL or directly from SQLite.
-
-    If *session_path* is a ``.jsonl`` file, reads the exported cache file.
-    If it is a ``.vscdb`` file and *session_id* is provided, queries the DB
-    directly (backward compat with dashboard).
-    """
-    if session_path.suffix == ".jsonl" and session_path.is_file():
-        return _read_session_jsonl(session_path, session_id)
-    if session_path.suffix == ".vscdb" and session_id:
-        return _read_session_db(session_path, session_id)
-    # Try resolving as directory containing state.vscdb
-    db_path = session_path / "state.vscdb"
-    if db_path.exists() and session_id:
-        return _read_session_db(db_path, session_id)
-    return None
-
-
-def _read_session_jsonl(path: Path, session_id: str | None) -> ViewerSession | None:
-    """Parse an exported Cursor JSONL file into a ViewerSession."""
-    lines = load_jsonl_dict_lines(path)
-    if not lines:
-        return None
-    metadata = lines[0]
-    resolved_id = session_id or metadata.get("composerId") or path.stem
-    messages: list[ViewerMessage] = []
-    for bubble in lines[1:]:
-        role = _normalize_role(bubble.get("type"))
-        text = _extract_text(bubble.get("text"))
-        if not text.strip():
-            continue
-        messages.append(ViewerMessage(role=role, content=text))
-    return ViewerSession(session_id=resolved_id, messages=messages)
-
-
 def _read_session_db(db_path: Path, session_id: str) -> ViewerSession | None:
     """Read one session directly from a Cursor SQLite DB by composerId."""
-    conn = sqlite3.connect(db_path)
+    conn = readonly_connect(db_path)
     try:
-        conn.execute("PRAGMA query_only=ON")
         rows = conn.execute(
             "SELECT value FROM cursorDiskKV WHERE key LIKE ? ORDER BY key",
             (f"bubbleId:{session_id}:%",),
         ).fetchall()
         messages: list[ViewerMessage] = []
-        for (raw,) in rows:
-            bubble = _parse_json_value(raw)
+        for row in rows:
+            bubble = _parse_json_value(row["value"])
             if not isinstance(bubble, dict):
                 continue
             role = _normalize_role(bubble.get("type"))
@@ -452,10 +435,5 @@ if __name__ == "__main__":
         lines = jsonl_path.read_text(encoding="utf-8").strip().splitlines()
         assert len(lines) > 1, f"Expected multiple lines, got {len(lines)}"
         print(f"  first JSONL ({jsonl_path.name}): {len(lines)} lines")
-
-        viewer = read_session(jsonl_path, first.run_id)
-        assert viewer is not None, "read_session returned None"
-        assert viewer.messages, "read_session returned no messages"
-        print(f"  read_session: {len(viewer.messages)} messages")
 
     print("Self-test passed.")

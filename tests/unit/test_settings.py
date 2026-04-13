@@ -17,8 +17,7 @@ from lerim.config.settings import (
     _parse_string_table,
     _toml_value,
     _toml_write_dict,
-    _build_dspy_role,
-    _build_llm_role,
+    _build_role,
     load_toml_file,
     save_config_patch,
     reload_config,
@@ -303,73 +302,36 @@ def test_port_over_65535_resets(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_llm_role_explicit_overrides():
-    """_build_llm_role uses explicit values over defaults."""
-    role = _build_llm_role(
+def test_agent_role_explicit_overrides():
+    """_build_role uses explicit values over defaults.
+
+    Usage limits no longer live on RoleConfig — the single-pass extraction
+    agent auto-scales its budget from trace size, so this test only checks
+    the provider/model override path.
+    """
+    role = _build_role(
         {
             "provider": "anthropic",
             "model": "claude-3",
-            "timeout_seconds": 600,
-            "max_iterations": 10,
         },
         default_provider="openrouter",
         default_model="default-model",
     )
     assert role.provider == "anthropic"
     assert role.model == "claude-3"
-    assert role.timeout_seconds == 600
 
 
-def test_llm_role_timeout_minimum():
-    """_build_llm_role enforces minimum timeout of 10s."""
-    role = _build_llm_role(
-        {"timeout_seconds": 5, "max_iterations": 10},
-        default_provider="openrouter",
-        default_model="m",
-    )
-    assert role.timeout_seconds == 10
-
-
-def test_dspy_role_windowing_required():
-    """_build_dspy_role raises when windowing config keys are missing."""
-    import pytest
-
-    with pytest.raises(
-        ValueError, match="missing required config key: max_window_tokens"
-    ):
-        _build_dspy_role(
-            {"provider": "ollama", "model": "qwen3:8b", "timeout_seconds": 180},
-            default_provider="openrouter",
-            default_model="default",
-        )
-
-
-def test_dspy_role_explicit_windowing():
-    """_build_dspy_role uses explicit windowing values when set."""
-    role = _build_dspy_role(
+def test_agent_role_explicit_request_limits():
+    """_build_role uses explicit maintain/ask request limits when set."""
+    role = _build_role(
         {
             "provider": "ollama",
             "model": "qwen3:8b",
-            "timeout_seconds": 180,
-            "max_window_tokens": 50000,
-            "window_overlap_tokens": 2000,
+            "max_iters_maintain": 15,
+            "max_iters_ask": 6,
         },
         default_provider="openrouter",
         default_model="default",
     )
-    assert role.max_window_tokens == 50000
-    assert role.window_overlap_tokens == 2000
-
-
-def test_dspy_role_max_window_tokens_minimum():
-    """_build_dspy_role enforces minimum max_window_tokens of 1000."""
-    role = _build_dspy_role(
-        {
-            "timeout_seconds": 180,
-            "max_window_tokens": -5,
-            "window_overlap_tokens": 5000,
-        },
-        default_provider="ollama",
-        default_model="m",
-    )
-    assert role.max_window_tokens == 1000
+    assert role.max_iters_maintain == 15
+    assert role.max_iters_ask == 6

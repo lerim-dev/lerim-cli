@@ -36,7 +36,7 @@ lerim --version
 You should see output like:
 
 ```
-lerim, version 0.1.69
+lerim, version X.Y.Z
 ```
 
 </div>
@@ -45,24 +45,24 @@ lerim, version 0.1.69
 
 ### Set up API keys
 
-Lerim needs an LLM provider for extraction and querying. Set at least one API key:
+Lerim needs an LLM provider for sync, maintain, and ask. Set at least one API key:
 
-=== "OpenCode Go (common default)"
-
-    ```bash
-    export OPENCODE_API_KEY="..."
-    ```
-
-    The shipped `default.toml` often uses `provider = "opencode_go"` for roles. Set this key unless you override providers in `~/.lerim/config.toml`.
-
-=== "MiniMax + ZAI"
+=== "MiniMax + ZAI (package default)"
 
     ```bash
     export MINIMAX_API_KEY="sk-cp-..."
     export ZAI_API_KEY="..."
     ```
 
-    Use when `[roles.*]` uses MiniMax and Z.AI.
+    The shipped `default.toml` uses `provider = "minimax"` for `[roles.agent]`. Set `MINIMAX_API_KEY` to run with defaults. `ZAI_API_KEY` is needed only if you configure Z.AI.
+
+=== "OpenCode Go"
+
+    ```bash
+    export OPENCODE_API_KEY="..."
+    ```
+
+    Use when your role provider is set to `opencode_go` in `~/.lerim/config.toml`.
 
 === "OpenRouter"
 
@@ -135,7 +135,7 @@ This registers the current directory and creates a `.lerim/` folder for project-
 Start Lerim as a Docker service:
 
 ```bash
-lerim up
+lerim up --build
 ```
 
 Output:
@@ -151,9 +151,9 @@ This starts a Docker container that:
 - Exposes the JSON API at `http://localhost:8765` for CLI commands
 
 !!! note
-    The first time you run `lerim up`, it will pull the Docker image from the registry. This may take a minute.
+    Use `lerim up --build` after upgrades to rebuild the local image. For routine starts, `lerim up` is usually enough.
 
-Use **[Lerim Cloud](https://lerim.dev)** for the web UI (sessions, memories, settings). `http://localhost:8765/` may show a short stub page linking to Cloud.
+Dashboard UI is not released yet. Use CLI commands for now. `http://localhost:8765/` may show a short local stub page.
 
 </div>
 
@@ -169,12 +169,6 @@ Now you can query your agent memories. Try these commands:
     lerim ask "Why did we choose this architecture?"
     ```
 
-=== "Search memories"
-
-    ```bash
-    lerim memory search "database migration"
-    ```
-
 === "List all memories"
 
     ```bash
@@ -185,16 +179,17 @@ Now you can query your agent memories. Try these commands:
 
     ```bash
     lerim status
+    lerim status --live
     ```
 
 Example output from `lerim status`:
 
 ```
-Lerim status:
-- connected_agents: 2
-- memory_count: 0
-- sessions_indexed_count: 0
-- queue: {'pending': 0, 'processing': 0, 'failed': 0}
+Lerim Status (2026-04-13 10:52:53Z)
+Summary: connected agents, memory files, indexed sessions, queue
+Project Streams: per-project state (blocked/running/queued/healthy)
+Activity (Sync + Maintain): latest runs and outcomes
+What To Do Next: actionable commands like `lerim queue --failed`
 ```
 
 !!! tip
@@ -217,11 +212,16 @@ lerim skill install
 This copies `SKILL.md` and `cli-reference.md` into `~/.agents/skills/lerim/` and
 `~/.claude/skills/lerim/` (see `lerim skill install --help`).
 
-At the start of a coding session, tell your agent:
+At the start of a coding session, your agent should read `.lerim/memory/index.md` to
+see all stored memories by category. For synthesized answers across multiple memories,
+use `lerim ask`:
 
-> Check lerim for any relevant memories about [topic you're working on].
+```bash
+lerim ask "What auth pattern do we use?"
+```
 
-Your agent will run `lerim ask` or `lerim memory search` to pull in past decisions and learnings before it starts working.
+See [Querying Memories](guides/querying-memories.md) for a recommended CLAUDE.md/AGENTS.md
+snippet to add to your project so your agent knows about Lerim from the start.
 
 ## Force a sync
 
@@ -280,10 +280,10 @@ lerim sync --agent claude
 ## What's happening in the background?
 
 1. **Session indexing** — Lerim watches your agent session stores for new traces
-2. **Extraction** — When new sessions are detected, Lerim extracts decision and learning candidates using DSPy pipelines
+2. **Extraction** — When new sessions are detected, Lerim extracts decision and learning candidates using the PydanticAI sync agent
 3. **Deduplication** — Candidates are compared against existing knowledge to avoid duplicates
 4. **Storage** — New entries are written as markdown files to `.lerim/memory/` (project scope)
-5. **Refinement** — The maintain loop periodically merges duplicates, archives low-value entries, and applies time decay to keep the context graph clean
+5. **Refinement** — The maintain flow (same PydanticAI runtime) periodically merges duplicates, archives low-value entries, and refreshes the memory index
 
 ## Next steps
 
@@ -313,11 +313,11 @@ lerim sync --agent claude
 
     [:octicons-arrow-right-24: Memory model](concepts/memory-model.md)
 
--   :material-monitor-dashboard: **Lerim Cloud**
+-   :material-monitor-dashboard: **Dashboard (Coming Soon)**
 
     ---
 
-    Web UI (sessions, memories, pipeline)
+    Current dashboard status and CLI alternatives
 
     [:octicons-arrow-right-24: Web UI](guides/dashboard.md)
 

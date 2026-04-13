@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lerim.app import cli
+from lerim.server import cli
 from tests.helpers import run_cli_json
 
 

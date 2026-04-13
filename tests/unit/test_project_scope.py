@@ -23,43 +23,26 @@ def test_git_root_none_outside_repo(tmp_path):
     assert result is None
 
 
-def test_resolve_global_only(tmp_path):
-    """scope='global_only' -> only global dir."""
+def test_resolve_no_repo_uses_global(tmp_path):
+    """Outside a git repo -> only global dir."""
     global_dir = tmp_path / "global"
     global_dir.mkdir()
+    no_repo = tmp_path / "no-repo"
+    no_repo.mkdir()
     res = resolve_data_dirs(
-        scope="global_only",
-        project_dir_name=".lerim",
         global_data_dir=global_dir,
+        repo_path=no_repo,
     )
     assert len(res.ordered_data_dirs) == 1
     assert res.ordered_data_dirs[0] == global_dir.resolve()
 
 
-def test_resolve_project_only(tmp_path):
-    """scope='project_only' -> only project dir."""
+def test_resolve_project_with_global_fallback(tmp_path):
+    """Inside a git repo -> project first, global second."""
     (tmp_path / ".git").mkdir()
     global_dir = tmp_path / "global"
     global_dir.mkdir()
     res = resolve_data_dirs(
-        scope="project_only",
-        project_dir_name=".lerim",
-        global_data_dir=global_dir,
-        repo_path=tmp_path,
-    )
-    assert len(res.ordered_data_dirs) == 1
-    project_lerim = (tmp_path / ".lerim").resolve()
-    assert res.ordered_data_dirs[0] == project_lerim
-
-
-def test_resolve_project_fallback_global(tmp_path):
-    """scope='project_fallback_global' -> project first, global second."""
-    (tmp_path / ".git").mkdir()
-    global_dir = tmp_path / "global"
-    global_dir.mkdir()
-    res = resolve_data_dirs(
-        scope="project_fallback_global",
-        project_dir_name=".lerim",
         global_data_dir=global_dir,
         repo_path=tmp_path,
     )
@@ -75,8 +58,6 @@ def test_resolve_deduplication(tmp_path):
     project_lerim = tmp_path / ".lerim"
     project_lerim.mkdir()
     res = resolve_data_dirs(
-        scope="project_fallback_global",
-        project_dir_name=".lerim",
         global_data_dir=project_lerim,
         repo_path=tmp_path,
     )

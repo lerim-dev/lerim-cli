@@ -1,112 +1,79 @@
 # Tracing
 
-Lerim uses OpenTelemetry for agent observability via
-[Pydantic Logfire](https://logfire.pydantic.dev). Stderr logs are kept minimal --
-detailed traces (model calls, tool calls, tokens, timing) go through OTel spans.
+Lerim uses [MLflow](https://mlflow.org) for PydanticAI agent observability.
+Tracing is opt-in and controlled by the `LERIM_MLFLOW` environment variable.
 
 ## What gets traced
 
-When tracing is enabled, Logfire records spans for work instrumented at startup (see **What happens at startup** below). The lead runtime uses the OpenAI Agents SDK (`Runner.run`); **built-in OpenAI Agents SDK tracing is disabled** in `LerimOAIAgent` so traces are not exported to OpenAI’s hosted tracing by default.
+When tracing is enabled, MLflow records:
 
-Typical visibility:
+- **PydanticAI model calls** -- via `mlflow.pydantic_ai.autolog()`, every language model invocation
+  across sync/maintain/ask flows is captured automatically, including
+  input prompts, outputs, token counts, and latency.
+- **Agent/tool executions** -- tool calls and agent steps are traced as nested spans within each run.
+- **agent_trace.json** -- each sync/maintain run also writes a local
+  `agent_trace.json` under the run workspace for a full tool/message history
+  (not MLflow-specific).
 
-- DSPy LLM calls (via `logfire.instrument_dspy()`)
-- Optional raw HTTP when `include_httpx = true` (provider debugging)
-- Per-run LLM cost from cost tracking (where the provider exposes usage)
+## Setup
 
-Each sync/maintain run also writes `agent_trace.json` under the run workspace for a full tool/message history (not Logfire-specific).
+MLflow ships as a Lerim dependency, so `pip install lerim` already includes it.
 
-## One-time setup
-
-### 1. Install Logfire
-
-```bash
-pip install logfire
-```
-
-### 2. Authenticate
-
-```bash
-logfire auth
-```
-
-This opens a browser to link your Logfire account and stores a token in
-`~/.logfire/`.
-
-### 3. Create a project
-
-```bash
-logfire projects new
-```
-
-Choose a project name (e.g. `lerim`). This is where your traces will appear
-in the Logfire dashboard.
-
-!!! info "Free tier"
-    Logfire has a free tier that is sufficient for development and personal use.
-    View your traces at [logfire.pydantic.dev](https://logfire.pydantic.dev).
+!!! info "No account needed"
+	Lerim writes traces to a local SQLite DB. No authentication,
+	no external account, and no API keys required. Everything stays on your machine.
 
 ## Enable tracing
 
+Set `LERIM_MLFLOW=true` in your environment or `.env` file:
+
 === "Environment variable"
 
-    Quick toggle for a single command:
+	Quick toggle for a single command:
 
-    ```bash
-    LERIM_TRACING=1 lerim sync
-    LERIM_TRACING=1 lerim ask "Why did we choose Postgres?"
-    ```
+	```bash
+	LERIM_MLFLOW=true lerim sync
+	LERIM_MLFLOW=true lerim ask "Why did we choose Postgres?"
+	```
 
-=== "Config file"
+=== ".env file"
 
-    Persistent toggle in `~/.lerim/config.toml` or `<repo>/.lerim/config.toml`:
+	Persistent toggle in `~/.lerim/.env` or `<repo>/.lerim/.env`:
 
-    ```toml
-    [tracing]
-    enabled = true
-    ```
-
-## Configuration options
-
-All options live under the `[tracing]` section in TOML config:
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `enabled` | bool | `false` | Enable OpenTelemetry tracing. Also toggleable via `LERIM_TRACING=1` env var. |
-| `include_httpx` | bool | `false` | Capture raw HTTP request/response bodies in spans. Useful for debugging provider issues. |
-| `include_content` | bool | `true` | Include prompt and completion text in trace spans. Disable to reduce trace size. |
-
-```toml
-[tracing]
-enabled = true
-include_httpx = false
-include_content = true
-```
-
-!!! warning "Sensitive data"
-    When `include_content = true` (the default), prompt and completion text is
-    sent to Logfire. If your transcripts contain sensitive information, consider
-    setting `include_content = false`.
-
-## What happens at startup
-
-When tracing is enabled, Lerim calls `configure_tracing()` once before any agent
-is constructed. This:
-
-1. Configures Logfire with `service_name="lerim"` and `send_to_logfire="if-token-present"`
-2. Instruments DSPy pipelines (`logfire.instrument_dspy()`)
-3. Optionally instruments httpx (`logfire.instrument_httpx()`) if `include_httpx = true`
+	```bash
+	LERIM_MLFLOW=true
+	```
 
 ## Viewing traces
 
-Open [logfire.pydantic.dev](https://logfire.pydantic.dev) and select your project.
-You'll see:
+Start the MLflow UI and open your browser:
 
-- **Timeline** -- DSPy and HTTP-related activity as spans (lead SDK tracing disabled; use `agent_trace.json` in run folders for full tool turns)
-- **Span tree** -- nested spans from DSPy and optional httpx
-- **Token usage** -- per-span token counts
-- **Timing** -- latency for each operation
+```bash
+mlflow ui
+```
 
-!!! tip "DSPy visibility"
-    DSPy pipelines run with `verbose=False` in stderr, but their LLM calls
-    are visible in Logfire via httpx spans when `include_httpx = true`.
+Then navigate to [http://localhost:5000](http://localhost:5000). You'll see:
+
+- **Runs** -- each sync or maintain cycle appears as a separate run with
+  parameters, metrics, and artifacts.
+- **Traces** -- expand a run to see the full trace tree of model calls.
+- **Model calls** -- every PydanticAI model request is logged with input prompts,
+  outputs, token counts, and latency.
+- **Spans** -- nested spans show the call hierarchy from the top-level
+  orchestration down to individual LM calls and tool invocations.
+
+Lerim stores trace data in `~/.lerim/mlflow.db` (SQLite).
+If you run `mlflow ui` from any directory, you can point it explicitly:
+
+```bash
+mlflow ui --backend-store-uri sqlite:///$HOME/.lerim/mlflow.db
+```
+
+!!! tip "Filtering"
+	Use the MLflow search bar to filter runs by experiment name, tags, or
+	parameters. This is useful when you have many sync/maintain cycles logged.
+
+## Notes
+
+- Lerim configures MLflow tracking to a local SQLite store (`~/.lerim/mlflow.db`).
+- `LERIM_MLFLOW=true` is the main switch to enable or disable tracing.

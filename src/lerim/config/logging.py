@@ -212,7 +212,7 @@ def configure_logging(level: str | None = None) -> None:
         logging.getLogger(name).propagate = True
 
     # Silence noisy third-party loggers
-    for noisy in ("LiteLLM", "litellm", "httpx", "httpcore", "openai", "dspy"):
+    for noisy in ("httpx", "httpcore", "openai"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 

@@ -11,10 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ripgrep &&
 COPY . /build
 RUN pip install --no-cache-dir /build && rm -rf /build
 
-# Pre-download the fastembed model so it's cached in the image
-# (the container has a read-only /tmp tmpfs that's too small for model downloads)
-ENV FASTEMBED_CACHE_PATH=/opt/lerim/models
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
 
 EXPOSE 8765
 

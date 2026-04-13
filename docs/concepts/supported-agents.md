@@ -37,7 +37,7 @@ flowchart LR
 |------|--------|---------|
 | 1 | `default_path()` | Returns the default traces directory for this platform on the current OS |
 | 2 | `count_sessions(path)` | Counts how many sessions exist under the given path |
-| 3 | `iter_sessions(traces_dir, start, end, known_run_hashes)` | Yields `SessionRecord` entries within a time window, skipping already-known sessions by hash |
+| 3 | `iter_sessions(traces_dir, start, end, known_run_ids)` | Yields `SessionRecord` entries within a time window, skipping already-known sessions by run ID |
 | 4 | `find_session_path(session_id, traces_dir)` | Locates a specific session file on disk by session ID |
 | 5 | `read_session(session_path, session_id)` | Parses one session file and returns a normalized `ViewerSession` for session viewers (e.g. Cloud) |
 
@@ -47,9 +47,11 @@ Adapters handle platform-specific formats (JSONL, SQLite) and normalize them int
 - `agent_type` — platform name (`claude`, `codex`, `cursor`, `opencode`)
 - `session_path` — absolute path to the session file on disk
 - `repo_path` — which project directory the session was working in
+- `repo_name` — detected repository name (if available)
 - `start_time` — when the session started
+- `status`, `duration_ms` — normalized execution metadata
 - `message_count`, `tool_call_count`, `error_count`, `total_tokens` — session metrics
-- `content_hash` — for change detection (skip re-indexing unchanged sessions)
+- `summaries` — optional short summary snippets from the source platform
 
 ---
 
@@ -135,7 +137,7 @@ flowchart TD
     C --> D{"Matches a\nregistered project?"}
     D -->|Yes| E["Enqueued for extraction"]
     D -->|No| F["Indexed only\n(no memories written)"]
-    E --> G["Lead agent processes\n(sync path)"]
+    E --> G["PydanticAI sync agent\nprocesses session"]
     G --> H["Memories written to\n<repo>/.lerim/memory/"]
 ```
 
@@ -165,7 +167,7 @@ flowchart TD
 
     ---
 
-    Primitives, frontmatter, lifecycle, and decay.
+    Types, layout, and lifecycle.
 
     [:octicons-arrow-right-24: Memory model](memory-model.md)
 

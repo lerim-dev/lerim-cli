@@ -71,10 +71,10 @@ LLM_FALLBACK_PROVIDER=${LLM_FALLBACK_PROVIDER:-openrouter}
 LLM_FALLBACK_MODEL=${LLM_FALLBACK_MODEL:-x-ai/grok-4.1-fast}
 LLM_FALLBACK_BASE_URL=${LLM_FALLBACK_BASE_URL:-}
 
-AGENT_PROVIDER=${AGENT_PROVIDER:-openrouter}
-AGENT_MODEL=${AGENT_MODEL:-x-ai/grok-4.1-fast}
-AGENT_FALLBACK_PROVIDER=${AGENT_FALLBACK_PROVIDER:-openrouter}
-AGENT_FALLBACK_MODEL=${AGENT_FALLBACK_MODEL:-}
+AGENT_PROVIDER=${AGENT_PROVIDER:-minimax}
+AGENT_MODEL=${AGENT_MODEL:-MiniMax-M2.5}
+AGENT_FALLBACK_PROVIDER=${AGENT_FALLBACK_PROVIDER:-zai}
+AGENT_FALLBACK_MODEL=${AGENT_FALLBACK_MODEL:-glm-4.7}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -134,6 +134,8 @@ print_kv "ZAI_CODING_API_KEY" "$(key_status ZAI_CODING_API_KEY)"
 print_kv "OPENAI_API_KEY" "$(key_status OPENAI_API_KEY)"
 print_kv "OPENROUTER_API_KEY" "$(key_status OPENROUTER_API_KEY)"
 print_kv "ANTHROPIC_API_KEY" "$(key_status ANTHROPIC_API_KEY)"
+print_kv "MINIMAX_API_KEY" "$(key_status MINIMAX_API_KEY)"
+print_kv "OPENCODE_API_KEY" "$(key_status OPENCODE_API_KEY)"
 
 # Config comes from TOML layers now (src/lerim/config/default.toml -> ~/.lerim/config.toml -> project).
 # Only API keys are read from env (ANTHROPIC_API_KEY, OPENROUTER_API_KEY, ZAI_API_KEY).

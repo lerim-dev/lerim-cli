@@ -1,15 +1,14 @@
 # Lerim CLI Reference (Source Of Truth)
 
 Canonical parser source:
-- `src/lerim/app/cli.py`
+- `src/lerim/server/cli.py`
 
 Canonical command:
 - `lerim`
 
 Commands that call the HTTP API (`ask`, `sync`, `maintain`, `status`) require a
 running server (`lerim up` or `lerim serve`). Most other commands are **host-only**
-(local files / Docker CLI / queue DB). `memory search`, `memory list`, and
-`memory add` work without a server (they read or write the memory tree directly).
+(local files / Docker CLI / queue DB). `memory list` and `memory reset` work without a server.
 
 ## Global flags
 
@@ -36,7 +35,7 @@ running server (`lerim up` or `lerim serve`). Most other commands are **host-onl
 - `sync`
 - `maintain`
 - `dashboard`
-- `memory` (`search`, `list`, `add`, `reset`)
+- `memory` (`list`, `reset`)
 - `ask`
 - `status`
 - `queue`
@@ -69,7 +68,7 @@ lerim project remove my-app             # unregister a project
 
 Adding/removing a project restarts the Docker container if running.
 
-### `lerim up` / `lerim down` / `lerim logs` (host-only)
+### `lerim up` / `lerim down` (host-only)
 
 Docker container lifecycle.
 
@@ -77,19 +76,36 @@ Docker container lifecycle.
 lerim up                    # start Lerim (pull GHCR image)
 lerim up --build            # build from local Dockerfile instead
 lerim down                  # stop it
-lerim logs                  # view logs
-lerim logs --follow         # tail logs
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--build` | off | Build from local Dockerfile instead of pulling the GHCR image |
 
+### `lerim logs` (host-only)
+
+View local log entries from `~/.lerim/logs/lerim.jsonl` (last 50 by default).
+
+```bash
+lerim logs                      # show recent logs
+lerim logs --follow             # tail logs continuously
+lerim logs --level error        # filter by level
+lerim logs --since 2h           # entries from the last 2 hours
+lerim logs --json               # raw JSONL output
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--follow`, `-f` | off | Live tail: watch for new log lines |
+| `--level` | -- | Filter by log level (case-insensitive): error, warning, info |
+| `--since` | -- | Show entries from the last N hours/minutes/days (e.g. `1h`, `30m`, `2d`) |
+| `--json` | off | Output raw JSONL lines instead of formatted text |
+
 ### `lerim serve`
 
 JSON HTTP API + daemon loop in one process (Docker entrypoint). The **web UI**
-is **[Lerim Cloud](https://lerim.dev)** — not bundled in this repo. GET `/` may
-return a stub page linking to Cloud when no static assets are present.
+is not bundled in this repo yet. GET `/` may return a stub page when no
+static assets are present.
 
 ```bash
 lerim serve
@@ -120,7 +136,7 @@ lerim connect remove claude               # disconnect Claude
 ### `lerim sync`
 
 Hot-path: discover new agent sessions from connected platforms, enqueue them,
-and run DSPy extraction to create memory primitives.
+and run PydanticAI extraction to create memories.
 Requires a running server (`lerim up` or `lerim serve`).
 
 **Time window** controls which sessions to scan:
@@ -157,14 +173,14 @@ lerim sync --ignore-lock            # skip writer lock (debugging only)
 | `--ignore-lock` | off | Skip writer lock (risk of corruption) |
 
 Notes:
-- `sync` is the hot path (queue + DSPy extraction + lead decision/write).
+- `sync` is the hot path (queue + PydanticAI extraction + lead write).
 - Cold maintenance work is not executed in `sync`.
 
 ### `lerim maintain`
 
 Cold-path: offline memory refinement. Scans existing memories and merges
 duplicates, archives low-value items, and consolidates related memories.
-Archived items go to `memory/archived/{decisions,learnings}/`.
+Archived items go to `memory/archived/`.
 Requires a running server (`lerim up` or `lerim serve`).
 
 ```bash
@@ -186,71 +202,33 @@ on `sync_interval_minutes` / `maintain_interval_minutes`) runs **inside**
 
 ### `lerim dashboard`
 
-Prints the **local API** base URL (`http://localhost:<port>/`) and reminds you
-that the browser UI is on **Lerim Cloud** (`https://lerim.dev`).
+Shows current web UI status and lists CLI alternatives for common tasks.
 
 ```bash
-lerim dashboard                  # print API URL + Cloud hint
-lerim dashboard --port 9000      # port shown in the API URL
+lerim dashboard
 ```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--port` | config `server.port` (`8765`) | Port shown in the printed API URL |
 
 ### `lerim memory`
 
 Subcommands for managing the memory store directly.
 Memories are stored as markdown files in `.lerim/memory/`.
 
-#### `lerim memory search`
-
-Full-text keyword search across memory titles, bodies, and tags (case-insensitive).
-
-```bash
-lerim memory search 'database migration'
-lerim memory search pytest --limit 5
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `query` | required | Search string to match |
-| `--project` | -- | Filter to project (not yet implemented) |
-| `--limit` | `20` | Max results |
-
 #### `lerim memory list`
 
-List stored memories (decisions and learnings), ordered by recency.
+List memory files for all registered projects (default) or one selected project.
 
 ```bash
 lerim memory list
+lerim memory list --scope project --project lerim-cli
 lerim memory list --limit 10
 lerim memory list --json       # structured JSON output
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--project` | -- | Filter to project (not yet implemented) |
+| `--scope` | `all` | Read scope: `all` or `project` |
+| `--project` | -- | Project name/path when `--scope=project` |
 | `--limit` | `50` | Max items |
-
-#### `lerim memory add`
-
-Manually create a single memory record.
-
-```bash
-lerim memory add --title "Use uv for deps" --body "uv is faster than pip"
-lerim memory add --title "API auth" --body "Use bearer tokens" --primitive decision
-lerim memory add --title "Slow test" --body "Integration suite 5min" --kind friction --confidence 0.9 --tags ci,testing
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--title` | required | Short descriptive title |
-| `--body` | required | Full body content |
-| `--primitive` | `learning` | `decision` or `learning` |
-| `--kind` | `insight` | `insight`, `procedure`, `friction`, `pitfall`, `preference` |
-| `--confidence` | `0.7` | Score from 0.0 to 1.0 |
-| `--tags` | -- | Comma-separated tags (e.g. `python,testing,ci`) |
 
 #### `lerim memory reset`
 
@@ -281,14 +259,14 @@ Requires a running server (`lerim up` or `lerim serve`).
 
 ```bash
 lerim ask 'What auth pattern do we use?'
-lerim ask "How is the database configured?" --limit 5
+lerim ask "How is the database configured?"
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `question` | required | Your question (quote if spaces) |
-| `--project` | -- | Scope to project (not yet implemented) |
-| `--limit` | `12` | Max memory items as context |
+| `--scope` | `all` | Read scope: `all` or `project` |
+| `--project` | -- | Project name/path when `--scope=project` |
 
 Notes:
 - Ask uses memory retrieval evidence.
@@ -302,6 +280,8 @@ Requires a running server (`lerim up` or `lerim serve`).
 
 ```bash
 lerim status
+lerim status --scope project --project lerim-cli
+lerim status --live
 lerim status --json    # structured JSON output
 ```
 
@@ -321,7 +301,17 @@ lerim queue --json
 |------|-------------|
 | `--failed` | Only failed + dead_letter jobs |
 | `--status` | Filter by status (`pending`, `running`, `failed`, `dead_letter`, `done`) |
-| `--project` | Substring match on repo path |
+| `--project` | Exact project name/path match |
+| `--project-like` | Substring match on repo path (legacy behavior) |
+
+### `lerim unscoped`
+
+Host-only: list indexed sessions that do not match any registered project.
+
+```bash
+lerim unscoped
+lerim unscoped --limit 100
+```
 
 ### `lerim retry`
 
@@ -345,7 +335,7 @@ lerim skip --all
 
 ### `lerim auth`
 
-Authenticate with Lerim Cloud (browser login, token, status, logout).
+Authenticate with the hosted auth service (browser login, token, status, logout).
 
 ```bash
 lerim auth                    # browser OAuth (default)

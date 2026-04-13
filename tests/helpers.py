@@ -8,7 +8,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 
-from lerim.config.settings import CodexRoleConfig, Config, DSPyRoleConfig, LLMRoleConfig
+from lerim.config.settings import Config, RoleConfig
 
 
 def make_config(base: Path) -> Config:
@@ -18,55 +18,19 @@ def make_config(base: Path) -> Config:
         global_data_dir=base,
         memory_dir=base / "memory",
         index_dir=base / "index",
-        memories_db_path=base / "index" / "memories.sqlite3",
-        graph_db_path=base / "index" / "graph.sqlite3",
         sessions_db_path=base / "index" / "sessions.sqlite3",
         platforms_path=base / "platforms.json",
-        memory_scope="global_only",
-        memory_project_dir_name=".lerim",
-        decay_enabled=True,
-        decay_days=180,
-        decay_min_confidence_floor=0.1,
-        decay_archive_threshold=0.2,
-        decay_recent_access_grace_days=30,
         server_host="127.0.0.1",
         server_port=8765,
         sync_interval_minutes=5,
         maintain_interval_minutes=5,
-        lead_role=LLMRoleConfig(
+        agent_role=RoleConfig(
             provider="openrouter",
             model="x-ai/grok-4.1-fast",
-            api_base="",
-            fallback_models=(),
-            timeout_seconds=300,
-            max_iterations=10,
-            openrouter_provider_order=(),
-        ),
-        codex_role=CodexRoleConfig(),
-        extract_role=DSPyRoleConfig(
-            provider="openrouter",
-            model="openai/gpt-5-nano",
-            api_base="",
-            timeout_seconds=180,
-            max_window_tokens=300000,
-            window_overlap_tokens=5000,
-            openrouter_provider_order=(),
-        ),
-        summarize_role=DSPyRoleConfig(
-            provider="openrouter",
-            model="openai/gpt-5-nano",
-            api_base="",
-            timeout_seconds=180,
-            max_window_tokens=300000,
-            window_overlap_tokens=5000,
-            openrouter_provider_order=(),
         ),
         sync_window_days=7,
         sync_max_sessions=50,
-        parallel_pipelines=True,
-        tracing_enabled=False,
-        tracing_include_httpx=False,
-        tracing_include_content=True,
+        mlflow_enabled=False,
         anthropic_api_key=None,
         openai_api_key=None,
         zai_api_key=None,
@@ -98,35 +62,15 @@ def write_test_config(tmp_path: Path, **sections: dict[str, Any]) -> Path:
     """
     all_sections: dict[str, dict[str, Any]] = {
         "data": {"dir": str(tmp_path)},
-        "memory": {"scope": "global_only"},
     }
 
-    legacy_agent = sections.pop("agent", None)
-    if isinstance(legacy_agent, dict):
-        lead = all_sections.setdefault("roles.lead", {})
-        if "provider" in legacy_agent:
-            lead["provider"] = legacy_agent["provider"]
-        if "model" in legacy_agent:
-            lead["model"] = legacy_agent["model"]
-        if "timeout" in legacy_agent:
-            lead["timeout_seconds"] = legacy_agent["timeout"]
-
-    legacy_dspy = sections.pop("dspy", None)
-    if isinstance(legacy_dspy, dict):
-        extract = all_sections.setdefault("roles.extract", {})
-        summarize = all_sections.setdefault("roles.summarize", {})
-        for key, value in legacy_dspy.items():
-            mapped = {
-                "provider": "provider",
-                "model": "model",
-                "api_base": "api_base",
-                "max_window_tokens": "max_window_tokens",
-                "window_overlap_tokens": "window_overlap_tokens",
-            }.get(key)
-            if mapped:
-                extract[mapped] = value
-                summarize[mapped] = value
-
+    agent_section = sections.pop("agent", None)
+    if isinstance(agent_section, dict):
+        lead = all_sections.setdefault("roles.agent", {})
+        if "provider" in agent_section:
+            lead["provider"] = agent_section["provider"]
+        if "model" in agent_section:
+            lead["model"] = agent_section["model"]
     for name, payload in sections.items():
         if isinstance(payload, dict):
             all_sections[name] = payload
@@ -150,7 +94,7 @@ def write_test_config(tmp_path: Path, **sections: dict[str, Any]) -> Path:
 
 def run_cli(args: list[str]) -> tuple[int, str]:
     """Run CLI command and return ``(exit_code, stdout_text)``."""
-    from lerim.app import cli
+    from lerim.server import cli
 
     out = io.StringIO()
     with redirect_stdout(out):

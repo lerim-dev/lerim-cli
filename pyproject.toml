@@ -4,27 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lerim"
-version = "0.1.70"
+version = "0.1.72"
 description = "Continual learning layer for coding agents and software projects."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "BSL-1.1" }
 dependencies = [
     "pydantic==2.12.5",
+    "pydantic-ai==1.70.0",
+    "pydantic-evals==1.70.0",
     "eval_type_backport==0.3.1; python_version < '3.13'",
     "tomli>=2.0; python_version < '3.11'",
     "python-dotenv==1.2.2",
     "PyYAML==6.0.3",
     "loguru==0.7.3",
-    "dspy==3.1.3",
     "python-frontmatter==1.1.0",
     "openrouter==0.7.11",
-    "logfire[dspy]==4.30.0",
-    "litellm==1.81.13",
+    "mlflow>=3.10.1",
     "rich==14.3.3",
-    "openai-agents>=0.13.1",
-    "fastembed>=0.8.0",
-    "sqlite-vec>=0.1.6",
 ]
 
 [project.urls]
@@ -54,7 +51,7 @@ docs = [
 ]
 
 [project.scripts]
-lerim = "lerim.app.cli:main"
+lerim = "lerim.server.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -84,8 +81,8 @@ extend-select = ["B006"]
 ignore = ["E501"]
 
 [tool.vulture]
-paths = ["src/"]
-min_confidence = 100
+paths = ["src/lerim/", "vulture_whitelist.py"]
+min_confidence = 60
 
 [dependency-groups]
 dev = [

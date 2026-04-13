@@ -1,80 +1,185 @@
-"""OpenTelemetry tracing for agent instrumentation.
+"""MLflow tracing for PydanticAI agent observability.
 
-Sends spans to Logfire cloud (free tier). Activated by ``tracing.enabled = true``
-in config or ``LERIM_TRACING=1``.
+Activates MLflow autologging for PydanticAI when ``LERIM_MLFLOW=true`` is set.
+All PydanticAI agent/model/tool spans are captured automatically.
 
-Instruments three layers:
-  1. DSPy extraction/summarisation pipelines (ChainOfThought, Predict)
-  2. OpenAI Agents SDK agent loop (LLM calls, tool decisions, tool executions)
-  3. Manual spans in daemon / oai_agent / extract_pipeline for orchestration context
+Traces are stored in a local SQLite database (~/.lerim/mlflow.db).
+External OTel OTLP export is disabled to avoid noise when no collector runs.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import os
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
 
-import logfire
-from logfire import ScrubMatch, ScrubbingOptions
+import mlflow
+import mlflow.pydantic_ai
+from mlflow.exceptions import MlflowException
+from mlflow.store.db.utils import (
+	_initialize_tables,
+	_upgrade_db,
+	_verify_schema,
+	create_sqlalchemy_engine,
+)
 from loguru import logger
 
 from lerim.config.settings import Config
 
 
-def _allow_session_fields(match: ScrubMatch) -> Any:
-	"""Allow 'session' pattern through — Lerim sessions are coding sessions, not auth.
-
-	Logfire's default scrubber treats 'session' as sensitive (session tokens,
-	session cookies). In Lerim, 'session' refers to coding agent sessions and
-	appears in every span attribute and LLM prompt. Scrubbing it makes all
-	traces unreadable.
-	"""
-	if match.pattern_match.group(0).lower() == "session":
-		return match.value  # keep original value
-	return None  # scrub other patterns (password, api_key, etc.)
-
-
-def configure_tracing(config: Config) -> None:
-	"""Activate OpenTelemetry tracing if enabled in config or via LERIM_TRACING env var.
-
-	Sends traces to Logfire cloud via the token in ``.logfire/`` directory.
-	Must be called once at startup before any agent is constructed.
-	"""
-	if not config.tracing_enabled:
-		return
-
-	logfire.configure(
-		send_to_logfire="if-token-present",
-		service_name="lerim",
-		console=False,
-		scrubbing=ScrubbingOptions(callback=_allow_session_fields),
+def _is_recoverable_schema_reset_error(message: str) -> bool:
+	"""Return True when local MLflow DB should be reset and reinitialized."""
+	text = message.lower()
+	return (
+		"can't locate revision" in text
+		or "cannot locate revision" in text
+		or "no such table" in text
+		or "no such column" in text
 	)
 
-	# --- DSPy instrumentation (extraction / summarisation) ---------------
-	logfire.instrument_dspy()
 
-	# --- OpenAI Agents SDK instrumentation (agent loop) ------------------
-	# Wraps the OAI SDK's TraceProvider so every agent span (LLM call,
-	# tool decision, tool execution) becomes an OTel span in Logfire.
-	logfire.instrument_openai_agents()
+def _backup_and_reset_mlflow_db(db_path: Path) -> Path | None:
+	"""Backup current MLflow DB and remove broken DB files for re-init."""
+	if not db_path.exists():
+		return None
+	timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+	backup_path = db_path.with_name(f"{db_path.stem}.backup-{timestamp}{db_path.suffix}")
+	backup_path.parent.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(db_path, backup_path)
+	for suffix in ("", "-wal", "-shm"):
+		candidate = Path(str(db_path) + suffix)
+		try:
+			candidate.unlink()
+		except FileNotFoundError:
+			continue
+	return backup_path
 
-	# Remove the default OAI BatchTraceProcessor → BackendSpanExporter
-	# which would otherwise export spans to OpenAI's servers.
-	# The Logfire wrapper handles all export via OTel.
-	from agents.tracing import set_trace_processors
-	set_trace_processors([])
 
-	# --- Optional HTTP instrumentation -----------------------------------
-	if config.tracing_include_httpx:
-		logfire.instrument_httpx(capture_all=True)
+def _ensure_mlflow_schema(tracking_uri: str, db_path: str) -> None:
+	"""Ensure MLflow SQLite schema matches installed MLflow revision.
 
-	logger.info("OTel tracing enabled → Logfire (DSPy + OAI Agents)")
+	When MLflow is upgraded, existing local SQLite files may be on an older
+	alembic revision. In that case we run the same DB upgrade used by
+	``mlflow db upgrade`` so runtime startup remains seamless.
+	"""
+	engine = create_sqlalchemy_engine(tracking_uri)
+	try:
+		_verify_schema(engine)
+	except MlflowException as exc:
+		error_msg = str(exc).lower()
+		if "out-of-date database schema" in error_msg:
+			logger.info("Upgrading MLflow database schema at {}", db_path)
+			try:
+				_upgrade_db(engine)
+			except Exception as upgrade_exc:
+				if _is_recoverable_schema_reset_error(str(upgrade_exc)):
+					backup_path = _backup_and_reset_mlflow_db(Path(db_path))
+					logger.warning(
+						"MLflow schema upgrade failed; backed up DB to {} and reinitializing {}",
+						str(backup_path) if backup_path else "<none>",
+						db_path,
+					)
+					fresh_engine = create_sqlalchemy_engine(tracking_uri)
+					_initialize_tables(fresh_engine)
+					return
+				raise
+			return
+		if _is_recoverable_schema_reset_error(str(exc)):
+			backup_path = _backup_and_reset_mlflow_db(Path(db_path))
+			logger.warning(
+				"MLflow revision state is broken; backed up DB to {} and reinitializing {}",
+				str(backup_path) if backup_path else "<none>",
+				db_path,
+			)
+			fresh_engine = create_sqlalchemy_engine(tracking_uri)
+			_initialize_tables(fresh_engine)
+			return
+		raise
+	except Exception as exc:
+		if _is_recoverable_schema_reset_error(str(exc)):
+			backup_path = _backup_and_reset_mlflow_db(Path(db_path))
+			logger.warning(
+				"MLflow revision state is broken; backed up DB to {} and reinitializing {}",
+				str(backup_path) if backup_path else "<none>",
+				db_path,
+			)
+			fresh_engine = create_sqlalchemy_engine(tracking_uri)
+			_initialize_tables(fresh_engine)
+			return
+		raise
+
+
+def configure_tracing(config: Config, experiment_name: str = "lerim") -> None:
+	"""Activate MLflow PydanticAI autologging if enabled via env/config.
+
+	Must be called once at startup before any agent is constructed.
+
+	Args:
+		config: Lerim config (must have mlflow_enabled=True to take effect).
+		experiment_name: MLflow experiment to log into. Use "lerim" for production
+			runs and "lerim-evals" (or any custom name) for evaluation runs so they
+			show up in separate tabs in the MLflow UI.
+	"""
+	if not config.mlflow_enabled:
+		return
+
+	# Disable external OTel OTLP export — we use MLflow's SQLite backend only.
+	# Without this, a stale OTEL_EXPORTER_OTLP_ENDPOINT env var causes
+	# "Exception while exporting Span" errors on every LLM call.
+	os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
+	os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
+
+	db_path = config.global_data_dir / "mlflow.db"
+	tracking_uri = f"sqlite:///{db_path}"
+
+	def _activate_mlflow() -> None:
+		mlflow.set_tracking_uri(tracking_uri)
+		mlflow.set_experiment(experiment_name)
+		mlflow.pydantic_ai.autolog()
+
+	try:
+		_ensure_mlflow_schema(tracking_uri, str(db_path))
+		_activate_mlflow()
+		logger.info(
+			"MLflow tracing enabled (PydanticAI autolog) → sqlite:///{} experiment={}",
+			db_path,
+			experiment_name,
+		)
+	except Exception as exc:
+		if _is_recoverable_schema_reset_error(str(exc)):
+			backup_path = _backup_and_reset_mlflow_db(Path(db_path))
+			logger.warning(
+				"MLflow revision state is broken; backed up DB to {} and reinitializing {}",
+				str(backup_path) if backup_path else "<none>",
+				db_path,
+			)
+			try:
+				_ensure_mlflow_schema(tracking_uri, str(db_path))
+				_activate_mlflow()
+				logger.info(
+					"MLflow tracing enabled (PydanticAI autolog) → sqlite:///{} experiment={}",
+					db_path,
+					experiment_name,
+				)
+				return
+			except Exception as retry_exc:
+				logger.warning(
+					"MLflow tracing disabled due to initialization error: {}",
+					retry_exc,
+				)
+				return
+		logger.warning(
+			"MLflow tracing disabled due to initialization error: {}",
+			exc,
+		)
 
 
 if __name__ == "__main__":
-    """Minimal self-test: configure_tracing runs without error."""
-    from lerim.config.settings import load_config
+	"""Minimal self-test: configure_tracing runs without error."""
+	from lerim.config.settings import load_config
 
-    cfg = load_config()
-    configure_tracing(cfg)
-    state = "enabled" if cfg.tracing_enabled else "disabled"
-    print(f"tracing.py self-test passed (tracing {state})")
+	cfg = load_config()
+	configure_tracing(cfg)
+	state = "enabled" if cfg.mlflow_enabled else "disabled"
+	print(f"tracing.py self-test passed (mlflow {state})")

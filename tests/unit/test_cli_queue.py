@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from lerim.app import cli
+from lerim.server import cli
 
 
 QUEUE_COUNTS = {"pending": 0, "running": 0, "done": 0, "failed": 0, "dead_letter": 0}
@@ -161,7 +161,7 @@ def test_format_queue_counts_order() -> None:
 def test_cmd_queue_empty(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""No jobs produces 'no jobs' message."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 	monkeypatch.setattr("lerim.sessions.catalog.list_queue_jobs", lambda **kw: [])
 	monkeypatch.setattr("lerim.sessions.catalog.count_session_jobs_by_status", lambda: QUEUE_COUNTS)
 
@@ -185,7 +185,7 @@ def test_cmd_queue_json(monkeypatch: pytest.MonkeyPatch) -> None:
 		},
 	]
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 	monkeypatch.setattr("lerim.sessions.catalog.list_queue_jobs", lambda **kw: fake_jobs)
 	monkeypatch.setattr(
 		"lerim.sessions.catalog.count_session_jobs_by_status",
@@ -208,7 +208,7 @@ def test_cmd_queue_json(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_retry_no_args(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""No run_id, --project, or --all returns exit 2."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 
 	args = argparse.Namespace(run_id=None, project=None, all=False)
 	rc = cli._cmd_retry(args)
@@ -219,7 +219,7 @@ def test_cmd_retry_no_args(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_retry_prefix_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""Unresolvable prefix returns exit 1."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 	monkeypatch.setattr("lerim.sessions.catalog.resolve_run_id_prefix", lambda p: None)
 
 	args = argparse.Namespace(run_id="abc123def456", project=None, all=False)
@@ -232,7 +232,7 @@ def test_cmd_retry_prefix_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_retry_prefix_too_short(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""Run ID under 6 chars returns exit 2."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 
 	args = argparse.Namespace(run_id="abc", project=None, all=False)
 	rc = cli._cmd_retry(args)
@@ -244,7 +244,7 @@ def test_cmd_retry_prefix_too_short(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_retry_success(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""Valid prefix + retry succeeds returns exit 0."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 	monkeypatch.setattr("lerim.sessions.catalog.resolve_run_id_prefix", lambda p: "abc123def456full")
 	monkeypatch.setattr("lerim.sessions.catalog.retry_session_job", lambda rid: True)
 	monkeypatch.setattr("lerim.sessions.catalog.count_session_jobs_by_status", lambda: QUEUE_COUNTS)
@@ -264,7 +264,7 @@ def test_cmd_retry_all(monkeypatch: pytest.MonkeyPatch) -> None:
 		{"run_id": "dead2_full_id_here", "status": "dead_letter"},
 	]
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 	monkeypatch.setattr("lerim.sessions.catalog.list_queue_jobs", lambda **kw: dead_jobs)
 	monkeypatch.setattr(
 		"lerim.sessions.catalog.retry_session_job",
@@ -283,7 +283,7 @@ def test_cmd_retry_all(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_retry_not_dead_letter(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""Retry returns False (job not dead_letter) gives exit 1."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 	monkeypatch.setattr("lerim.sessions.catalog.resolve_run_id_prefix", lambda p: "abc123full")
 	monkeypatch.setattr("lerim.sessions.catalog.retry_session_job", lambda rid: False)
 
@@ -297,8 +297,8 @@ def test_cmd_retry_not_dead_letter(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_retry_project(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""--project retries all dead_letter jobs for a resolved project."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
-	monkeypatch.setattr("lerim.app.cli._resolve_project_repo_path", lambda n: "/tmp/my-proj")
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._resolve_project_repo_path", lambda n: "/tmp/my-proj")
 	monkeypatch.setattr("lerim.sessions.catalog.retry_project_jobs", lambda rp: 3)
 	monkeypatch.setattr("lerim.sessions.catalog.count_session_jobs_by_status", lambda: QUEUE_COUNTS)
 
@@ -312,8 +312,8 @@ def test_cmd_retry_project(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_retry_project_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""--project with unknown project returns exit 1."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
-	monkeypatch.setattr("lerim.app.cli._resolve_project_repo_path", lambda n: None)
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._resolve_project_repo_path", lambda n: None)
 
 	args = argparse.Namespace(run_id=None, project="nope", all=False)
 	rc = cli._cmd_retry(args)
@@ -328,7 +328,7 @@ def test_cmd_retry_project_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_skip_no_args(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""No run_id, --project, or --all returns exit 2."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 
 	args = argparse.Namespace(run_id=None, project=None, all=False)
 	rc = cli._cmd_skip(args)
@@ -339,7 +339,7 @@ def test_cmd_skip_no_args(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_skip_success(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""Valid prefix + skip succeeds returns exit 0."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 	monkeypatch.setattr("lerim.sessions.catalog.resolve_run_id_prefix", lambda p: "abc123def456full")
 	monkeypatch.setattr("lerim.sessions.catalog.skip_session_job", lambda rid: True)
 	monkeypatch.setattr("lerim.sessions.catalog.count_session_jobs_by_status", lambda: QUEUE_COUNTS)
@@ -360,7 +360,7 @@ def test_cmd_skip_all(monkeypatch: pytest.MonkeyPatch) -> None:
 		{"run_id": "dead3_full_id_here", "status": "dead_letter"},
 	]
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 	monkeypatch.setattr("lerim.sessions.catalog.list_queue_jobs", lambda **kw: dead_jobs)
 	monkeypatch.setattr(
 		"lerim.sessions.catalog.skip_session_job",
@@ -379,7 +379,7 @@ def test_cmd_skip_all(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_skip_prefix_too_short(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""Run ID under 6 chars returns exit 2."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 
 	args = argparse.Namespace(run_id="abc", project=None, all=False)
 	rc = cli._cmd_skip(args)
@@ -391,7 +391,7 @@ def test_cmd_skip_prefix_too_short(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_skip_prefix_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""Unresolvable prefix returns exit 1."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 	monkeypatch.setattr("lerim.sessions.catalog.resolve_run_id_prefix", lambda p: None)
 
 	args = argparse.Namespace(run_id="abc123def456", project=None, all=False)
@@ -404,7 +404,7 @@ def test_cmd_skip_prefix_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_skip_not_dead_letter(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""Skip returns False (job not dead_letter) gives exit 1."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
 	monkeypatch.setattr("lerim.sessions.catalog.resolve_run_id_prefix", lambda p: "abc123full")
 	monkeypatch.setattr("lerim.sessions.catalog.skip_session_job", lambda rid: False)
 
@@ -418,8 +418,8 @@ def test_cmd_skip_not_dead_letter(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_skip_project(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""--project skips all dead_letter jobs for a resolved project."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
-	monkeypatch.setattr("lerim.app.cli._resolve_project_repo_path", lambda n: "/tmp/my-proj")
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._resolve_project_repo_path", lambda n: "/tmp/my-proj")
 	monkeypatch.setattr("lerim.sessions.catalog.skip_project_jobs", lambda rp: 2)
 	monkeypatch.setattr("lerim.sessions.catalog.count_session_jobs_by_status", lambda: QUEUE_COUNTS)
 
@@ -433,8 +433,8 @@ def test_cmd_skip_project(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cmd_skip_project_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
 	"""--project with unknown project returns exit 1."""
 	output: list[str] = []
-	monkeypatch.setattr("lerim.app.cli._emit", lambda *a, **kw: output.append(str(a[0])))
-	monkeypatch.setattr("lerim.app.cli._resolve_project_repo_path", lambda n: None)
+	monkeypatch.setattr("lerim.server.cli._emit", lambda *a, **kw: output.append(str(a[0])))
+	monkeypatch.setattr("lerim.server.cli._resolve_project_repo_path", lambda n: None)
 
 	args = argparse.Namespace(run_id=None, project="nope", all=False)
 	rc = cli._cmd_skip(args)

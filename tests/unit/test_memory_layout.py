@@ -2,38 +2,45 @@
 
 from __future__ import annotations
 
-from lerim.memory.memory_repo import (
-    build_memory_paths,
-    ensure_memory_paths,
-    reset_memory_root,
+from lerim.memory.repo import (
+	build_memory_paths,
+	ensure_global_infrastructure,
+	ensure_project_memory,
+	reset_memory_root,
 )
 
 
-def test_ensure_memory_paths_creates_canonical_folders(tmp_path) -> None:
-    layout = build_memory_paths(tmp_path)
-    ensure_memory_paths(layout)
+def test_ensure_project_memory_creates_canonical_folders(tmp_path) -> None:
+	layout = build_memory_paths(tmp_path)
+	ensure_project_memory(layout)
 
-    assert (layout.memory_dir / "decisions").exists()
-    assert (layout.memory_dir / "learnings").exists()
-    assert (layout.memory_dir / "summaries").exists()
-    assert layout.workspace_dir.exists()
-    assert layout.index_dir.exists()
+	assert layout.memory_dir.exists()
+	assert (layout.memory_dir / "summaries").exists()
+	assert (layout.memory_dir / "archived").exists()
+	# workspace and index are global infrastructure, not per-project
+	assert not (tmp_path / "workspace").exists()
+	assert not (tmp_path / "index").exists()
+
+
+def test_ensure_global_infrastructure_creates_dirs(tmp_path) -> None:
+	ensure_global_infrastructure(tmp_path)
+
+	assert (tmp_path / "workspace").exists()
+	assert (tmp_path / "index").exists()
+	assert (tmp_path / "cache").exists()
+	assert (tmp_path / "logs").exists()
 
 
 def test_reset_memory_root_recreates_clean_layout(tmp_path) -> None:
-    layout = build_memory_paths(tmp_path)
-    ensure_memory_paths(layout)
+	layout = build_memory_paths(tmp_path)
+	ensure_project_memory(layout)
 
-    learning_path = layout.memory_dir / "learnings" / "example--l20260220abcd.md"
-    learning_path.write_text("seed", encoding="utf-8")
-    stale_index = layout.index_dir / "fts.sqlite3"
-    stale_index.write_text("", encoding="utf-8")
+	memory_file = layout.memory_dir / "example--l20260220abcd.md"
+	memory_file.write_text("seed", encoding="utf-8")
 
-    result = reset_memory_root(layout)
+	result = reset_memory_root(layout)
 
-    removed = set(result["removed"])
-    assert str(layout.memory_dir) in removed
-    assert str(layout.index_dir) in removed
-    assert (layout.memory_dir / "learnings").exists()
-    assert not learning_path.exists()
-    assert not stale_index.exists()
+	removed = set(result["removed"])
+	assert str(layout.memory_dir) in removed
+	assert layout.memory_dir.exists()
+	assert not memory_file.exists()

@@ -20,7 +20,7 @@ class TestContextLayersE2E(unittest.TestCase):
             "memories_used": [],
             "error": False,
         }
-        with patch("lerim.app.cli._api_post", return_value=fake_response):
+        with patch("lerim.server.cli._api_post", return_value=fake_response):
             exit_code, payload = run_cli_json(["ask", "question", "--json"])
 
         self.assertEqual(exit_code, 0)
