@@ -143,35 +143,38 @@ API keys are read from environment variables, stored by default in:
 `~/.lerim/.env`
 
 Example:
-
-`MINIMAX_API_KEY=your-key`  
-`OPENROUTER_API_KEY=your-key`  
-`OPENAI_API_KEY=your-key`  
-`ZAI_API_KEY=your-key`
+```bash
+MINIMAX_API_KEY=your-key 
+OPENROUTER_API_KEY=your-key` 
+OPENAI_API_KEY=your-key` 
+ZAI_API_KEY=your-key
+```
 
 Example provider config:
-
-`[roles.agent]`  
-`provider = "minimax"`  
-`model = "MiniMax-M2.7"`  
-`fallback_models = ["zai:glm-4.7"]`
+```toml
+[roles.agent] 
+provider = "minimax"
+model = "MiniMax-M2.7"  
+fallback_models = ["zai:glm-4.7"]
+```
 
 ## Most-used commands
-
-`lerim status`  
-`lerim status --live`  
-`lerim logs --follow`  
-`lerim queue`  
-`lerim queue --failed`  
-`lerim unscoped --limit 20`  
-`lerim memory list --limit 20`
+```bash
+lerim status  
+lerim status --live  
+lerim logs --follow  
+lerim queue
+lerim queue --failed
+lerim memory list --limit 20
+```
 
 Setup and management:
-
-`lerim connect auto`  
-`lerim project list`  
-`lerim project remove <name>`  
-`lerim skill install`
+```bash
+lerim connect auto  
+lerim project list  
+lerim project remove <name>  
+lerim skill install
+```
 
 Alternative to Docker:
 
@@ -214,11 +217,12 @@ It is a background memory agent for coding workflows.
 - PyPI: https://pypi.org/project/lerim/
 
 ## Development
-
-`uv venv && source .venv/bin/activate`  
-`uv pip install -e '.[test]'`  
-`tests/run_tests.sh unit`  
-`tests/run_tests.sh quality`
+```bash
+uv venv && source .venv/bin/activate  
+uv pip install -e '.[test]'  
+tests/run_tests.sh unit  
+tests/run_tests.sh quality
+```
 
 ## Contributing
 
